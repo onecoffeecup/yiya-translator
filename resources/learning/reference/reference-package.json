@@ -1,0 +1,39 @@
+{
+  "format_version": 1,
+  "snapshot": "20261004",
+  "archive": "fuyi-reference-20261004.zip",
+  "files": {
+    "reference.sqlite": {
+      "size": 161394688,
+      "sha256": "f1d20717b6561827824b823ed78022c8a3932ab0f68832c4d353ef69b8ab6cd6"
+    },
+    "reference-manifest.json": {
+      "size": 3027,
+      "sha256": "0871384740e296418432600331e27cacf03d97a5b734514aea598d6492e294a5"
+    },
+    "README.txt": {
+      "size": 2544,
+      "sha256": "003ec4fd0d00d277d0316e7f73c32b5d01c143e10aa811ca191e48c0976b47db"
+    },
+    "licenses/CC-BY-2.0-FR.html": {
+      "size": 39479,
+      "sha256": "597d4c64f6606c64da65ba6c079e5cc87e4cce2b5187eda908c939b538e7ab9b"
+    },
+    "licenses/CC-BY-SA-4.0.txt": {
+      "size": 20138,
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
+    },
+    "licenses/EDRDG-LICENSE.html": {
+      "size": 13587,
+      "sha256": "52f60ea9ca68170a2f0663d7dba381ebf1bd57c17a3347dfe21153865c156692"
+    },
+    "licenses/OpenJLPT-LICENSE.txt": {
+      "size": 20138,
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
+    },
+    "licenses/OpenJLPT-NOTICE.md": {
+      "size": 3456,
+      "sha256": "a2e6f45517bb1a1c047628991832244916888a4ced3aa26adeafb89705588557"
+    }
+  }
+}

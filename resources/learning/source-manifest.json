@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-04",
+  "note": "按实际使用登记的内置资料清单；自动元数据检查不等于真人内容审校。离线参考包的源文件版本和 SHA-256 见 reference/reference-manifest.json。",
+  "datasets": [
+    {
+      "id": "grammar-catalog-v1",
+      "name": "浮译内置语法登记（第一版）",
+      "rights_holder": "项目原创（project_original）",
+      "usage": "语法名称、接续形式、中文含义与原创简述",
+      "fields_used": [
+        "catalog_id",
+        "name",
+        "aliases",
+        "reference_level",
+        "connection",
+        "meaning"
+      ],
+      "source_url": null,
+      "version": "1",
+      "license_or_origin": "project_original",
+      "license_evidence_url": null,
+      "adapted": true,
+      "adaptation_note": "讲解为独立编写，经 AI 辅助并按公开参考交叉核对；非复制任何单一来源。",
+      "attribution_text": null,
+      "reviewed_at": "2026-10-03",
+      "review_method": "AI 辅助、对照多个公开语法参考页交叉核对，非真人专家审校"
+    },
+    {
+      "id": "jmdict",
+      "name": "JMdict 日英词典",
+      "rights_holder": "James William Breen / EDRDG",
+      "usage": "写法、读音、词性、义项、英文释义和用法标签",
+      "source_url": "https://www.edrdg.org/jmdict/j_jmdict.html",
+      "license_or_origin": "CC BY-SA 4.0",
+      "license_evidence_url": "https://www.edrdg.org/edrdg/licence.html",
+      "adapted": true,
+      "adaptation_note": "转为只读 SQLite，未自动生成中文释义。",
+      "attribution_text": "JMdict / EDRDG",
+      "reviewed_at": "2026-10-04",
+      "review_method": "读取官方许可及实际数据格式，自动校验快照和完整性；非独立人工词典审校"
+    },
+    {
+      "id": "tatoeba-reference-examples",
+      "name": "Tatoeba 日文关联例句",
+      "rights_holder": "逐条署名的 Tatoeba 句子作者",
+      "usage": "JMdict 已有关联索引的日文例句，按义项保留",
+      "source_url": "https://tatoeba.org/en/downloads",
+      "license_or_origin": "CC BY 2.0 FR",
+      "license_evidence_url": "https://en.wiki.tatoeba.org/articles/show/using-the-tatoeba-corpus",
+      "adapted": true,
+      "adaptation_note": "仅保留当前导出作者存在、日文文本完全一致、命中词形确实出现在句内的记录；不导入音频或英文例句译文。",
+      "attribution_text": "作者、sentence_id 和 url 逐条保留",
+      "reviewed_at": "2026-10-04",
+      "review_method": "词典索引和元数据筛选；非独立人工例句审校"
+    },
+    {
+      "id": "openjlpt-reference-levels",
+      "name": "OpenJLPT / Jonathan Waller 参考等级",
+      "rights_holder": "OpenJLPT contributors / Jonathan Waller",
+      "usage": "经词典 ID、写法和读音匹配的参考等级",
+      "source_url": "https://github.com/evanclan/OpenJLPT",
+      "license_or_origin": "CC BY-SA 4.0",
+      "license_evidence_url": "https://github.com/evanclan/OpenJLPT/blob/main/NOTICE.md",
+      "adapted": true,
+      "adaptation_note": "只使用等级，不导入其自动匹配例句或原创语法；按实际查询写法显示等级。",
+      "attribution_text": "OpenJLPT / Jonathan Waller，非官方参考",
+      "reviewed_at": "2026-10-04",
+      "review_method": "读取项目许可、上游署名及数据，自动校验词典身份匹配；非官方等级核定"
+    }
+  ],
+  "references": [
+    {
+      "id": "jlpt-sensei-reference",
+      "name": "JLPT Sensei",
+      "status": "reference_only",
+      "usage": "仅用于核对常见语法的接续、含义与参考等级",
+      "source_url": "https://jlptsensei.com/learn-japanese-grammar/",
+      "note": "其条款禁止复制、转载与再分发；未导入其讲解、例句或整套等级列表。"
+    },
+    {
+      "id": "jlpt-official-faq",
+      "name": "JLPT 官方 FAQ",
+      "status": "reference_only",
+      "usage": "确认 JLPT 官方不再公布完整分级词汇/语法清单",
+      "source_url": "https://www.jlpt.jp/e/faq/",
+      "note": "因此 App 内等级一律标「参考 Nx」，不宣称官方指定或某年真题。"
+    }
+  ],
+  "not_integrated": []
+}

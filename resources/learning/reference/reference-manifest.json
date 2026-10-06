@@ -1,0 +1,78 @@
+{
+  "format_version": 1,
+  "built_at": "2026-10-04T11:46:15.573177+00:00",
+  "entries": 218857,
+  "linked_examples": 11567,
+  "graded_entries": 7683,
+  "skipped_examples": 20743,
+  "languages": [
+    "Japanese",
+    "English"
+  ],
+  "example_policy": "Only JMdict sense-indexed Japanese examples with exact current Tatoeba text and a named contributor; no OpenJLPT auto-matched examples.",
+  "sources": [
+    {
+      "file": "JMdict_e_examp.gz",
+      "url": "https://www.edrdg.org/pub/Nihongo/JMdict_e_examp.gz",
+      "sha256": "2e49c7ad52c6a0d05d9b86aeb1b86a2473fe28011381e9b0414eb2ce66fbc50b"
+    },
+    {
+      "file": "jpn_sentences_detailed.tsv.bz2",
+      "url": "https://downloads.tatoeba.org/exports/per_language/jpn/jpn_sentences_detailed.tsv.bz2",
+      "sha256": "591b040bce75503a3a41d51281cdc45ab5390505088b67b52020b7ecc59d24dd"
+    },
+    {
+      "file": "OpenJLPT-NOTICE.md",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/NOTICE.md",
+      "sha256": "a2e6f45517bb1a1c047628991832244916888a4ced3aa26adeafb89705588557"
+    },
+    {
+      "file": "OpenJLPT-LICENSE.txt",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/LICENSE",
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
+    },
+    {
+      "file": "CC-BY-SA-4.0.txt",
+      "url": "https://creativecommons.org/licenses/by-sa/4.0/legalcode.txt",
+      "sha256": "28a9529c7d0bb4dc51f4bf5c116a3d16ef247a052f7591466768ddf563fd1cf5"
+    },
+    {
+      "file": "CC-BY-2.0-FR.html",
+      "url": "https://creativecommons.org/licenses/by/2.0/fr/legalcode",
+      "sha256": "597d4c64f6606c64da65ba6c079e5cc87e4cce2b5187eda908c939b538e7ab9b"
+    },
+    {
+      "file": "EDRDG-LICENSE.html",
+      "url": "https://www.edrdg.org/edrdg/licence.html",
+      "sha256": "52f60ea9ca68170a2f0663d7dba381ebf1bd57c17a3347dfe21153865c156692"
+    },
+    {
+      "file": "openjlpt-n1.json",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/data/json/vocab/n1.json",
+      "sha256": "09325eb676ec26044e9019afb5ddd460a394a0d8cb51b0b34d30d03124c131ff"
+    },
+    {
+      "file": "openjlpt-n2.json",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/data/json/vocab/n2.json",
+      "sha256": "4c7053d1b61f71ca4004252cafdf89439c65531900e7bab6c53078802acf3c5b"
+    },
+    {
+      "file": "openjlpt-n3.json",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/data/json/vocab/n3.json",
+      "sha256": "17ca6bcbba9d212c3c9d38c38cecc2adef0fd8718cb7157bb48dd9d3a1724948"
+    },
+    {
+      "file": "openjlpt-n4.json",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/data/json/vocab/n4.json",
+      "sha256": "b38512a6dc1e06a3615f377b3e58184c4a85b6f769c2e3f58f2a4ef0e1810927"
+    },
+    {
+      "file": "openjlpt-n5.json",
+      "url": "https://cdn.jsdelivr.net/gh/evanclan/OpenJLPT@main/data/json/vocab/n5.json",
+      "sha256": "cbb221c9a3a92108fcd02fb088d9afacc70bc8c96570d5730425de0a49dad5f3"
+    }
+  ],
+  "jmdict_header_dates": [
+    "2026-10-04"
+  ]
+}

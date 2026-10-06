@@ -1,0 +1,36 @@
+.DS_Store
+/.build
+/dist
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+
+# 本机交接、设计探索和历史截图不随公开仓库发布。
+/HANDOFF.md
+/handoff/
+/design/
+/resources/AppIcon.iconset/
+
+# 只读资料包通过 Release 附件提供；来源、署名和校验清单留在源码中。
+/resources/learning/reference/reference.sqlite
+/resources/learning/reference/reference.sqlite.*
+
+# ==== 不得公开的材料（私人 / 版权 / 内部）====
+# 私人内容与 JLPT 真题等版权材料，公开仓库里绝不能出现
+/_private/
+# JLPT 真题相关（已在 _private 里备份一份，这里防止再次误放）
+/*真题*
+/jlpt-n2-*
+# 第三方词表（CC BY-NC 4.0，禁商用）；文字资料包单独备作 Release 附件，来源和校验清单见 docs/data/。
+/output/

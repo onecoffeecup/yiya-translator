@@ -1,0 +1,84 @@
+{
+  "package_schema_version": 1,
+  "package_name": "yiya-jlpt-n1-n2-text-20261005",
+  "packaged_at": "2026-10-05T09:42:32+00:00",
+  "data_schema_version": 2,
+  "source": {
+    "title": "egg rolls JLPT N1-N5 一万词 v3.5",
+    "author": "egg rolls",
+    "url": "https://github.com/5mdld/anki-jlpt-decks",
+    "source_file": "https://github.com/5mdld/anki-jlpt-decks/blob/main/deck-source/notes.csv",
+    "license": "CC BY-NC 4.0",
+    "license_url": "https://creativecommons.org/licenses/by-nc/4.0/",
+    "changes": "筛选 N1/N2；保留日文例句、关联表达、反义表达及中文翻译；移除读音、声调和音频；将词性缩写展开为中文；去除 HTML 和注音标记。释义和例句沿用原资料，不经 AI 改写。",
+    "level_note": "等级及频率来自作者整理，仅供参考，未经逐条独立核验。未提供试卷年份和题号映射。",
+    "frequency_definitions": {
+      "N1": {
+        "高频": "出现于至少4套试卷",
+        "中频": "出现于2至3套试卷",
+        "低频": "出现于1套试卷"
+      },
+      "N2": {
+        "高频": "出现于至少5套试卷",
+        "中频": "出现于2至4套试卷",
+        "低频": "出现于1套试卷"
+      }
+    }
+  },
+  "source_csv_commit": null,
+  "source_snapshot_note": "沿用现有本地整理数据，原始 CSV 提交号未记录；未以当前上游提交替代。",
+  "upstream_license": {
+    "url": "https://github.com/5mdld/anki-jlpt-decks/blob/main/LICENSE",
+    "git_blob_sha": "c657cab45c850057a63b3605897f5195f3c4ac02",
+    "retrieved_on": "2026-10-05"
+  },
+  "entry_count": 7260,
+  "counts": {
+    "N1": 4045,
+    "N2": 3215
+  },
+  "example_counts": {
+    "例句": 10761,
+    "关联表达": 609,
+    "反义表达": 562
+  },
+  "files": [
+    {
+      "path": "LICENSE-CC-BY-NC-4.0.txt",
+      "bytes": 19346,
+      "sha256": "3711f963c05d0be80d53e5923308a6dee31b203da23435c9cfb7c7b6e4dd5e19"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3015,
+      "sha256": "16a9151a39ea30320dea5d2f03356f7ce5455d681c356403b1908f2a865fee7d"
+    },
+    {
+      "path": "SOURCE-NOTICE.md",
+      "bytes": 1470,
+      "sha256": "7a6a25d15adef09bb1acc815fc1620cce49a19b96641a61b443095175b52557d"
+    },
+    {
+      "path": "n1-n2-text.json",
+      "bytes": 3846899,
+      "sha256": "ad9fd99e5a0e6bca44721d3f48a4981f827f3623eb04c4b6f5287aa7cc13b21d"
+    },
+    {
+      "path": "n1-n2-text.txt",
+      "bytes": 1406974,
+      "sha256": "a7738dc896d828580fa2f38bc0b99967a2e48d3734580e1d85576239c2cb28a6"
+    }
+  ],
+  "archive": {
+    "file": "yiya-jlpt-n1-n2-text-20261005.zip",
+    "bytes": 1020331,
+    "sha256": "fb017ef68053ac74b1a82a4cd2894c258f0e8c7974fabf373fdcd51788da926e",
+    "local_path": "output/jlpt-vocabulary/yiya-jlpt-n1-n2-text-20261005.zip",
+    "checksum_file": "yiya-jlpt-n1-n2-text-20261005.zip.sha256"
+  },
+  "verification": {
+    "zip_crc": "passed",
+    "data_byte_identity": "passed",
+    "json_txt_counts": "passed"
+  }
+}

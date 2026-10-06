@@ -1,0 +1,14 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.m text eol=lf
+*.h text eol=lf
+*.inc text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.icns binary
+/HANDOFF.md export-ignore
+/handoff export-ignore
+/design export-ignore
+/_private export-ignore
+/.build export-ignore
+/dist export-ignore

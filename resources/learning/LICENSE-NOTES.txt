@@ -1,0 +1,31 @@
+译芽 · 日语学习资料说明与许可
+更新日期：2026-10-05
+
+一、内置语法登记（grammar-catalog.json）
+- 内容来源：项目原创（project_original）。
+- 语法名称、接续、中文含义与原创简述为独立编写，经 AI 辅助并对照公开语法参考页交叉核对。
+- 核对状态为“AI 辅助、对照多个公开来源交叉核对”，并非真人专家审校。
+- 参考等级（N1–N5）仅表示常见分类，JLPT 官方不再公布完整分级清单，App 内一律显示“参考 Nx”，
+  不宣称官方指定或某年真题。未知或冲突项显示“等级待核实”。
+
+二、仅作核对参考（reference_only，未导入其正文或例句）
+- JLPT Sensei：https://jlptsensei.com/learn-japanese-grammar/
+  其网站条款禁止复制、转载与再分发，本项目仅用于核对接续/含义/等级，未收录其讲解、例句或整套等级表。
+- JLPT 官方 FAQ：https://www.jlpt.jp/e/faq/
+  用于确认 JLPT 官方不再公布完整分级词汇/语法清单。
+
+三、已接入的离线词典与参考资料（2026-10-04）
+- JMdict 日英词典：James William Breen / EDRDG，CC BY-SA 4.0。
+  https://www.edrdg.org/jmdict/j_jmdict.html
+- 日文例句：Tatoeba 句子作者，CC BY 2.0 FR；逐条保留作者、ID及来源链接，仅按词典义项关联。
+  https://tatoeba.org/en/downloads
+- 参考等级：OpenJLPT / Jonathan Waller，非官方参考；使用 CC BY-SA 4.0 衍生等级数据。
+  https://github.com/evanclan/OpenJLPT
+- 已把上述资料转换为只读 SQLite；词典原文为英文，没有自动生成中文考试讲义。
+  按需 AI 补全和手动词条仍单独标注，不改写成词典来源。
+- 完整许可、署名、筛选规则、源文件校验值和更新方式见 learning/reference/README.txt、
+  reference-manifest.json 与 licenses/；App“翻译服务”页有常设入口。
+
+四、说明
+- 本 App 不内置任何许可不明的第三方内容；用户运行时自行提取的游戏台词仅作为个人学习记录保存，不作为随 App 分发的公共例句库。
+- 正式商业发布或新增地区发行前，应依据选定资料、使用方式与发布地区重新核验许可及其他适用权利。
