@@ -7,8 +7,8 @@
 #   ARCHS=arm64 scripts/release-app.sh  # 只做 Apple Silicon 包
 #
 # 产物：
-#   dist/release/译芽-<版本>.zip         给用户下载的压缩包
-#   dist/release/译芽-<版本>.zip.sha256  校验值
+#   dist/release/yiya-<版本>.zip         给用户下载的压缩包
+#   dist/release/yiya-<版本>.zip.sha256  校验值
 #
 # 说明：本脚本使用 ad-hoc 签名并写入稳定的 designated requirement。
 # 固定身份有助于保留权限，但不同系统/签名变化后仍可能重新要求授权。
@@ -37,7 +37,7 @@ RELEASE_DIR="$ROOT_DIR/dist/release"
 STAGE_BASE="$(mktemp -d)"
 STAGE_DIR="$STAGE_BASE/译芽-$VERSION"
 STAGE_APP="$STAGE_DIR/译芽.app"
-ZIP_PATH="$RELEASE_DIR/译芽-$VERSION.zip"
+ZIP_PATH="$RELEASE_DIR/yiya-$VERSION.zip"
 VERIFY_DIR=""
 TEMP_ZIP=""
 cleanup() {
