@@ -15,7 +15,8 @@
 - 收藏词语、语法和句子，保留语境并进行遮义复习。
 - 在收藏词详情里离线查看词典读音、英文释义、日文例句及社区 JLPT 参考等级。
 
-![单词学习界面（示例数据）](docs/images/fuyi-learning.png)
+![单词学习界面（示例数据）]<img width="3420" height="1926" alt="译芽开发过程 1" src="https://github.com/user-attachments/assets/c838fe13-9846-4e04-a862-ede2153b9977" />
+
 
 ## 下载后怎么用
 
