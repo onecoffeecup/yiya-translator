@@ -323,7 +323,9 @@ static BOOL FYInlineLineEndsSentence(NSString *text) {
 }
 
 static BOOL FYInlineHasSentencePunctuation(NSString *text) {
-    NSCharacterSet *set = [NSCharacterSet characterSetWithCharactersInString:@"。、，．，！？!?…「」『』（）()"];
+    // Brackets occur in dates, field labels and menu entries. They do not prove
+    // that a distant, narrower observation is the next sentence of a paragraph.
+    NSCharacterSet *set = [NSCharacterSet characterSetWithCharactersInString:@"。、，．！？!?…"];
     return [(text ?: @"") rangeOfCharacterFromSet:set].location != NSNotFound;
 }
 
@@ -371,6 +373,12 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 @end
 
 #pragma mark - FYInlinePlacement
+
+@interface FYInlinePlacement ()
+@property (nonatomic, copy) NSArray *bodyFontSettings;
+@property (nonatomic) CGFloat stableBodyFontSize;
+@property (nonatomic) NSUInteger availableVariantCount;
+@end
 
 @implementation FYInlinePlacement
 - (instancetype)init {
@@ -510,6 +518,14 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     NSString *itemText = FYInlineNormalize(line.text);
     NSString *blockText = FYInlineNormalize(block.lineTexts.lastObject ?: block.text);
 
+    // 弹窗的关闭按钮是独立操作，不是正文的末行。
+    NSArray *dismissLabels = @[@"閉じる", @"とじる", @"关闭", @"關閉", @"close"];
+    if ([dismissLabels containsObject:itemText.lowercaseString] ||
+        [dismissLabels containsObject:blockText.lowercaseString]) {
+        if (outReason) { *outReason = @"关闭按钮保持独立"; }
+        return NO;
+    }
+
     if (combined.size.height > self.maxBlockHeightFraction) {
         if (outReason) { *outReason = @"合并后整块过高"; }
         return NO;
@@ -600,6 +616,18 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     BOOL punctuation = FYInlineHasSentencePunctuation(line.text) ||
                        FYInlineHasSentencePunctuation(block.lineTexts.lastObject ?: block.text);
     CGFloat longestPair = MAX((CGFloat)itemText.length, (CGFloat)blockText.length);
+    // 资料页的短字段值与下方备注常常左对齐，但它们属于不同的行。
+    // 例如「帰宅部」下隔半行高才是「桜井琥一の弟。」；后者明显更宽且有句号，
+    // 不能仅凭句读把二者当成正文折行。真正连续的备注两行仍可按下方规则合并。
+    if (block.lineBoxes.count == 1 && blockText.length <= 6 &&
+        !FYInlineHasSentencePunctuation(block.text) &&
+        // 装饰点被读入短值后会扩大行框，仍需保留短字段与完整备注的边界。
+        itemText.length >= 7 && itemBox.size.width > blockBox.size.width * 1.45 &&
+        (verticalGap > repHeight * 0.25 ||
+         fabs(CGRectGetMidY(itemBox) - CGRectGetMidY(blockBox)) > repHeight * 0.60)) {
+        if (outReason) { *outReason = @"短字段值与下方正文分行"; }
+        return NO;
+    }
     // 规则排列的独立条目：两行都短、宽度相近、且都没有句读 —— 这是菜单/设置列表的样子。
     BOOL entryLike = itemText.length <= 16 && blockText.length <= 16 && widthRatio >= 0.70 && !punctuation;
 
@@ -640,7 +668,7 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 /// 行距是否接近"实排"：正文按列宽折行时，行与行之间只有很小的空隙；
 /// 菜单/按钮列表的行距通常接近甚至超过行高。用两者的比值判定，不写死像素或字号。
 - (BOOL)linesLookTightlyStacked:(NSArray<FYInlineTextLine *> *)lines {
-    if (lines.count < 3) { return NO; }
+    if (lines.count < 2) { return NO; }
     NSArray<FYInlineTextLine *> *sorted = [lines sortedArrayUsingComparator:^NSComparisonResult(FYInlineTextLine *left, FYInlineTextLine *right) {
         CGFloat leftTop = CGRectGetMaxY(left.rect);
         CGFloat rightTop = CGRectGetMaxY(right.rect);
@@ -682,6 +710,19 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         if (normalized.length >= 16) { return FYInlineBlockKindLong; }
         return FYInlineBlockKindShort;
     }
+    // 段落证据先于「每行很短」的菜单猜测：窄列里两句完整介绍仍是正文。
+    // 用句读和相对行距识别，不按角色、恰好两行或某个总字数特判。
+    BOOL explicitControls = self.shortLabelDetector != nil;
+    for (FYInlineTextLine *line in lines) {
+        if (!self.shortLabelDetector || !self.shortLabelDetector(FYInlineNormalize(line.text))) {
+            explicitControls = NO;
+            break;
+        }
+    }
+    if (!explicitControls && FYInlineHasSentencePunctuation(normalized) &&
+        [self linesLookTightlyStacked:lines]) {
+        return FYInlineBlockKindLong;
+    }
     // 规则排列的短条目列表保持短贴片。但「每行 ≤14 字」**不等于**按钮列表：
     // OCR 会按列宽把一段正文切成若干短行（现场：五行喜好正文每行 8~12 字、左对齐、
     // 行距只有 0.45 倍行高、最大行宽 0.239 刚好低于 0.24），旧判据把它当按钮列表，
@@ -711,6 +752,35 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     return FYInlineBlockKindShort;
 }
 
+- (FYInlineTextLine *)rowLabelToLeftOfRect:(CGRect)valueRect inLines:(NSArray<FYInlineTextLine *> *)lines {
+    FYInlineTextLine *nearest = nil;
+    CGFloat nearestGap = CGFLOAT_MAX;
+    for (FYInlineTextLine *candidate in lines) {
+        CGRect label = candidate.rect;
+        CGFloat horizontalGap = CGRectGetMinX(valueRect) - CGRectGetMaxX(label);
+        // OCR 可能把值前的装饰点并入行框，与标签产生少量几何重叠。
+        // 只容忍四分之一行高以内的误差，仍要求标签位于值的左侧。
+        CGFloat overlapTolerance = MIN((CGFloat)0.012,
+            MAX(CGRectGetHeight(label), CGRectGetHeight(valueRect)) * 0.25);
+        if (horizontalGap < -overlapTolerance || horizontalGap > 0.085 ||
+            CGRectGetMidX(label) >= CGRectGetMinX(valueRect) ||
+            CGRectGetWidth(label) > 0.10 || FYInlineNormalize(candidate.text).length > 6) { continue; }
+        if (fabs(CGRectGetMidY(label) - CGRectGetMidY(valueRect)) >
+            MAX(CGRectGetHeight(label), CGRectGetHeight(valueRect)) * 0.55) { continue; }
+        if (horizontalGap < nearestGap) { nearest = candidate; nearestGap = horizontalGap; }
+    }
+    return nearest;
+}
+
+- (BOOL)line:(FYInlineTextLine *)line startsAnotherFieldRowAfterBlock:(FYInlineTextBlock *)block
+   inLines:(NSArray<FYInlineTextLine *> *)lines {
+    CGRect previous = block.lineBoxes.lastObject ? block.lineBoxes.lastObject.rectValue : block.boundingBox;
+    FYInlineTextLine *upperLabel = [self rowLabelToLeftOfRect:previous inLines:lines];
+    FYInlineTextLine *lowerLabel = [self rowLabelToLeftOfRect:line.rect inLines:lines];
+    return upperLabel && lowerLabel && upperLabel != lowerLabel &&
+        fabs(CGRectGetMinX(upperLabel.rect) - CGRectGetMinX(lowerLabel.rect)) < 0.030;
+}
+
 - (NSArray<FYInlineTextBlock *> *)blocksFromLines:(NSArray<FYInlineTextLine *> *)lines {
     NSArray<FYInlineTextLine *> *deduplicated = [self deduplicatedLines:lines];
     NSMutableArray<FYInlineTextLine *> *filtered = [NSMutableArray array];
@@ -729,6 +799,9 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         BOOL merge = NO;
         CGFloat confidence = 1.0;
         for (FYInlineTextBlock *block in [blocks reverseObjectEnumerator]) {
+            // 同栏字段的值可能左对齐、甚至被 Vision 合进同一个 observation；
+            // 两行分别有自己的左侧标签时，它们是表格的两行，不是正文折行。
+            if ([self line:line startsAnotherFieldRowAfterBlock:block inLines:ordered]) { continue; }
             CGFloat found = 0;
             NSString *blockReason = nil;
             if ([self shouldMergeLine:line intoBlock:block confidence:&found reason:&blockReason]) {
@@ -885,6 +958,7 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
 @interface FYInlineLayoutEngine ()
 @property (nonatomic) NSUInteger revision;
+@property (nonatomic, strong) NSMutableDictionary<NSArray *, NSNumber *> *layoutHeightCache;
 @end
 
 @implementation FYInlineLayoutEngine
@@ -939,10 +1013,16 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
                             font:(NSFont *)font
                            style:(NSParagraphStyle *)style {
     if (width <= 4 || text.length == 0) { return 0; }
+    // 多轮避让会反复测量同一正文、字体和宽度；只在本轮排版内复用结果。
+    NSArray *key = self.layoutHeightCache ? @[text, @(width), font, style] : nil;
+    NSNumber *cached = key ? self.layoutHeightCache[key] : nil;
+    if (cached) { return cached.doubleValue; }
     NSRect measured = [text boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX)
                                          options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
                                       attributes:@{NSFontAttributeName: font, NSParagraphStyleAttributeName: style}];
-    return ceil(NSHeight(measured));
+    CGFloat height = ceil(NSHeight(measured));
+    if (key) { self.layoutHeightCache[key] = @(height); }
+    return height;
 }
 
 - (CGFloat)longCardLineHeight:(FYInlinePlacement *)placement {
@@ -1064,7 +1144,9 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
 - (CGFloat)measuredBodyHeight:(NSString *)translation placement:(FYInlinePlacement *)placement width:(CGFloat)width {
     CGFloat textWidth = MAX((CGFloat)80, width - placement.panelPadding * 2);
-    return [self measuredHeightForText:translation width:textWidth font:placement.font style:placement.paragraphStyle];
+    // 绘制会合并软换行；测量必须使用同一份正文，否则短译文仍按原来的多行撑高。
+    return [self measuredHeightForText:FYInlineNormalizeTranslationParagraphs(translation)
+                                width:textWidth font:placement.font style:placement.paragraphStyle];
 }
 
 #pragma mark 短贴片
@@ -1280,9 +1362,8 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 // 相邻条目是两块真文字，互相遮挡仍然非法（既有套件专门守这条）。
 static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherText,
                                           CGRect selfRect, CGRect otherRect) {
-    NSString *left = FYInlineNormalize(selfText ?: @"");
-    NSString *right = FYInlineNormalize(otherText ?: @"");
-    if (left.length < 2 || ![left isEqualToString:right]) { return NO; }
+    // 调用方已按块归一化；不要在每个候选 × 每个原文框中重复处理全文。
+    if (selfText.length < 2 || ![selfText isEqualToString:otherText]) { return NO; }
     CGFloat selfArea = NSWidth(selfRect) * NSHeight(selfRect);
     CGFloat otherArea = NSWidth(otherRect) * NSHeight(otherRect);
     CGFloat minArea = MIN(selfArea, otherArea);
@@ -1316,8 +1397,12 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     for (FYInlineCandidate *candidate in candidates) {
         if (!FYInlineRectContainsRect(viewport, candidate.frame)) {
             candidate.rejection = @"超出可见区域";
-            candidate.hardRejection = YES;
-            continue;
+            // 覆盖自身的中心位置出界，不代表同一字段内所有位置都出界。
+            BOOL canSearchOwnRegion = candidate.anchor == FYInlineAnchorOverlay &&
+                NSMinX(candidate.frame) >= NSMinX(viewport) && NSMaxX(candidate.frame) <= NSMaxX(viewport) &&
+                NSHeight(candidate.frame) <= NSHeight(viewport);
+            candidate.hardRejection = !canSearchOwnRegion;
+            if (candidate.hardRejection) { continue; }
         }
         if (candidate.anchor != FYInlineAnchorOverlay) {
             // 位移有界：不许漂到别的条目附近。
@@ -1329,16 +1414,14 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
             }
         }
         // 覆盖自身正文是允许的；压到**别的**块才不合法。这里只记下最大交叠厚度：
-        // 是否真的非法由统一安排阶段结合「上一帧是否用同一个锚定方向」判定，
-        // 这样 1~3px 的抖动不会让贴片在下方/上方之间来回跳。
-        // 放宽遮挡容忍度：≤10pt 的轻微交叠视为可接受（避免密集文本场景下"明明有空间却显示空间不足"）。
+        // 统一安排阶段搜索合法空隙，再结合前帧锚点评分；不直接接受轻微遮挡。
         for (NSUInteger index = 0; index < otherSources.count; index++) {
             if (index == selfIndex) { continue; }
             CGRect other = otherSources[index].rectValue;
             if (NSWidth(other) < 2 || NSHeight(other) < 2) { continue; }
             if (!CGRectIntersectsRect(candidate.frame, other)) { continue; }
             NSString *otherText = index < sourceTexts.count ? sourceTexts[index] : nil;
-            if (FYInlineSourceLooksDuplicated(selfText, FYInlineNormalize(otherText ?: @""),
+            if (FYInlineSourceLooksDuplicated(selfText, otherText,
                                               placement.sourceFrame, other)) {
                 // 记一条诊断，但不计为遮挡：重复框不该让这一块失去位置。
                 if (candidate.occlusionDepth <= 0) {
@@ -1363,51 +1446,153 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     }
 }
 
-#pragma mark 细缝消解
+#pragma mark 字段内空隙搜索
 
-/// 候选与其它原文块只差 1~容差 点的细缝时：不直接接受重叠，也不因此换锚点，
-/// 而是沿垂直方向做 ≤ 容差 的微移把它消掉 —— 既严格不遮挡别的块，又保持锚定方向与位置稳定。
+/// 将其它原文和已放译文从可用纵向区间扣除，取离首选位置最近的合法空隙。
+/// 覆盖自身时，至少保持半个较小框与原文字段相交；其它锚点仍只允许原有微移。
+/// 所有位置都严格避让，不把「容差」当作允许遮挡的厚度。
 - (FYInlineCandidate *)candidate:(FYInlineCandidate *)candidate
-          resolvingSliverWithin:(CGFloat)tolerance
+      resolvingCollisionsWithin:(CGFloat)tolerance
                        viewport:(CGRect)viewport
                      placement:(FYInlinePlacement *)placement
                    otherSources:(NSArray<NSValue *> *)otherSources
+                    sourceTexts:(NSArray<NSString *> *)sourceTexts
+                      selfIndex:(NSUInteger)selfIndex
                     placedFrames:(NSArray<NSValue *> *)placedFrames {
-    if (candidate.occlusionDepth <= 0 || candidate.occlusionDepth > tolerance) { return nil; }
-    CGFloat step = candidate.occlusionDepth + 0.5;
-    for (NSNumber *shift in @[@(step), @(-step)]) {
-        CGRect moved = NSOffsetRect(candidate.frame, 0, shift.doubleValue);
-        if (fabs(shift.doubleValue) > tolerance + 0.5) { continue; }
-        if (!FYInlineRectContainsRect(viewport, moved)) { continue; }
-        if (candidate.anchor != FYInlineAnchorOverlay) {
-            CGFloat maxDrift = MAX(NSHeight(placement.sourceFrame), NSHeight(moved)) + self.panelGap + 4;
-            CGFloat distance = MAX(0, MAX(CGRectGetMinY(placement.sourceFrame) - CGRectGetMaxY(moved),
-                                          CGRectGetMinY(moved) - CGRectGetMaxY(placement.sourceFrame)));
-            if (distance > maxDrift) { continue; }
-        }
-        BOOL blocked = NO;
-        for (NSValue *value in otherSources) {
-            if (CGRectIntersectsRect(moved, value.rectValue)) { blocked = YES; break; }
-        }
-        if (blocked) { continue; }
-        for (NSValue *value in placedFrames) {
-            if (CGRectIntersectsRect(moved, value.rectValue)) { blocked = YES; break; }
-        }
-        if (blocked) { continue; }
-        FYInlineCandidate *resolved = [FYInlineCandidate new];
-        resolved.anchor = candidate.anchor;
-        resolved.anchorRank = candidate.anchorRank;
-        resolved.compact = candidate.compact;
-        resolved.name = candidate.name;
-        resolved.frame = moved;
-        resolved.distance = candidate.distance;
-        resolved.scrollable = candidate.scrollable;
-        resolved.measuredContentHeight = candidate.measuredContentHeight;
-        resolved.bodyViewportHeight = candidate.bodyViewportHeight;
-        resolved.occlusionDepth = 0;
-        return resolved;
+    CGRect frame = candidate.frame;
+    CGFloat height = NSHeight(frame), origin = NSMinY(frame);
+    if (height <= 0 || NSMinX(frame) < NSMinX(viewport) || NSMaxX(frame) > NSMaxX(viewport)) { return nil; }
+    CGFloat lower = NSMinY(viewport), upper = NSMaxY(viewport) - height;
+    if (candidate.anchor == FYInlineAnchorOverlay || candidate.anchor == FYInlineAnchorCompactEntry) {
+        CGFloat overlap = MIN(NSHeight(placement.sourceFrame), height) * 0.5;
+        lower = MAX(lower, NSMinY(placement.sourceFrame) + overlap - height);
+        upper = MIN(upper, NSMaxY(placement.sourceFrame) - overlap);
+    } else {
+        lower = MAX(lower, origin - tolerance - 0.5);
+        upper = MIN(upper, origin + tolerance + 0.5);
     }
-    return nil;
+    if (lower > upper) { return nil; }
+    NSMutableArray<NSValue *> *obstacles = [NSMutableArray array];
+    NSString *selfText = FYInlineNormalize(placement.block.text ?: @"");
+    for (NSUInteger index = 0; index < otherSources.count; index++) {
+        if (index == selfIndex) { continue; }
+        CGRect other = otherSources[index].rectValue;
+        if (NSWidth(other) < 2 || NSHeight(other) < 2) { continue; }
+        NSString *text = index < sourceTexts.count ? sourceTexts[index] : nil;
+        if (FYInlineSourceLooksDuplicated(selfText, text, placement.sourceFrame, other)) { continue; }
+        [obstacles addObject:otherSources[index]];
+    }
+    [obstacles addObjectsFromArray:placedFrames];
+    NSMutableArray<NSArray<NSNumber *> *> *intervals = [NSMutableArray arrayWithObject:@[@(lower), @(upper)]];
+    for (NSValue *value in obstacles) {
+        CGRect obstacle = value.rectValue;
+        if (NSMaxX(obstacle) <= NSMinX(frame) || NSMinX(obstacle) >= NSMaxX(frame)) { continue; }
+        CGFloat forbiddenLower = NSMinY(obstacle) - height - 0.5;
+        CGFloat forbiddenUpper = NSMaxY(obstacle) + 0.5;
+        NSMutableArray *remaining = [NSMutableArray array];
+        for (NSArray<NSNumber *> *interval in intervals) {
+            CGFloat start = interval[0].doubleValue, end = interval[1].doubleValue;
+            if (forbiddenUpper < start || forbiddenLower > end) {
+                [remaining addObject:interval];
+            } else {
+                if (forbiddenLower >= start) { [remaining addObject:@[@(start), @(MIN(end, forbiddenLower))]]; }
+                if (forbiddenUpper <= end) { [remaining addObject:@[@(MAX(start, forbiddenUpper)), @(end)]]; }
+            }
+        }
+        intervals = remaining;
+        if (intervals.count == 0) { return nil; }
+    }
+    CGFloat chosenY = 0, bestShift = CGFLOAT_MAX;
+    for (NSArray<NSNumber *> *interval in intervals) {
+        CGFloat y = FYInlineClamp(origin, interval[0].doubleValue, interval[1].doubleValue);
+        CGFloat shift = fabs(y - origin);
+        if (shift < bestShift) { chosenY = y; bestShift = shift; }
+    }
+    CGRect moved = NSOffsetRect(frame, 0, chosenY - origin);
+    if (candidate.anchor != FYInlineAnchorOverlay && candidate.anchor != FYInlineAnchorCompactEntry) {
+        CGFloat maxDrift = MAX(NSHeight(placement.sourceFrame), height) + self.panelGap + 4;
+        CGFloat distance = MAX(0, MAX(NSMinY(placement.sourceFrame) - NSMaxY(moved), NSMinY(moved) - NSMaxY(placement.sourceFrame)));
+        if (distance > maxDrift) { return nil; }
+    }
+    FYInlineCandidate *resolved = [FYInlineCandidate new];
+    resolved.anchor = candidate.anchor;
+    resolved.anchorRank = candidate.anchorRank;
+    resolved.compact = candidate.compact;
+    resolved.name = bestShift > 0.01 ? [candidate.name stringByAppendingString:@" · 字段内空隙避让"] : candidate.name;
+    resolved.frame = moved;
+    resolved.distance = candidate.distance;
+    resolved.scrollable = candidate.scrollable;
+    resolved.measuredContentHeight = candidate.measuredContentHeight;
+    resolved.bodyViewportHeight = candidate.bodyViewportHeight;
+    return resolved;
+}
+
+/// 后来的字段被已放面板挡住时，尝试同时调整附近面板，而不是立即收起后来者。
+/// 不改尺寸、字体或锚点；只移动自动放置的面板，且每张仍在自己的字段范围内。
+- (FYInlineCandidate *)reflowCandidateForPlacement:(FYInlinePlacement *)placement
+                                         candidates:(NSArray<FYInlineCandidate *> *)candidates
+                                           viewport:(CGRect)viewport
+                                      sourceFrames:(NSArray<NSValue *> *)sourceFrames
+                                       sourceTexts:(NSArray<NSString *> *)sourceTexts
+                                          selfIndex:(NSUInteger)selfIndex
+                                      allPlacements:(NSArray<FYInlinePlacement *> *)allPlacements
+                                       placedFrames:(NSMutableArray<NSValue *> *)placedFrames
+                                   placedPlacements:(NSArray<FYInlinePlacement *> *)placedPlacements {
+    FYInlineCandidate *best = nil;
+    NSArray<NSValue *> *bestFrames = nil;
+    CGFloat bestScore = CGFLOAT_MAX;
+    for (FYInlineCandidate *candidate in candidates) {
+        if (candidate.hardRejection) { continue; }
+        FYInlineCandidate *desired = [self candidate:candidate resolvingCollisionsWithin:self.stabilityTolerance
+                                            viewport:viewport placement:placement otherSources:sourceFrames
+                                         sourceTexts:sourceTexts selfIndex:selfIndex placedFrames:@[]];
+        if (!desired) { continue; }
+        NSMutableArray<NSNumber *> *collisions = [NSMutableArray array];
+        for (NSUInteger index = 0; index < placedFrames.count; index++) {
+            CGRect hit = CGRectIntersection(desired.frame, placedFrames[index].rectValue);
+            if (!CGRectIsNull(hit) && !CGRectIsEmpty(hit)) { [collisions addObject:@(index)]; }
+        }
+        // 限制局部重排的工作量；复杂拥挤仍由后续卡片尺寸与折叠方案处理。
+        if (collisions.count == 0 || collisions.count > 3) { continue; }
+        NSMutableArray<NSValue *> *trialFrames = [placedFrames mutableCopy];
+        BOOL legal = YES;
+        CGFloat movement = 0;
+        for (NSNumber *number in collisions) {
+            NSUInteger index = number.unsignedIntegerValue;
+            FYInlinePlacement *occupied = placedPlacements[index];
+            if (occupied.manuallyPlaced) { legal = NO; break; }
+            NSMutableArray<NSValue *> *obstacles = [trialFrames mutableCopy];
+            [obstacles removeObjectAtIndex:index];
+            [obstacles addObject:[NSValue valueWithRect:desired.frame]];
+            FYInlineCandidate *before = [FYInlineCandidate new];
+            before.frame = trialFrames[index].rectValue;
+            before.anchor = occupied.anchor;
+            before.compact = occupied.compactEntry;
+            before.name = @"相邻字段重排";
+            before.measuredContentHeight = occupied.measuredContentHeight;
+            before.bodyViewportHeight = occupied.bodyViewportHeight;
+            before.scrollable = occupied.scrollable;
+            NSUInteger sourceIndex = [allPlacements indexOfObjectIdenticalTo:occupied];
+            FYInlineCandidate *moved = [self candidate:before resolvingCollisionsWithin:self.stabilityTolerance
+                                              viewport:viewport placement:occupied otherSources:sourceFrames
+                                           sourceTexts:sourceTexts selfIndex:sourceIndex placedFrames:obstacles];
+            if (!moved) { legal = NO; break; }
+            movement += fabs(NSMinY(moved.frame) - NSMinY(before.frame));
+            trialFrames[index] = [NSValue valueWithRect:moved.frame];
+        }
+        CGFloat score = desired.anchorRank * 42 + movement;
+        if (legal && score < bestScore) { best = desired; bestFrames = trialFrames; bestScore = score; }
+    }
+    if (best) {
+        for (NSUInteger index = 0; index < placedFrames.count; index++) {
+            if (CGRectEqualToRect(placedFrames[index].rectValue, bestFrames[index].rectValue)) { continue; }
+            FYInlinePlacement *moved = placedPlacements[index];
+            moved.translationFrame = bestFrames[index].rectValue;
+            moved.reason = [moved.reason stringByAppendingString:@"；与相邻字段共同避让"];
+            placedFrames[index] = bestFrames[index];
+        }
+    }
+    return best;
 }
 
 #pragma mark 评分
@@ -1443,6 +1628,18 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 - (FYInlineLayoutResult *)layoutRequests:(NSArray<FYInlineLayoutRequest *> *)requests
                                 viewport:(CGRect)viewport
                                 previous:(FYInlineLayoutResult *)previous {
+    NSMutableDictionary *outerCache = self.layoutHeightCache;
+    self.layoutHeightCache = [NSMutableDictionary dictionary];
+    @try {
+        return [self layoutRequestsWithHeightCache:requests viewport:viewport previous:previous];
+    } @finally {
+        self.layoutHeightCache = outerCache;
+    }
+}
+
+- (FYInlineLayoutResult *)layoutRequestsWithHeightCache:(NSArray<FYInlineLayoutRequest *> *)requests
+                                              viewport:(CGRect)viewport
+                                              previous:(FYInlineLayoutResult *)previous {
     NSMutableDictionary<NSString *, NSNumber *> *variantIndexes = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *attemptLog = [NSMutableDictionary dictionary];
     FYInlineLayoutResult *result = nil;
@@ -1462,7 +1659,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
             }
             if (!request) { continue; }
             NSUInteger used = variantIndexes[placement.blockID].unsignedIntegerValue;
-            NSUInteger count = [self longCardVariantsForRequest:request viewport:viewport].count;
+            NSUInteger count = placement.availableVariantCount;
             if (used + 1 < count) {
                 variantIndexes[placement.blockID] = @(used + 1);
                 progressed = YES;
@@ -1472,6 +1669,10 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     }
     // 把候选尝试记录写回结果（诊断：每个候选的宽/字号/卡尺寸/失败原因/冲突块）。
     for (FYInlinePlacement *placement in result.placements) {
+        if (placement.block.kind == FYInlineBlockKindLong &&
+            (placement.mode == FYInlineDisplayModeFullCard || placement.mode == FYInlineDisplayModeScrollingCard)) {
+            placement.stableBodyFontSize = placement.chosenBodyFontSize;
+        }
         NSArray<NSString *> *lines = attemptLog[placement.blockID];
         placement.variantDiagnostics = lines ?: @[];
         self.lastVariantDiagnostics = [lines copy] ?: @[];
@@ -1532,7 +1733,17 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 
         BOOL compact = NO;
         if (request.block.kind == FYInlineBlockKindLong) {
-            NSArray<NSDictionary *> *variants = [self longCardVariantsForRequest:request viewport:viewport];
+            // 自动重排保留已经读到的正文大小；显式字号设置变化才重新选字号。
+            // 折叠帧也携带这份状态，避免下一帧恢复空间时又从最大字号开始。
+            placement.bodyFontSettings = @[@(self.longBodyFontSize), @(self.minimumLongBodyFontSize),
+                                           [self longBodyFont].fontName ?: @""];
+            FYInlinePlacement *before = [previous placementForBlockID:stableID];
+            if ([before.bodyFontSettings isEqual:placement.bodyFontSettings]) {
+                placement.stableBodyFontSize = before.stableBodyFontSize;
+            }
+            NSArray<NSDictionary *> *variants = [self longCardVariantsForRequest:request viewport:viewport
+                                                                    bodyFontSize:placement.stableBodyFontSize];
+            placement.availableVariantCount = variants.count;
             NSUInteger variantIndex = variantIndexes[stableID].unsignedIntegerValue;
             if (variantIndex > 0 && variantIndex < variants.count) { placement.chosenVariant = variantIndex; }
             NSDictionary *variant = variants.count > 0 ? variants[MIN(placement.chosenVariant, variants.count - 1)] : nil;
@@ -1613,6 +1824,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     }];
 
     NSMutableArray<NSValue *> *placedFrames = [NSMutableArray array];
+    NSMutableArray<FYInlinePlacement *> *placedPlacements = [NSMutableArray array];
     NSMutableDictionary<NSNumber *, NSNumber *> *columnAnchors = [NSMutableDictionary dictionary];
     for (NSNumber *number in order) {
         NSUInteger index = number.unsignedIntegerValue;
@@ -1621,6 +1833,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
         if (placement.manuallyPlaced) {
             // 手动位置先占位，后面的候选会避开它。
             [placedFrames addObject:[NSValue valueWithRect:placement.translationFrame]];
+            [placedPlacements addObject:placement];
             continue;
         }
         NSArray<FYInlineCandidate *> *candidates = candidateLists[index];
@@ -1629,17 +1842,17 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 
         // 合法性与帧间稳定在此合流：
         //   · 压到别的原文块/别的译文一律非法；
-        //   · 但 1~stabilityTolerance 点的细缝先尝试“微移消解”，避免 OCR 抖动让锚点翻面。
+        //   · 覆盖自身时搜索字段内的空隙，其它锚点保留有界微移，避免漂到别的条目。
         FYInlineCandidate *chosen = nil;
         for (FYInlineCandidate *loopCandidate in candidates) {
             if (loopCandidate.hardRejection) { continue; }
             FYInlineCandidate *candidate = loopCandidate;
             FYInlineCandidate *usable = candidate;
-            if (candidate.occlusionDepth > 0) {
-                // 仅在容差内微移，不能让卡片覆盖其它原文。
-                usable = [self candidate:candidate resolvingSliverWithin:self.stabilityTolerance
+            if (candidate.anchor == FYInlineAnchorOverlay || candidate.occlusionDepth > 0) {
+                // 严格避让所有障碍；正文搜索范围由自身字段决定，不由固定像素阈值决定。
+                usable = [self candidate:candidate resolvingCollisionsWithin:self.stabilityTolerance
                                 viewport:viewport placement:placement
-                            otherSources:sourceFrames placedFrames:placedFrames];
+                            otherSources:sourceFrames sourceTexts:sourceTexts selfIndex:index placedFrames:placedFrames];
                 if (!usable) { continue; }
             }
             BOOL conflict = NO;
@@ -1649,9 +1862,9 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
                 if (MIN(hit.size.width, hit.size.height) > 0) { conflict = YES; break; }
             }
             if (conflict) {
-                FYInlineCandidate *resolved = [self candidate:usable resolvingSliverWithin:self.stabilityTolerance
+                FYInlineCandidate *resolved = [self candidate:usable resolvingCollisionsWithin:self.stabilityTolerance
                                                      viewport:viewport placement:placement
-                                                 otherSources:sourceFrames placedFrames:placedFrames];
+                                                 otherSources:sourceFrames sourceTexts:sourceTexts selfIndex:index placedFrames:placedFrames];
                 if (resolved) { usable = resolved; } else { continue; }
             }
             if (!chosen || [self scoreForCandidate:usable placement:placement previous:previousPlacement
@@ -1662,6 +1875,11 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
             }
         }
 
+        if (!chosen) {
+            chosen = [self reflowCandidateForPlacement:placement candidates:candidates viewport:viewport
+                                         sourceFrames:sourceFrames sourceTexts:sourceTexts selfIndex:index
+                                        allPlacements:placements placedFrames:placedFrames placedPlacements:placedPlacements];
+        }
         if (!chosen) {
             // ③ 明确降级：先给紧凑入口，再不行标记“暂不可放置”，绝不强盖别的条目。
             // 多行块（含被分类判成"短"的段落）同样要走到这里：现场五行喜好正文就是被
@@ -1729,6 +1947,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
             if (placement.compactEntry) {
                 placement.reason = [NSString stringWithFormat:@"%@：画面放不下可读的三行正文，这里给「查看译文」紧凑入口", chosen.name];
                 [placedFrames addObject:[NSValue valueWithRect:placement.translationFrame]];
+                [placedPlacements addObject:placement];
                 continue;
             }
             placement.bodyViewportHeight = chosen.bodyViewportHeight;
@@ -1742,6 +1961,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
         }
         if (!CGRectIsEmpty(placement.translationFrame)) {
             [placedFrames addObject:[NSValue valueWithRect:placement.translationFrame]];
+            [placedPlacements addObject:placement];
         }
     }
 
@@ -1773,12 +1993,22 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 /// 顺序按优先级：贴合原文宽度 → 减少标题与留白 → 逐档缩字（不低于 minimumLongBodyFontSize）。
 /// 有可读正文空间而全文较长时允许卡内滚动，不因此折叠。
 - (NSArray<NSDictionary *> *)longCardVariantsForRequest:(FYInlineLayoutRequest *)request viewport:(CGRect)viewport {
+    return [self longCardVariantsForRequest:request viewport:viewport bodyFontSize:0];
+}
+
+- (NSArray<NSDictionary *> *)longCardVariantsForRequest:(FYInlineLayoutRequest *)request
+                                              viewport:(CGRect)viewport
+                                          bodyFontSize:(CGFloat)stableSize {
     NSMutableArray<NSDictionary *> *variants = [NSMutableArray array];
     NSArray<NSNumber *> *widths = [self cardWidthCandidatesForSource:request.sourceFrame viewport:viewport];
     NSMutableArray<NSNumber *> *fontSizes = [NSMutableArray array];
     CGFloat floorSize = MAX((CGFloat)10, self.minimumLongBodyFontSize);
-    for (CGFloat size = self.longBodyFontSize; size >= floorSize - 0.01; size -= 2) {
-        [fontSizes addObject:@(size)];
+    if (stableSize > 0) {
+        [fontSizes addObject:@(stableSize)];
+    } else {
+        for (CGFloat size = self.longBodyFontSize; size >= floorSize - 0.01; size -= 2) {
+            [fontSizes addObject:@(size)];
+        }
     }
     if (fontSizes.count == 0) { [fontSizes addObject:@(self.longBodyFontSize)]; }
     for (NSNumber *widthValue in widths) {
@@ -1913,11 +2143,11 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     for (FYInlineCandidate *candidate in candidates) {
         if (candidate.hardRejection) { continue; }
         FYInlineCandidate *usable = candidate;
-        if (candidate.occlusionDepth > 0) {
-            // 与主路径同一套细缝消解：只允许 1~容差 点的抖动缝，靠微移消掉而不是接受遮挡。
-            usable = [self candidate:candidate resolvingSliverWithin:self.stabilityTolerance
+        if (candidate.anchor == FYInlineAnchorOverlay || candidate.occlusionDepth > 0) {
+            // 与完整译文同一套字段内空隙搜索，不能靠接受遮挡塞进入口。
+            usable = [self candidate:candidate resolvingCollisionsWithin:self.stabilityTolerance
                             viewport:viewport placement:placement
-                        otherSources:sourceFrames placedFrames:placedFrames];
+                        otherSources:sourceFrames sourceTexts:sourceTexts selfIndex:selfIndex placedFrames:placedFrames];
             if (!usable) { continue; }
         }
         BOOL conflict = NO;

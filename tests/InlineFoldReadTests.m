@@ -815,6 +815,92 @@ static void TestOverflowEntryAndChooser(void) {
     Check(roomy.inlineOverflowCount == 0, @"极端降级：空间充足时放不下条数为 0");
 }
 
+static FYInlinePlacement *FoldUnplaceable(NSString *identity, NSString *source, NSString *translation) {
+    FYInlineTextBlock *block = [FYInlineTextBlock new];
+    block.text = source;
+    FYInlinePlacement *placement = [FYInlinePlacement new];
+    placement.mode = FYInlineDisplayModeUnplaceable;
+    placement.blockID = identity;
+    placement.sourceBlockID = identity;
+    placement.block = block;
+    placement.translation = translation;
+    return placement;
+}
+
+static void TestConsecutiveOverflowFrames(void) {
+    NSRect viewport = NSMakeRect(0, 0, 260, 150);
+    FoldApp *app = FoldFixtureApp(viewport);
+    FYInlinePlacement *first = FoldUnplaceable(@"one", @"一つ目", @"第一条译文");
+    FYInlinePlacement *second = FoldUnplaceable(@"two", @"二つ目", @"第二条译文");
+    NSArray *both = @[first, second];
+    NSArray *one = @[first];
+    NSDictionary *items = @{};
+    [app updateInlineOverflowEntryWithPlacements:both items:items viewport:viewport unplaceable:2];
+    NSPanel *entry = app.inlineOverflowPanel;
+    Check(entry != nil && app.inlineOverflowCount == 2, @"连续帧：两条译文先建立入口");
+    [app updateInlineOverflowEntryWithPlacements:one items:items viewport:viewport unplaceable:1];
+    Check(app.inlineOverflowPanel == entry && app.inlineOverflowCount == 2,
+          @"连续帧：单帧条数变化不重建入口或改写可见数量");
+    [app updateInlineOverflowEntryWithPlacements:both items:items viewport:viewport unplaceable:2];
+    Check(app.inlineOverflowPanel == entry && app.inlineOverflowCount == 2,
+          @"连续帧：N 与 N±1 交替时仍复用入口");
+    [app updateInlineOverflowEntryWithPlacements:@[] items:items viewport:viewport unplaceable:0];
+    [app refreshOverlayVisibility:nil];
+    Check(app.inlineOverflowPanel == entry && entry.isVisible,
+          @"连续帧：单帧没有可落位译文也不让入口消失");
+    [app updateInlineOverflowEntryWithPlacements:both items:items viewport:viewport unplaceable:2];
+    Check(app.inlineOverflowPanel == entry, @"连续帧：下一帧恢复后仍是原来的窗口");
+    [app updateInlineOverflowEntryWithPlacements:one items:items viewport:viewport unplaceable:1];
+    [app updateInlineOverflowEntryWithPlacements:one items:items viewport:viewport unplaceable:1];
+    Check(app.inlineOverflowPanel == entry && app.inlineOverflowCount == 1,
+          @"连续帧：条数确实变化后就地更新窗口");
+    [app updateInlineOverflowEntryWithPlacements:both items:items viewport:viewport unplaceable:2];
+    [app updateInlineOverflowEntryWithPlacements:both items:items viewport:viewport unplaceable:2];
+    Check(app.inlineOverflowPanel == entry && app.inlineOverflowCount == 2,
+          @"连续帧：条数恢复后仍不重建窗口");
+
+    [(FYInlineLongCardView *)entry.contentView onClick]();
+    NSPanel *chooser = app.inlineOverflowChoicePanel;
+    NSArray *snapshot = app.inlineOverflowEntries;
+    Check(chooser != nil, @"连续帧：用户能打开选择列表");
+    [app updateInlineOverflowEntryWithPlacements:@[] items:items viewport:viewport unplaceable:0];
+    [app updateInlineOverflowEntryWithPlacements:one items:items viewport:viewport unplaceable:1];
+    [app refreshOverlayVisibility:nil];
+    Check(app.inlineOverflowChoicePanel == chooser && chooser.isVisible && app.inlineOverflowEntries == snapshot,
+          @"连续帧：列表打开期间空帧和条数变化都不替换按钮数据或隐藏列表");
+    NSArray<NSButton *> *rows = FoldChooserRows(app);
+    if (rows.count > 1) {
+        [rows[1] performClick:nil];
+        Check(app.inlineExpandedReadingPanel != nil &&
+              [app.inlineExpandedReadingBlockID isEqualToString:@"two"],
+              @"连续帧：变化后点击第二行仍打开原来第二条译文");
+    }
+
+    FoldApp *expired = FoldFixtureApp(viewport);
+    [expired updateInlineOverflowEntryWithPlacements:both items:items viewport:viewport unplaceable:2];
+    [expired updateInlineOverflowEntryWithPlacements:@[] items:items viewport:viewport unplaceable:0];
+    expired.inlineOverflowEmptySince = [NSDate timeIntervalSinceReferenceDate] - 2;
+    [expired refreshOverlayVisibility:nil];
+    Check(expired.inlineOverflowPanel == nil && expired.inlineOverflowCount == 0,
+          @"连续帧：持续没有条目后入口会收起，不会永远保留旧译文");
+}
+
+static void TestOCRJitterAcrossFingerprintBoundary(void) {
+    NSRect viewport = NSMakeRect(0, 0, 1000, 700);
+    FoldApp *app = FoldFixtureApp(viewport);
+    OCRTextItem *first = FoldItem(@"選択", CGRectMake(0.0049, 0.55, 0.20, 0.05), InlineBlockKindShort, nil);
+    [app showInlineTranslations:@[@"选择"] forItems:@[first] placementRect:viewport];
+    FYInlineLayoutResult *layout = app.lastInlineLayoutResult;
+    OCRTextItem *jitter = FoldItem(@"選択", CGRectMake(0.0059, 0.55, 0.20, 0.05), InlineBlockKindShort, nil);
+    [app showInlineTranslations:@[@"选择"] forItems:@[jitter] placementRect:viewport];
+    Check(layout != nil && app.lastInlineLayoutResult == layout,
+          @"坐标抖动：跨过两位小数的舍入边界仍不全量重排");
+    OCRTextItem *moved = FoldItem(@"選択", CGRectMake(0.0249, 0.55, 0.20, 0.05), InlineBlockKindShort, nil);
+    [app showInlineTranslations:@[@"选择"] forItems:@[moved] placementRect:viewport];
+    Check(app.lastInlineLayoutResult != layout,
+          @"坐标移动：超过抖动阈值后仍会重新布局");
+}
+
 #pragma mark - 12. 样式/范围守卫
 
 static void TestStyleScopeGuard(void) {
@@ -952,6 +1038,20 @@ static void TestScreenshots(void) {
 
 #pragma mark - main
 
+static void TestInlineOCRCorrectionStability(void) {
+    FoldApp *app = [FoldApp new];
+    NSString *shown = @"帰宅部 桜井琥一の弟。 スリルは彼の活力。 身長 178cm 体重 64kg 花屋アンネリー";
+    NSString *jitterA = @"帰宅部 桜井琥一の弟。 スリルは彼の活力。 身長 178cm 体重 64kg 花屋アンネリ一";
+    NSString *jitterB = @"帰宅部 桜井琥一の弟。 スリルは彼の活力。 身長 178cm 体重 64kg 花屋アンネリー。";
+    Check(![app shouldAcceptInlineOCRCorrection:jitterA comparedTo:shown], @"界面 OCR：首帧近似误识别不替换译文");
+    Check(![app shouldAcceptInlineOCRCorrection:jitterB comparedTo:shown], @"界面 OCR：另一种误识别不累计前一候选");
+    Check(![app shouldAcceptInlineOCRCorrection:jitterA comparedTo:shown], @"界面 OCR：交替抖动仍保留已显示译文");
+    Check(![app shouldAcceptInlineOCRCorrection:jitterA comparedTo:shown], @"界面 OCR：连续两帧仍等待");
+    Check([app shouldAcceptInlineOCRCorrection:jitterA comparedTo:shown], @"界面 OCR：连续三帧稳定修正才替换译文");
+    Check([app shouldAcceptInlineOCRCorrection:@"全新的游戏页面与菜单" comparedTo:shown],
+          @"界面 OCR：明显换页立即更新");
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         unsetenv("FUYI_DIAG");
@@ -968,6 +1068,9 @@ int main(int argc, const char *argv[]) {
         TestSameTextTwoPlaces();
         TestGeometryChangeForExpandedCard();
         TestOverflowEntryAndChooser();
+        TestConsecutiveOverflowFrames();
+        TestOCRJitterAcrossFingerprintBoundary();
+        TestInlineOCRCorrectionStability();
         TestStyleScopeGuard();
         TestScreenshots();
 

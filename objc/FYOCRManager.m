@@ -54,6 +54,294 @@ CGFloat FYOCRFittedTextArea(NSArray<OCRTextItem *> *blocks) {
 - (void)reset { self.candidate=@""; self.count=0; }
 @end
 
+@interface FYInlineOCRTrack : NSObject
+@property(nonatomic, strong) OCRTextItem *item;
+@property(nonatomic, copy) NSString *pendingText;
+@property(nonatomic) NSInteger pendingTextHits;
+@property(nonatomic) NSInteger pendingGeometryHits;
+@property(nonatomic) CGRect pendingGeometry;
+@property(nonatomic) InlineBlockKind pendingKind;
+@property(nonatomic) NSInteger missingHits;
+@end
+@implementation FYInlineOCRTrack
+@end
+
+@interface FYInlineOCRFrameStabilizer ()
+@property(nonatomic, readwrite) BOOL ready;
+@property(nonatomic, strong) NSMutableArray<FYInlineOCRTrack *> *tracks;
+@property(nonatomic, copy) NSArray<OCRTextItem *> *openingFrame;
+@property(nonatomic, copy) NSArray<OCRTextItem *> *pageCandidate;
+@property(nonatomic) NSInteger pageCandidateHits;
+@property(nonatomic, strong) NSMutableArray<FYInlineOCRTrack *> *pendingAdditions;
+@property(nonatomic) NSInteger blankHits;
+@end
+
+static OCRTextItem *FYCopyInlineOCRItem(OCRTextItem *source) {
+    OCRTextItem *copy = [OCRTextItem new];
+    copy.text = source.text ?: @"";
+    copy.boundingBox = source.boundingBox;
+    copy.lastLineBox = source.lastLineBox;
+    copy.lineTexts = source.lineTexts;
+    copy.lineBoxes = source.lineBoxes;
+    copy.lineCount = source.lineCount;
+    copy.blockKind = source.blockKind;
+    copy.confidence = source.confidence;
+    copy.groupingConfidence = source.groupingConfidence;
+    copy.sourceBlockID = source.sourceBlockID;
+    return copy;
+}
+
+static NSArray<OCRTextItem *> *FYCopyInlineOCRFrame(NSArray<OCRTextItem *> *items) {
+    NSMutableArray *copies = [NSMutableArray arrayWithCapacity:items.count];
+    for (OCRTextItem *item in items) { [copies addObject:FYCopyInlineOCRItem(item)]; }
+    return copies;
+}
+
+static CGFloat FYInlineOCRGeometryDelta(CGRect a, CGRect b) {
+    return MAX(MAX(fabs(NSMinX(a)-NSMinX(b)), fabs(NSMinY(a)-NSMinY(b))),
+               MAX(fabs(NSWidth(a)-NSWidth(b)), fabs(NSHeight(a)-NSHeight(b))));
+}
+
+static CGRect FYInlineOCRMapRect(CGRect box, CGRect from, CGRect to) {
+    CGFloat sx = NSWidth(to) / MAX((CGFloat)0.0001, NSWidth(from));
+    CGFloat sy = NSHeight(to) / MAX((CGFloat)0.0001, NSHeight(from));
+    return CGRectMake(NSMinX(to) + (NSMinX(box)-NSMinX(from))*sx,
+                      NSMinY(to) + (NSMinY(box)-NSMinY(from))*sy, NSWidth(box)*sx, NSHeight(box)*sy);
+}
+
+static CGFloat FYInlineOCRMatchScore(OCRTextItem *left, OCRTextItem *right) {
+    CGRect a = left.boundingBox, b = right.boundingBox;
+    CGRect hit = CGRectIntersection(a, b);
+    CGFloat areaA = NSWidth(a) * NSHeight(a), areaB = NSWidth(b) * NSHeight(b);
+    CGFloat areaHit = CGRectIsNull(hit) || CGRectIsEmpty(hit) ? 0 : NSWidth(hit) * NSHeight(hit);
+    CGFloat unionArea = areaA + areaB - areaHit;
+    CGFloat overlap = unionArea > 0 ? areaHit / unionArea : 0;
+    NSString *aText = FYNormalizeOCRTextForComparison(left.text);
+    NSString *bText = FYNormalizeOCRTextForComparison(right.text);
+    CGFloat dx = fabs(NSMidX(a) - NSMidX(b)), dy = fabs(NSMidY(a) - NSMidY(b));
+    if (overlap < 0.12 && !([aText isEqualToString:bText] && dx < 0.025 && dy < 0.025)) { return 0; }
+    return overlap + ([aText isEqualToString:bText] ? 1.0 : 0.0);
+}
+
+static NSUInteger FYInlineOCRFrameMatches(NSArray<OCRTextItem *> *left, NSArray<OCRTextItem *> *right, BOOL sameText) {
+    NSMutableIndexSet *used = [NSMutableIndexSet indexSet];
+    NSUInteger matched = 0;
+    for (OCRTextItem *item in left) {
+        CGFloat best = 0;
+        NSInteger bestIndex = -1;
+        for (NSUInteger index = 0; index < right.count; index++) {
+            if ([used containsIndex:index]) { continue; }
+            CGFloat score = FYInlineOCRMatchScore(item, right[index]);
+            if (sameText && ![item.text isEqualToString:right[index].text]) { continue; }
+            if (score > best) { best = score; bestIndex = (NSInteger)index; }
+        }
+        if (bestIndex >= 0) { [used addIndex:(NSUInteger)bestIndex]; matched++; }
+    }
+    return matched;
+}
+
+@implementation FYInlineOCRFrameStabilizer
+- (void)reset {
+    self.ready = NO;
+    self.tracks = nil;
+    self.openingFrame = nil;
+    self.pageCandidate = nil;
+    self.pageCandidateHits = 0;
+    self.pendingAdditions = nil;
+    self.blankHits = 0;
+}
+- (void)acceptFrame:(NSArray<OCRTextItem *> *)items {
+    self.tracks = [NSMutableArray arrayWithCapacity:items.count];
+    for (OCRTextItem *item in items) {
+        FYInlineOCRTrack *track = [FYInlineOCRTrack new];
+        track.item = FYCopyInlineOCRItem(item);
+        [self.tracks addObject:track];
+    }
+    self.ready = YES;
+    self.openingFrame = nil;
+    self.pageCandidate = nil;
+    self.pageCandidateHits = 0;
+    self.pendingAdditions = [NSMutableArray array];
+}
+- (NSArray<OCRTextItem *> *)acceptedItems {
+    NSMutableArray<OCRTextItem *> *items = [NSMutableArray arrayWithCapacity:self.tracks.count];
+    for (FYInlineOCRTrack *track in self.tracks) { [items addObject:track.item]; }
+    return items;
+}
+- (NSArray<OCRTextItem *> *)itemsPreservingConfirmedBoundaries:(NSArray<OCRTextItem *> *)items {
+    NSMutableArray *result = [NSMutableArray array];
+    for (OCRTextItem *seen in items) {
+        NSMutableArray<OCRTextItem *> *parts = [NSMutableArray array];
+        NSString *text = FYNormalizeOCRTextForComparison(seen.text);
+        for (FYInlineOCRTrack *track in self.tracks) {
+            CGRect box = track.item.boundingBox;
+            CGRect hit = CGRectIntersection(box, seen.boundingBox);
+            CGFloat area = NSWidth(box) * NSHeight(box);
+            NSString *partText = FYNormalizeOCRTextForComparison(track.item.text);
+            if (partText.length && [text containsString:partText] && area > 0 &&
+                !CGRectIsNull(hit) && NSWidth(hit) * NSHeight(hit) / area >= 0.65) {
+                [parts addObject:track.item];
+            }
+        }
+        [parts sortUsingComparator:^NSComparisonResult(OCRTextItem *a, OCRTextItem *b) {
+            return [[NSNumber numberWithUnsignedInteger:[text rangeOfString:FYNormalizeOCRTextForComparison(a.text)].location]
+                compare:@([text rangeOfString:FYNormalizeOCRTextForComparison(b.text)].location)];
+        }];
+        NSString *joined = FYNormalizeOCRTextForComparison([[parts valueForKey:@"text"] componentsJoinedByString:@"\n"]);
+        // A union observation containing the exact same independently confirmed
+        // fields is evidence that they still exist, not that their boundary vanished.
+        // Different text or a genuinely different layout follows normal confirmation.
+        NSArray *output = @[seen];
+        if (parts.count >= 2 && [joined isEqualToString:text]) {
+            CGRect unionBox = parts.firstObject.boundingBox;
+            for (OCRTextItem *part in parts) { unionBox = CGRectUnion(unionBox, part.boundingBox); }
+            NSMutableArray *mapped = [NSMutableArray array];
+            for (OCRTextItem *part in parts) {
+                OCRTextItem *copy = FYCopyInlineOCRItem(part);
+                copy.boundingBox = FYInlineOCRMapRect(part.boundingBox, unionBox, seen.boundingBox);
+                if (!CGRectIsEmpty(part.lastLineBox)) { copy.lastLineBox = FYInlineOCRMapRect(part.lastLineBox, unionBox, seen.boundingBox); }
+                NSMutableArray *boxes = [NSMutableArray array];
+                for (NSValue *box in part.lineBoxes) {
+                    [boxes addObject:[NSValue valueWithRect:FYInlineOCRMapRect(box.rectValue, unionBox, seen.boundingBox)]];
+                }
+                copy.lineBoxes = boxes; [mapped addObject:copy];
+            }
+            output = mapped;
+        }
+        for (OCRTextItem *part in output) {
+            BOOL duplicate = NO;
+            for (OCRTextItem *kept in result) {
+                if ([part.text isEqualToString:kept.text] && FYInlineOCRMatchScore(part, kept) > 1.5) { duplicate = YES; break; }
+            }
+            if (!duplicate) { [result addObject:part]; }
+        }
+    }
+    return result;
+}
+- (NSArray<OCRTextItem *> *)observeItems:(NSArray<OCRTextItem *> *)items {
+    items = items ?: @[];
+    if (items.count == 0) {
+        self.pendingAdditions = nil;
+        self.pageCandidate = nil;
+        self.pageCandidateHits = 0;
+        self.openingFrame = nil;
+        for (FYInlineOCRTrack *track in self.tracks) {
+            track.pendingText = nil; track.pendingTextHits = 0; track.pendingGeometryHits = 0;
+        }
+        self.blankHits++;
+        if (self.blankHits >= 3) { [self reset]; }
+        return self.ready ? [self acceptedItems] : @[];
+    }
+    self.blankHits = 0;
+    if (!self.ready) {
+        if (self.openingFrame.count > 0 &&
+            FYInlineOCRFrameMatches(self.openingFrame, items, YES) >= MAX(self.openingFrame.count, items.count) * 0.65) {
+            [self acceptFrame:items];
+            return [self acceptedItems];
+        }
+        self.openingFrame = FYCopyInlineOCRFrame(items);
+        return @[];
+    }
+
+    NSArray<OCRTextItem *> *accepted = [self acceptedItems];
+    NSUInteger matches = FYInlineOCRFrameMatches(accepted, items, NO);
+    if (accepted.count >= 3 && items.count >= 3 && matches < MIN(accepted.count, items.count) * 0.40) {
+        if (self.pageCandidate.count > 0 &&
+            FYInlineOCRFrameMatches(self.pageCandidate, items, YES) >= MAX(self.pageCandidate.count, items.count) * 0.60) {
+            self.pageCandidateHits++;
+        } else {
+            self.pageCandidate = FYCopyInlineOCRFrame(items);
+            self.pageCandidateHits = 1;
+        }
+        if (self.pageCandidateHits >= 2) { [self acceptFrame:items]; }
+        return [self acceptedItems];
+    }
+    self.pageCandidate = nil;
+    self.pageCandidateHits = 0;
+
+    items = [self itemsPreservingConfirmedBoundaries:items];
+
+    // Pair by strongest geometry/text evidence globally. A temporary merged
+    // OCR box overlaps two old rows, but can replace at most one of them.
+    NSMutableIndexSet *usedTracks = [NSMutableIndexSet indexSet];
+    NSMutableIndexSet *usedItems = [NSMutableIndexSet indexSet];
+    NSMutableArray<NSArray<NSNumber *> *> *scores = [NSMutableArray arrayWithCapacity:self.tracks.count];
+    for (FYInlineOCRTrack *track in self.tracks) {
+        NSMutableArray *row = [NSMutableArray arrayWithCapacity:items.count];
+        for (OCRTextItem *item in items) { [row addObject:@(FYInlineOCRMatchScore(track.item, item))]; }
+        [scores addObject:row];
+    }
+    while (YES) {
+        CGFloat best = 0;
+        NSInteger trackIndex = -1, itemIndex = -1;
+        for (NSUInteger t = 0; t < self.tracks.count; t++) {
+            if ([usedTracks containsIndex:t]) { continue; }
+            for (NSUInteger i = 0; i < items.count; i++) {
+                if ([usedItems containsIndex:i]) { continue; }
+                CGFloat score = scores[t][i].doubleValue;
+                if (score > best) { best = score; trackIndex = (NSInteger)t; itemIndex = (NSInteger)i; }
+            }
+        }
+        if (trackIndex < 0) { break; }
+        [usedTracks addIndex:(NSUInteger)trackIndex];
+        [usedItems addIndex:(NSUInteger)itemIndex];
+        FYInlineOCRTrack *track = self.tracks[(NSUInteger)trackIndex];
+        OCRTextItem *seen = items[(NSUInteger)itemIndex];
+        track.missingHits = 0;
+        if ([track.item.text isEqualToString:seen.text] && track.item.blockKind == seen.blockKind) {
+            track.pendingText = nil;
+            track.pendingTextHits = 0;
+            CGRect old = track.item.boundingBox, now = seen.boundingBox;
+            CGFloat delta = FYInlineOCRGeometryDelta(old, now);
+            if (delta >= 0.010) {
+                track.pendingGeometryHits = track.pendingGeometryHits > 0 &&
+                    FYInlineOCRGeometryDelta(track.pendingGeometry, now) < 0.005 ? track.pendingGeometryHits + 1 : 1;
+                track.pendingGeometry = now;
+                if (track.pendingGeometryHits >= 2) { track.item = FYCopyInlineOCRItem(seen); track.pendingGeometryHits = 0; }
+            } else { track.pendingGeometryHits = 0; }
+        } else {
+            track.pendingGeometryHits = 0;
+            if ([track.pendingText isEqualToString:seen.text] && track.pendingKind == seen.blockKind) { track.pendingTextHits++; }
+            else { track.pendingText = seen.text; track.pendingKind = seen.blockKind; track.pendingTextHits = 1; }
+            if (track.pendingTextHits >= 3) {
+                track.item = FYCopyInlineOCRItem(seen);
+                track.pendingText = nil;
+                track.pendingTextHits = 0;
+                track.pendingGeometryHits = 0;
+            }
+        }
+    }
+    NSMutableIndexSet *expired = [NSMutableIndexSet indexSet];
+    for (NSUInteger t = 0; t < self.tracks.count; t++) {
+        if ([usedTracks containsIndex:t]) { continue; }
+        FYInlineOCRTrack *track = self.tracks[t];
+        track.pendingText = nil; track.pendingTextHits = 0; track.pendingGeometryHits = 0;
+        track.missingHits++;
+        if (track.missingHits >= 3) { [expired addIndex:t]; }
+    }
+    [self.tracks removeObjectsAtIndexes:expired];
+
+    NSMutableArray<FYInlineOCRTrack *> *nextNew = [NSMutableArray array];
+    for (NSUInteger i = 0; i < items.count; i++) {
+        if ([usedItems containsIndex:i]) { continue; }
+        OCRTextItem *seen = items[i];
+        FYInlineOCRTrack *prior = nil;
+        for (FYInlineOCRTrack *candidate in [self.pendingAdditions copy]) {
+            if ([candidate.item.text isEqualToString:seen.text] && FYInlineOCRMatchScore(candidate.item, seen) > 0) {
+                prior = candidate; [self.pendingAdditions removeObject:candidate]; break;
+            }
+        }
+        FYInlineOCRTrack *track = prior ?: [FYInlineOCRTrack new];
+        track.item = FYCopyInlineOCRItem(seen);
+        track.pendingTextHits = prior ? prior.pendingTextHits + 1 : 1;
+        if (track.pendingTextHits >= 2) { [self.tracks addObject:track]; }
+        else { [nextNew addObject:track]; }
+    }
+    self.pendingAdditions = nextNew;
+    return [self acceptedItems];
+}
+@end
+
 BOOL FYOCRRefinementRegion(NSArray<OCRTextItem *> *blocks, BOOL autoFit, CGFloat fittedArea, CGRect *outRegion) {
     if (!autoFit || !(fittedArea > 0 && fittedArea <= .16) || !blocks.count) return NO;
     CGFloat minX=1,minY=1,maxX=0,maxY=0; BOOL any=NO;
@@ -294,7 +582,7 @@ BOOL FYOCRModalSurroundingsAreDimmer(unsigned char *pixels, size_t width, size_t
     size_t stepX = MAX((size_t)1, width / 160);
     size_t stepY = MAX((size_t)1, height / 160);
     for (size_t y = 0; y < height; y += stepY) {
-        double normalizedY = (double)y / (double)height;
+        double normalizedY = 1.0 - (double)y / (double)height;
         if (normalizedY < outer.origin.y || normalizedY > CGRectGetMaxY(outer)) { continue; }
         const unsigned char *row = pixels + y * bytesPerRow;
         for (size_t x = 0; x < width; x += stepX) {
@@ -382,6 +670,9 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
 }
 + (NSString *)postprocessedTextForItems:(NSArray<OCRTextItem *> *)items renderedTexts:(NSSet<NSString *> *)renderedTexts blocks:(NSArray<OCRTextItem *> **)outBlocks {
     items=[self itemsExcludingOwnOverlay:items renderedTexts:renderedTexts];
+    return [self sourceTextForItems:items blocks:outBlocks];
+}
++ (NSString *)sourceTextForItems:(NSArray<OCRTextItem *> *)items blocks:(NSArray<OCRTextItem *> **)outBlocks {
     items=[self resolveOverlappingItems:items];
     if (outBlocks) *outBlocks=items;
     return [[items valueForKey:@"text"] componentsJoinedByString:@"\n"] ?: @"";
@@ -399,6 +690,52 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     CGImageRelease(scaled);
     return text;
 }
++ (NSArray<OCRTextItem *> *)items:(NSArray<OCRTextItem *> *)blocks
+           scopedToModalInImage:(CGImageRef)image
+                    exclusions:(NSArray<NSValue *> *)exclusionValues {
+    if (!image || blocks.count < 2) { return blocks; }
+    FYOCRPixelBuffer buffer = FYCreateOCRPixelBuffer(image);
+    if (!buffer.pixels) { return blocks; }
+    NSUInteger count = exclusionValues.count;
+    CGRect *exclusions = count ? calloc(count, sizeof(CGRect)) : NULL;
+    if (count && !exclusions) { FYReleaseOCRPixelBuffer(&buffer); return blocks; }
+    for (NSUInteger i = 0; i < count; i++) { exclusions[i] = exclusionValues[i].rectValue; }
+    CGRect region = CGRectZero;
+    BOOL qualifies = FYDetectBrightOCRContentRegion(buffer.pixels, buffer.width, buffer.height,
+        buffer.bytesPerRow, &region, NULL, exclusions, count) &&
+        FYOCRModalRectQualifiesForCropping(region) &&
+        FYOCRModalSurroundingsAreDimmer(buffer.pixels, buffer.width, buffer.height, buffer.bytesPerRow, region);
+    free(exclusions);
+    FYReleaseOCRPixelBuffer(&buffer);
+    if (!qualifies) { return blocks; }
+
+    // 亮块和暗背景本身不足以区分邮件/照片与弹窗。还必须有位于该面板底部的
+    // 独立关闭按钮；正文里提到“关闭”、画面角落的“返回”都不能触发裁剪。
+    BOOL hasDismiss = NO;
+    CGRect footer = CGRectMake(NSMinX(region), MAX((CGFloat)0, NSMinY(region) - 0.13),
+                               NSWidth(region), NSHeight(region) * 0.35 + 0.13);
+    for (OCRTextItem *item in blocks) {
+        NSString *text = [FYNormalizeOCRTextForComparison(item.text) lowercaseString];
+        if (![@[@"閉じる", @"とじる", @"关闭", @"關閉", @"close"] containsObject:text]) { continue; }
+        if (NSWidth(item.boundingBox) > 0.22 || NSHeight(item.boundingBox) > 0.09 ||
+            !CGRectContainsRect(footer, item.boundingBox)) { continue; }
+        BOOL covered = NO;
+        for (NSValue *value in exclusionValues) {
+            if (CGRectIntersectsRect(value.rectValue, item.boundingBox)) { covered = YES; break; }
+        }
+        if (!covered) { hasDismiss = YES; break; }
+    }
+    if (!hasDismiss) { return blocks; }
+    NSArray *scoped = [self items:blocks inModalRegion:region exclusions:exclusionValues];
+    NSMutableArray *inside = [NSMutableArray array];
+    for (OCRTextItem *item in scoped) {
+        // 页眉/页脚可以向上下延伸；左右边界保持贴合面板，避免重新纳入左栏日期。
+        if (NSMinX(item.boundingBox) >= NSMinX(region) - 0.005 &&
+            NSMaxX(item.boundingBox) <= NSMaxX(region) + 0.005) { [inside addObject:item]; }
+    }
+    return inside.count >= 2 ? inside : blocks;
+}
+
 + (NSArray<OCRTextItem *> *)items:(NSArray<OCRTextItem *> *)blocks inModalRegion:(CGRect)modalRect exclusions:(NSArray<NSValue *> *)exclusionValues {
     // 弹窗的橙色页眉/页脚不够亮，纵向外扩一点，避免把弹窗自己的标题丢掉。
     // 不能扩太多，否则上一层页面的文字会重新落进范围里（实测 0.18 会把左侧栏目带回来）。
@@ -1097,6 +1434,18 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             block.lastLineBox = CGRectMake(baseX + last.origin.x * scaleX, baseY + last.origin.y * scaleY,
                                           last.size.width * scaleX, last.size.height * scaleY);
         }
+        if (block.lineBoxes.count > 0) {
+            NSMutableArray<NSValue *> *mapped = [NSMutableArray arrayWithCapacity:block.lineBoxes.count];
+            for (NSValue *value in block.lineBoxes) {
+                CGRect line = value.rectValue;
+                if (!CGRectIsEmpty(line)) {
+                    line = CGRectMake(baseX + line.origin.x * scaleX, baseY + line.origin.y * scaleY,
+                                      line.size.width * scaleX, line.size.height * scaleY);
+                }
+                [mapped addObject:[NSValue valueWithRect:line]];
+            }
+            block.lineBoxes = mapped;
+        }
     }
 }
 
@@ -1308,6 +1657,51 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     [merged sortUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) { return FYOCRReadingOrder(left, right); }];
     return [self resolveOverlappingItems:merged];
 }
++ (NSArray<OCRTextItem *> *)splitMultilineItems:(NSArray<OCRTextItem *> *)items {
+    NSMutableArray<OCRTextItem *> *result = [NSMutableArray array];
+    for (OCRTextItem *item in items ?: @[]) {
+        NSArray<NSString *> *parts = [item.text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+        NSMutableArray<NSNumber *> *indexes = [NSMutableArray array];
+        NSMutableArray<NSString *> *lines = [NSMutableArray array];
+        NSUInteger longest = 0;
+        for (NSUInteger index = 0; index < parts.count; index++) {
+            NSString *line = [parts[index] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+            if (line.length == 0) { continue; }
+            [indexes addObject:@(index)];
+            [lines addObject:line];
+            longest = MAX(longest, line.length);
+        }
+        if (lines.count < 2) { [result addObject:item]; continue; }
+        CGRect outer = item.boundingBox;
+        for (NSUInteger ordinal = 0; ordinal < lines.count; ordinal++) {
+            NSUInteger originalIndex = indexes[ordinal].unsignedIntegerValue;
+            CGRect lineBox = CGRectZero;
+            if (item.lineBoxes.count == parts.count) { lineBox = item.lineBoxes[originalIndex].rectValue; }
+            if (CGRectIsEmpty(lineBox) ||
+                (fabs(CGRectGetWidth(lineBox) - CGRectGetWidth(outer)) < 0.001 &&
+                 fabs(CGRectGetHeight(lineBox) - CGRectGetHeight(outer)) < 0.001)) {
+                // Older OCR results provide only the union box. Preserve row order and
+                // approximate widths until Vision's character-range boxes are available.
+                CGFloat height = CGRectGetHeight(outer) / (CGFloat)lines.count;
+                CGFloat width = CGRectGetWidth(outer) * (CGFloat)lines[ordinal].length / (CGFloat)MAX((NSUInteger)1, longest);
+                lineBox = CGRectMake(CGRectGetMinX(outer), CGRectGetMaxY(outer) - (ordinal + 1) * height,
+                                     MIN(CGRectGetWidth(outer), MAX((CGFloat)0.005, width)), height);
+            }
+            OCRTextItem *lineItem = [OCRTextItem new];
+            lineItem.text = lines[ordinal];
+            lineItem.boundingBox = lineBox;
+            lineItem.lastLineBox = lineBox;
+            lineItem.lineTexts = @[lineItem.text];
+            lineItem.lineBoxes = @[[NSValue valueWithRect:lineBox]];
+            lineItem.lineCount = 1;
+            lineItem.blockKind = item.blockKind;
+            lineItem.confidence = item.confidence;
+            lineItem.groupingConfidence = item.groupingConfidence;
+            [result addObject:lineItem];
+        }
+    }
+    return result;
+}
 + (NSString *)textFromRecognizedLines:(NSArray<NSString *> *)lines {
     NSMutableArray<NSString *> *kept = [NSMutableArray array];
     for (NSString *value in lines) {
@@ -1357,6 +1751,26 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             OCRTextItem *item = [[OCRTextItem alloc] init];
             item.text = line;
             item.boundingBox = observation.boundingBox;
+            if ([line rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location != NSNotFound) {
+                NSMutableArray<NSString *> *lineTexts = [NSMutableArray array];
+                NSMutableArray<NSValue *> *lineBoxes = [NSMutableArray array];
+                [candidate.string enumerateSubstringsInRange:NSMakeRange(0, candidate.string.length)
+                                                     options:NSStringEnumerationByLines
+                                                  usingBlock:^(NSString *substring, NSRange substringRange, NSRange enclosingRange, BOOL *stop) {
+                    NSString *part = [substring stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+                    if (part.length == 0) { return; }
+                    VNRectangleObservation *rangeBox = [candidate boundingBoxForRange:substringRange error:nil];
+                    [lineTexts addObject:part];
+                    [lineBoxes addObject:[NSValue valueWithRect:rangeBox ? rangeBox.boundingBox : CGRectZero]];
+                }];
+                if (lineTexts.count > 1) {
+                    item.text = [lineTexts componentsJoinedByString:@"\n"];
+                    item.lineTexts = lineTexts;
+                    item.lineBoxes = lineBoxes;
+                    item.lineCount = lineTexts.count;
+                    item.lastLineBox = lineBoxes.lastObject.rectValue;
+                }
+            }
             // 保留识别置信度：分组/布局只把它用于诊断，不当作几何证据。
             item.confidence = candidate.confidence;
             [items addObject:item];

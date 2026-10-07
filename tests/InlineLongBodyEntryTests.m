@@ -31,6 +31,12 @@ static void Check(BOOL ok, NSString *message) {
     }
 }
 
+static BOOL DisplaysFullTranslation(FYInlinePlacement *placement) {
+    return placement && (placement.mode == FYInlineDisplayModeShortLabel ||
+                         placement.mode == FYInlineDisplayModeFullCard ||
+                         placement.mode == FYInlineDisplayModeScrollingCard);
+}
+
 #pragma mark - 合成场景
 
 static FYInlineTextLine *Line(NSString *text, CGRect box) {
@@ -222,8 +228,10 @@ static void TestProfileSceneGetsEntry(void) {
 static void TestEntryWidthIndependentOfCardWidth(void) {
     CGRect viewport = ProfileViewport();
     FYInlineLayoutEngine *narrow = [FYInlineLayoutEngine defaultEngine];
-    narrow.cardMaxWidth = 320;
-    narrow.cardWidthFraction = 0.25;
+    // 将上限设在原文列宽以下；局部避让成功后，自适应候选可能在两种设置下
+    // 都选中相同的原文宽度，无法验证入口尺寸是否独立。
+    narrow.cardMaxWidth = 200;
+    narrow.cardWidthFraction = 0.19;
     FYInlineLayoutEngine *wide = [FYInlineLayoutEngine defaultEngine];
     wide.cardMaxWidth = 560;
     wide.cardWidthFraction = 0.62;
@@ -390,10 +398,17 @@ static void TestFieldFrameRealScene(void) {
     NSArray<FYInlineTextBlock *> *blocks = Group(lines);
     FYInlineTextBlock *body = nil;
     FYInlineTextBlock *title = nil;
+    FYInlineTextBlock *club = nil;
+    FYInlineTextBlock *remarks = nil;
     for (FYInlineTextBlock *block in blocks) {
         if ([block.text containsString:kBodyNeedle]) { body = block; }
         if ([block.text containsString:@"◆桜井琉夏の好み◆"]) { title = block; }
+        if ([block.text containsString:@"帰宅部"]) { club = block; }
+        if ([block.text containsString:@"桜井琥一の弟。"]) { remarks = block; }
     }
+    Check(club != nil && [club.text isEqualToString:@"帰宅部"], @"现场真实帧：社团值不与下一行备注合并");
+    Check(remarks != nil && remarks != club && [remarks.text containsString:@"スリルは彼の活力。"],
+          @"现场真实帧：备注的两行文字组成独立段落");
     Check(body != nil && body.lineCount == 5, @"现场真实帧：五行喜好正文是一块（5 行）");
     Check(title != nil && title != body, @"现场真实帧：标题与正文是两块，没有错误合并");
     Check(body != nil && body.kind == FYInlineBlockKindLong,
@@ -403,12 +418,22 @@ static void TestFieldFrameRealScene(void) {
     NSMutableDictionary<NSString *, NSString *> *translations = [NSMutableDictionary dictionary];
     translations[kBodyNeedle] = kBodyTranslation;
     translations[@"◆桜井琉夏の好み◆"] = @"◆樱井琉夏的喜好◆";
+    translations[@"帰宅部"] = @"回家部";
+    translations[@"桜井琥一の弟。"]= @"樱井琥一的弟弟。刺激是他的活力来源。";
     NSArray<FYInlineLayoutRequest *> *requests = RequestsForBlocks(blocks, viewport, translations);
     FYInlineLayoutResult *result = [engine layoutRequests:requests viewport:viewport previous:nil];
     FYInlinePlacement *bodyPlacement = nil;
+    FYInlinePlacement *remarksPlacement = nil;
+    FYInlinePlacement *clubPlacement = nil;
     for (FYInlinePlacement *placement in result.placements) {
         if ([placement.block.text containsString:kBodyNeedle]) { bodyPlacement = placement; }
+        if ([placement.block.text containsString:@"桜井琥一の弟。"]) { remarksPlacement = placement; }
+        if ([placement.block.text isEqualToString:@"帰宅部"]) { clubPlacement = placement; }
     }
+    Check(clubPlacement != nil && clubPlacement.mode == FYInlineDisplayModeShortLabel,
+          @"现场真实帧：社团值附近有足够空间，不应被判为暂不可放置");
+    Check(DisplaysFullTranslation(remarksPlacement),
+          @"现场真实帧：社团与备注分离后，备注有完整贴译而非空间不足折叠");
     Check(bodyPlacement != nil, @"现场真实帧：正文块有排版结果");
     if (!bodyPlacement) { return; }
     Check(bodyPlacement.mode != FYInlineDisplayModeUnplaceable,
@@ -420,6 +445,44 @@ static void TestFieldFrameRealScene(void) {
     Check(!OverlapsAnyOtherSource(bodyPlacement, requests), @"现场真实帧：正文的贴译没有遮挡别的原文块");
     Check(bodyPlacement.reason.length > 0 && bodyPlacement.rejectedCandidates.count > 0,
           @"现场真实帧：诊断给出落位原因与逐候选拒绝原因");
+}
+
+static void TestProfileFieldGroupingUnderOCRJitter(void) {
+    for (CGFloat jitter = -0.003; jitter <= 0.0031; jitter += 0.0015) {
+        NSArray<FYInlineTextLine *> *lines = @[
+            Line(@"クラブ", CGRectMake(0.518, 0.201, 0.068, 0.041)),
+            Line(@"帰宅部", CGRectMake(0.610, 0.201 + jitter, 0.070, 0.041)),
+            Line(@"備考", CGRectMake(0.515, 0.130, 0.048, 0.047)),
+            Line(@"桜井琥一の弟。", CGRectMake(0.610, 0.129 - jitter, 0.154, 0.051)),
+            Line(@"スリルは彼の活力。", CGRectMake(0.609, 0.079, 0.203, 0.060))
+        ];
+        FYInlineTextBlock *club = nil, *remarks = nil;
+        for (FYInlineTextBlock *block in Group(lines)) {
+            if ([block.text containsString:@"帰宅部"]) { club = block; }
+            if ([block.text containsString:@"桜井琥一の弟。"]) { remarks = block; }
+        }
+        Check(club != nil && [club.text isEqualToString:@"帰宅部"] &&
+              remarks != nil && remarks != club && remarks.lineCount == 2,
+              [NSString stringWithFormat:@"OCR 几何抖动 %.4f 时社团和备注仍分开", jitter]);
+    }
+}
+
+static void TestProfileRowsWithoutRecognizedLabels(void) {
+    // 动态背景可让左侧字段名漏读，也可让相邻 OCR 框垂直相交；
+    // 短值与下一行较宽的完整句仍不能合成一条翻译请求。
+    NSArray<FYInlineTextLine *> *lines = @[
+        Line(@"帰宅部", CGRectMake(0.610, 0.191, 0.070, 0.060)),
+        Line(@"桜井琥一の弟。", CGRectMake(0.610, 0.143, 0.154, 0.060)),
+        Line(@"スリルは彼の活力。", CGRectMake(0.609, 0.079, 0.203, 0.060))
+    ];
+    FYInlineTextBlock *club = nil, *remarks = nil;
+    for (FYInlineTextBlock *block in Group(lines)) {
+        if ([block.text containsString:@"帰宅部"]) { club = block; }
+        if ([block.text containsString:@"桜井琥一の弟。"]) { remarks = block; }
+    }
+    Check(club != nil && [club.text isEqualToString:@"帰宅部"] && remarks != nil &&
+          remarks != club && remarks.lineCount == 2,
+          @"字段标签漏读且 OCR 行框相交时，社团与备注仍不合并");
 }
 
 /// 兜底：被判成"短块"的多行段落也不能消失 —— 拿不到任何位置时同样给「查看译文」入口。
@@ -590,6 +653,237 @@ static OCRTextItem *EntryItem(NSString *text, CGRect box, InlineBlockKind kind, 
     item.confidence = 0.95;
     item.groupingConfidence = 1.0;
     return item;
+}
+
+static void TestCombinedVisionObservationUsesSeparateFieldRows(void) {
+    AppDelegate *app = EntryFixtureApp(CGRectMake(457, 454, 1018, 574));
+    NSMutableArray<OCRTextItem *> *raw = [NSMutableArray array];
+    for (FYInlineTextLine *line in FieldFrameLines()) {
+        if ([line.text isEqualToString:@"帰宅部"] || [line.text isEqualToString:@"桜井琥一の弟。"] ||
+            [line.text isEqualToString:@"スリルは彼の活力。"]) { continue; }
+        [raw addObject:EntryItem(line.text, line.rect, InlineBlockKindShort, nil)];
+    }
+    CGRect unionBox = CGRectMake(0.608, 0.079, 0.204, 0.164);
+    NSArray<NSValue *> *preciseBoxes = @[
+        [NSValue valueWithRect:CGRectMake(0.610, 0.201, 0.070, 0.041)],
+        [NSValue valueWithRect:CGRectMake(0.610, 0.129, 0.154, 0.051)],
+        [NSValue valueWithRect:CGRectMake(0.609, 0.079, 0.203, 0.060)]];
+    for (NSUInteger variant = 0; variant < 2; variant++) {
+        OCRTextItem *combined = EntryItem(@"帰宅部\n桜井琥一の弟。\nスリルは彼の活力。",
+                                           unionBox, InlineBlockKindShort, variant == 0 ? preciseBoxes : nil);
+        NSArray<OCRTextItem *> *merged = [app mergedInlineTextItemsFromItems:[raw arrayByAddingObject:combined]];
+        OCRTextItem *club = nil, *remarks = nil;
+        for (OCRTextItem *item in merged) {
+            if ([item.text containsString:@"帰宅部"]) { club = item; }
+            if ([item.text containsString:@"桜井琥一の弟。"]) { remarks = item; }
+        }
+        Check(club != nil && [club.text isEqualToString:@"帰宅部"] && remarks != nil &&
+              remarks != club && [remarks.text containsString:@"スリルは彼の活力。"],
+              [NSString stringWithFormat:@"Vision 多行结果（%@）：社团与备注仍是两条译文",
+               variant == 0 ? @"逐行框" : @"仅总框"]);
+    }
+}
+
+static void TestDecoratedProfileValueKeepsSeparateTranslation(void) {
+    // 2026-10-07 23:21 的现场观察：装饰点扩大社团框，使其与左侧标签轻微重叠。
+    // 同时覆盖标签漏读，避免仅依赖左侧标签才能分开两个字段。
+    for (NSUInteger variant = 0; variant < 2; variant++) {
+        CGRect viewport = CGRectMake(488, 472, 966, 546);
+        AppDelegate *app = EntryFixtureApp(viewport);
+        NSMutableArray *raw = [NSMutableArray array];
+        for (FYInlineTextLine *line in FieldFrameLines()) {
+            if ([line.text isEqualToString:@"帰宅部"] || [line.text isEqualToString:@"桜井琥一の弟。"] ||
+                [line.text isEqualToString:@"スリルは彼の活力。"] ||
+                (variant == 1 && ([line.text isEqualToString:@"クラブ"] || [line.text isEqualToString:@"備考"]))) { continue; }
+            [raw addObject:EntryItem(line.text, line.rect, InlineBlockKindShort, nil)];
+        }
+        [raw addObjectsFromArray:@[
+            EntryItem(@"•帰宅部", CGRectMake(.583271, .200723, .096791, .042342), InlineBlockKindShort, nil),
+            EntryItem(@"桜井琥一の弟。", CGRectMake(.609768, .129390, .153959, .051420), InlineBlockKindShort, nil),
+            EntryItem(@"スリルは彼の活力。", CGRectMake(.609495, .079067, .202832, .061861), InlineBlockKindShort, nil)]];
+        NSArray *grouped = [app filteredInlineTextItems:[app mergedInlineTextItemsFromItems:raw] strict:NO];
+        [app.inlineFrameStabilizer observeItems:grouped];
+        NSArray<OCRTextItem *> *stable = [app.inlineFrameStabilizer observeItems:grouped];
+        OCRTextItem *club = nil, *remarks = nil;
+        NSMutableArray *translations = [NSMutableArray array];
+        for (OCRTextItem *item in stable) {
+            NSDictionary *labels = @{@"クラブ": @"俱乐部", @"備考": @"备注", @"身長": @"身高",
+                                     @"体重": @"体重", @"バイト": @"打工", @"電話": @"电话"};
+            NSString *translation = labels[item.text] ?: @"菜单译文";
+            if ([item.text containsString:@"帰宅部"]) { club = item; translation = @"回家部"; }
+            if ([item.text containsString:@"桜井琥一の弟。"]) {
+                remarks = item; translation = @"樱井琥一的弟弟。\n刺激是他的活力来源。";
+            }
+            if ([item.text containsString:kBodyNeedle]) { translation = kBodyTranslation; }
+            [translations addObject:translation];
+        }
+        Check(club && [club.text isEqualToString:@"•帰宅部"] && remarks && remarks != club &&
+              [remarks.text isEqualToString:@"桜井琥一の弟。\nスリルは彼の活力。"],
+              [NSString stringWithFormat:@"带装饰点的现场帧（标签%@）：分组及首次确认保持两条译文", variant == 0 ? @"存在" : @"漏读"]);
+        [app showInlineTranslations:translations forItems:stable placementRect:viewport];
+        FYInlinePlacement *clubPlacement = nil, *remarksPlacement = nil;
+        for (FYInlinePlacement *placement in app.lastInlineLayoutResult.placements) {
+            if ([placement.block.text containsString:@"帰宅部"]) { clubPlacement = placement; }
+            if ([placement.block.text containsString:@"桜井琥一の弟。"]) { remarksPlacement = placement; }
+        }
+        Check(clubPlacement && remarksPlacement && clubPlacement != remarksPlacement &&
+              clubPlacement.mode == FYInlineDisplayModeShortLabel && DisplaysFullTranslation(remarksPlacement),
+              [NSString stringWithFormat:@"带装饰点的现场帧：社团与两行备注完整贴译，不触发空间不足折叠（社团 %ld %@；备注 %ld %@）",
+               (long)clubPlacement.mode, clubPlacement.reason, (long)remarksPlacement.mode, remarksPlacement.reason]);
+        if (remarksPlacement.mode == FYInlineDisplayModeUnplaceable) {
+            NSLog(@"DECORATED-PROFILE rejected=%@", remarksPlacement.rejectedCandidates);
+            for (FYInlinePlacement *p in app.lastInlineLayoutResult.placements) {
+                NSLog(@"DECORATED-PROFILE text=%@ source=%@ panel=%@", p.block.text,
+                      NSStringFromRect(p.sourceFrame), NSStringFromRect(p.translationFrame));
+            }
+        }
+        [app clearInlineTranslationPanels];
+    }
+}
+
+static void TestCompactProseIsNotAMenu(void) {
+    NSArray<NSArray<NSString *> *> *paragraphs = @[
+        @[@"桜井琉夏の兄。", @"悪態とクールの紙一重。"],
+        @[@"桜井琥一の弟。", @"スリルは彼の活力。"],
+        @[@"兄と同居している。", @"人混みは苦手らしい。"]];
+    for (NSArray<NSString *> *sentences in paragraphs) {
+        for (NSNumber *width in @[@0.23, @0.247]) {
+            NSArray<FYInlineTextBlock *> *blocks = Group(@[
+                Line(sentences[0], CGRectMake(.610, .129, .160, .051)),
+                Line(sentences[1], CGRectMake(.610, .079, width.doubleValue, .061))]);
+            Check(blocks.count == 1 && blocks.firstObject.kind == FYInlineBlockKindLong,
+                  @"紧排的完整短句在窄列及宽度阈值两侧均按正文处理");
+        }
+    }
+    for (NSArray<NSString *> *labels in @[@[@"設定", @"ロード"], @[@"予定（未定）", @"【状態】"]]) {
+        NSArray<FYInlineTextBlock *> *blocks = Group(@[
+            Line(labels[0], CGRectMake(.610, .129, .160, .051)),
+            Line(labels[1], CGRectMake(.610, .079, .160, .061))]);
+        BOOL allShort = blocks.count == 2;
+        for (FYInlineTextBlock *block in blocks) { allShort &= block.kind == FYInlineBlockKindShort; }
+        Check(allShort, @"紧排菜单和括号字段仍是独立短条目");
+    }
+}
+
+static void TestFieldSpaceDoesNotDependOnTextKind(void) {
+    CGRect viewport = CGRectMake(488, 472, 966, 546);
+    for (NSNumber *kind in @[@(FYInlineBlockKindShort), @(FYInlineBlockKindLong)]) {
+        FYInlineTextBlock *remarks = EntryBlock(@"桜井琉夏の兄。\n悪態とクールの紙一重。",
+                                               CGRectMake(.610, .079, .247, .102), kind.integerValue);
+        remarks.lineBoxes = @[[NSValue valueWithRect:CGRectMake(.610, .129, .160, .051)],
+                              [NSValue valueWithRect:CGRectMake(.610, .079, .247, .061)]];
+        remarks.lineTexts = @[@"桜井琉夏の兄。", @"悪態とクールの紙一重。"];
+        NSArray<FYInlineTextBlock *> *blocks = @[
+            EntryBlock(@"ガソリンスタンド", CGRectMake(.610, .263, .187, .038), FYInlineBlockKindShort),
+            EntryBlock(@"クラブ", CGRectMake(.517, .201, .070, .041), FYInlineBlockKindShort),
+            EntryBlock(@"帰宅部", CGRectMake(.610, .201, .070, .041), FYInlineBlockKindShort),
+            EntryBlock(@"備考", CGRectMake(.515, .130, .048, .047), FYInlineBlockKindShort), remarks];
+        NSArray *translations = @[@"加油站", @"社团", @"回家部", @"备注", @"樱井琉夏的哥哥。\n坏脾气与冷酷仅一线之隔。"];
+        NSMutableArray *requests = [NSMutableArray array];
+        for (NSUInteger i = 0; i < blocks.count; i++) {
+            [requests addObject:[FYInlineLayoutRequest requestWithBlock:blocks[i] translation:translations[i]
+                                                            sourceFrame:ScreenFrame(viewport, blocks[i].boundingBox)]];
+        }
+        FYInlineLayoutEngine *engine = [FYInlineLayoutEngine defaultEngine];
+        engine.shortFontSize = 14.51; engine.coverFontSize = 15.51;
+        engine.longBodyFontSize = 17.51; engine.minimumLongBodyFontSize = 13.51;
+        engine.longTitleFontSize = 12.51; engine.cardMaxWidth = 314.588;
+        engine.shortMaxWidth = 314.588 * 360 / 560;
+        FYInlineLayoutResult *result = [engine layoutRequests:requests viewport:viewport previous:nil];
+        FYInlinePlacement *p = [result placementForBlockID:remarks.blockID];
+        Check(DisplaysFullTranslation(p), @"空间判定独立于 Short/Long：有合法空隙时显示完整备注");
+        BOOL clear = DisplaysFullTranslation(p) && CGRectContainsRect(viewport, p.translationFrame);
+        for (FYInlinePlacement *other in result.placements) {
+            if (other == p) { continue; }
+            CGRect source = CGRectIntersection(p.translationFrame, other.sourceFrame);
+            CGRect panel = CGRectIntersection(p.translationFrame, other.translationFrame);
+            if ((!CGRectIsNull(source) && !CGRectIsEmpty(source)) ||
+                (other.mode != FYInlineDisplayModeUnplaceable && !CGRectIsNull(panel) && !CGRectIsEmpty(panel))) { clear = NO; }
+            Check(DisplaysFullTranslation(other), @"字段内避让也保留周围短字段的完整译文");
+        }
+        Check(clear, @"两类正文均在自己的字段附近，与其它原文、译文零重叠");
+    }
+}
+
+static void TestProfileRemarksAcrossCharactersAndViewports(void) {
+    // 琥一现场 23:50：备注译文比原文框高，居中时压到上方社团约 4pt。
+    // 使用真实译文、完整周边字段、生产分组/跟踪/渲染，并保留角色切换的前帧布局。
+    NSArray<NSValue *> *viewports = @[
+        [NSValue valueWithRect:CGRectMake(488, 472, 966, 546)],
+        [NSValue valueWithRect:CGRectMake(457, 454, 1018, 574)],
+        [NSValue valueWithRect:CGRectMake(250, 250, 1200, 680)]];
+    for (NSValue *value in viewports) {
+        for (NSNumber *fontSize in @[@14.51, @16]) {
+          for (NSNumber *width in @[@314.588, @560]) {
+            CGRect viewport = value.rectValue;
+            AppDelegate *app = EntryFixtureApp(viewport);
+            app.batchFontSizeSlider = [NSSlider sliderWithValue:fontSize.doubleValue minValue:10 maxValue:36 target:nil action:nil];
+            app.batchWidthSlider = [NSSlider sliderWithValue:width.doubleValue minValue:200 maxValue:800 target:nil action:nil];
+            app.batchHeightSlider = [NSSlider sliderWithValue:330 minValue:100 maxValue:600 target:nil action:nil];
+            [app applyBatchAppearanceToLayoutEngine];
+            for (NSNumber *character in @[@YES, @NO, @YES]) {
+                BOOL brother = character.boolValue;
+                NSString *first = brother ? @"桜井琉夏の兄。" : @"桜井琥一の弟。";
+                NSString *second = brother ? @"悪態とクールの紙一重。" : @"スリルは彼の活力。";
+                NSString *translation = brother ? @"樱井琉夏的哥哥。\n坏脾气与冷酷仅一线之隔。" :
+                                                  @"樱井琥一的弟弟。\n刺激是他的活力来源。";
+                NSMutableArray<OCRTextItem *> *raw = [NSMutableArray array];
+                for (FYInlineTextLine *line in FieldFrameLines()) {
+                    NSString *text = line.text;
+                    CGRect box = line.rect;
+                    if ([text isEqualToString:@"帰宅部"]) { box = CGRectMake(.608, .201, .072, .041); }
+                    if ([text isEqualToString:@"桜井琥一の弟。"]) { text = first; box = CGRectMake(.610, .129, .160, .051); }
+                    if ([text isEqualToString:@"スリルは彼の活力。"]) {
+                        text = second; box = CGRectMake(.610, .079, brother ? .2474 : .203, .0609);
+                    }
+                    if (brother && [text isEqualToString:@"桜井 琉夏"]) { text = @"桜井 琥一"; }
+                    if (brother && [text isEqualToString:@"RUKA SAKURAI"]) { text = @"KOUICHI SAKURAI"; }
+                    if (brother && [text isEqualToString:@"花屋アンネリー"]) { text = @"ガソリンスタンド"; }
+                    [raw addObject:EntryItem(text, box, InlineBlockKindShort, nil)];
+                }
+                NSArray *grouped = [app filteredInlineTextItems:[app mergedInlineTextItemsFromItems:raw] strict:NO];
+                NSArray<OCRTextItem *> *stable = nil;
+                for (NSUInteger frame = 0; frame < 4; frame++) { stable = [app.inlineFrameStabilizer observeItems:grouped]; }
+                NSMutableArray<NSString *> *translations = [NSMutableArray array];
+                for (OCRTextItem *item in stable) {
+                    NSDictionary *labels = @{@"クラブ": @"社团", @"備考": @"备注", @"身長": @"身高",
+                                             @"体重": @"体重", @"バイト": @"打工", @"電話": @"电话"};
+                    NSString *translated = labels[item.text] ?: @"菜单译文";
+                    if ([item.text containsString:@"帰宅部"]) { translated = @"回家部"; }
+                    if ([item.text containsString:first]) { translated = translation; }
+                    if ([item.text containsString:kBodyNeedle]) { translated = kBodyTranslation; }
+                    [translations addObject:translated];
+                }
+                [app showInlineTranslations:translations forItems:stable placementRect:viewport];
+                FYInlinePlacement *remarks = nil, *club = nil;
+                for (FYInlinePlacement *p in app.lastInlineLayoutResult.placements) {
+                    if ([p.block.text containsString:first]) { remarks = p; }
+                    if ([p.block.text containsString:@"帰宅部"]) { club = p; }
+                }
+                NSString *context = [NSString stringWithFormat:@"角色切换 %@ %.0fx%.0f 字号%.2f 宽%.0f",
+                                     brother ? @"琥一" : @"琉夏", NSWidth(viewport), NSHeight(viewport), fontSize.doubleValue, width.doubleValue];
+                Check(remarks && club && remarks != club && DisplaysFullTranslation(remarks) &&
+                      remarks.block.kind == FYInlineBlockKindLong &&
+                      club.mode == FYInlineDisplayModeShortLabel && [remarks.translation isEqualToString:translation],
+                      [context stringByAppendingFormat:@"：社团与完整备注分别显示（备注 mode=%ld %@）",
+                       (long)remarks.mode, remarks.reason]);
+                if (!DisplaysFullTranslation(remarks)) { continue; }
+                BOOL clear = CGRectContainsRect(viewport, remarks.translationFrame);
+                for (FYInlinePlacement *other in app.lastInlineLayoutResult.placements) {
+                    if (other == remarks) { continue; }
+                    CGRect sourceHit = CGRectIntersection(remarks.translationFrame, other.sourceFrame);
+                    if (!CGRectIsNull(sourceHit) && !CGRectIsEmpty(sourceHit)) { clear = NO; }
+                    if (other.mode != FYInlineDisplayModeUnplaceable) {
+                        CGRect panelHit = CGRectIntersection(remarks.translationFrame, other.translationFrame);
+                        if (!CGRectIsNull(panelHit) && !CGRectIsEmpty(panelHit)) { clear = NO; }
+                    }
+                }
+                Check(clear, [context stringByAppendingString:@"：备注在画面内且与其它原文、译文零重叠"]);
+            }
+            [app clearInlineTranslationPanels];
+          }
+        }
+    }
 }
 
 static OCRTextItem *ProfileBodyItem(void) {
@@ -910,6 +1204,50 @@ static void TestScreenshots(void) {
 
 #pragma mark - main
 
+@interface CleanSourceOCRApp : AppDelegate
+@property(nonatomic, copy) NSArray<OCRTextItem *> *fixture;
+@end
+@implementation CleanSourceOCRApp
+- (NSArray<OCRTextItem *> *)recognizeTextItemsInImage:(CGImageRef)image fastOCR:(BOOL)fast
+                                    languageSegment:(NSInteger)language error:(NSError **)error { return self.fixture; }
+@end
+
+static void TestSourceTextSurvivesIdenticalTranslations(void) {
+    CleanSourceOCRApp *app = [CleanSourceOCRApp new];
+    NSArray *texts = @[@"4月12日（日）", @"学力", @"1年目"];
+    NSMutableArray *items = [NSMutableArray array];
+    for (NSUInteger i = 0; i < texts.count; i++) {
+        OCRTextItem *item = [OCRTextItem new]; item.text = texts[i];
+        item.boundingBox = CGRectMake(.1+i*.25, .8, .2, .05); [items addObject:item];
+        app.inlineTranslationCache[texts[i]] = texts[i];
+    }
+    app.fixture = items;
+    for (NSInteger frame = 0; frame < 6; frame++) {
+        NSArray *blocks = nil;
+        NSString *text = [app recognizeTextBlocksInImage:NULL fastOCR:NO languageSegment:0 blocks:&blocks error:NULL];
+        Check(blocks.count == texts.count && [text containsString:@"4月12日（日）"] && [text containsString:@"学力"],
+              @"干净采集源中的日期与同形汉字不会因为已经翻译过而被删");
+    }
+}
+
+static void TestBracketedFieldDoesNotAbsorbBackground(void) {
+    // 22:21 实机日志：动画背景上的「クラ」间歇出现，旧分组把日期中的括号
+    // 当成正文句读证据，导致日期译文在单行与两行之间反复变化。
+    for (NSString *date in @[@"4月12日（日）", @"予定（未定）", @"【ステータス】"]) {
+        NSArray *blocks = Group(@[
+            Line(date, CGRectMake(.7017, .9201, .1967, .0533)),
+            Line(@"クラ", CGRectMake(.8133, .8225, .0333, .0267))
+        ]);
+        Check(blocks.count == 2 && [((FYInlineTextBlock *)blocks.firstObject).text isEqualToString:date],
+              @"括号字段与较远的背景短字保持独立");
+    }
+    NSArray *prose = Group(@[
+        Line(@"桜井琥一の弟。", CGRectMake(.6098, .1296, .1539, .0509)),
+        Line(@"スリルは彼の活力。", CGRectMake(.6095, .0791, .2028, .0618))
+    ]);
+    Check(prose.count == 1, @"真正的连续备注仍组成一个段落");
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         unsetenv("FUYI_DIAG");
@@ -922,6 +1260,15 @@ int main(int argc, const char *argv[]) {
         TestCrowdedSceneKeepsEntry();
         TestFieldLikeSceneReproduction();
         TestFieldFrameRealScene();
+        TestProfileFieldGroupingUnderOCRJitter();
+        TestProfileRowsWithoutRecognizedLabels();
+        TestBracketedFieldDoesNotAbsorbBackground();
+        TestSourceTextSurvivesIdenticalTranslations();
+        TestCombinedVisionObservationUsesSeparateFieldRows();
+        TestDecoratedProfileValueKeepsSeparateTranslation();
+        TestCompactProseIsNotAMenu();
+        TestFieldSpaceDoesNotDependOnTextKind();
+        TestProfileRemarksAcrossCharactersAndViewports();
         TestMultilineShortBlockStillGetsEntry();
         TestTinyViewportKeepsEverythingListed();
         TestDuplicateOCRBoxIsNotAFalseConflict();

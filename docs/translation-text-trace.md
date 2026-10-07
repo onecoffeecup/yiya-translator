@@ -46,7 +46,7 @@ python3 scripts/translation-trace.py stop
 
 每行是一个 JSON 对象，含 `time_unix_ms`、`session`、`cycle`、`window_id`、运行代次；翻译路径增加 `request_id`，可关联身份、缓存、网络完成和应用结果。
 
-- `ocr`：已有 OCR 的过滤后第一遍、精读合并结果和模态区域结果；`ocr_lines` 含文本与归一化框，坐标原点在左下。它不是额外识别请求，也不包含图像。
+- `ocr`：`pass1_filtered` 为第一遍后处理结果，`merged` 为精读合并结果，`modal_scoped` 为模态区域结果；界面模式增加 `inline_grouped`（分组与过滤后）和 `inline_stable`（跨帧确认后）。`ocr_lines` 含文本与归一化框，坐标原点在左下。历史构建的 `pass1_filtered` 曾按已有译文删除同文原文，不能把该阶段的缺字直接判定成 Vision 漏读；本轮干净源图已取消此过滤。
 - `mode`、`stable`、`skip`：自动判别、候选计数、等待稳定、重复文字和节流等跳过原因。不会额外调用稳定判定。
 - `dialogue`：提取的对白、身份关联后的实际原文、句子 ID 和版本。`identity_request_id` 是学习协调器身份中的编号，与本次诊断 `request_id` 分开。
 - `cache`：对白及贴译的命中/未命中；命中时没有 `request_submit` 属于正常行为。
@@ -65,4 +65,19 @@ bash scripts/run-translation-trace-tests.sh
 
 ## 加载到安装版
 
-2026-10-07 更新的 v0.2.0 附件已包含此模块。更新本机安装版时，先正常退出译芽，再按首次打开说明替换应用；从源码构建则可运行 `bash scripts/install-app.sh`，它会备份并替换原应用。安装脚本不是诊断开关的一部分。新版打开后，文字开关可动态启停，无需为每次采样重启。
+此前 v0.2.0 附件已包含文字诊断模块；本轮新增的界面贴译稳定修复仅完成本机安装，尚未更新公开附件。2026-10-07 安装后的现场采样见 [界面 OCR 稳定说明](inline-ocr-stability.md)。后续代码变动需从当前维护源码重新安装，不能把源码修改视作已进入正在运行的应用。安装时先正常退出译芽，运行 `bash scripts/install-app.sh`，再打开 `~/Applications/译芽.app`；安装脚本会打包、备份并替换原应用。文字诊断开关可动态启停，无需为每次采样重启。
+
+## 界面稳定性排查与离线回放
+
+先按同一个 `cycle` 对照 `modal_scoped`、`inline_grouped`、`inline_stable`，区分源观察、分组变化和确认后变化；再看缓存、请求与 `inline_apply`。首次界面确认可能记录 `inline_frame_confirming`；背景短字出现在观察中不等于已替换原字段。`inline_apply` 仍不能证明全部面板可见。
+
+在维护源码目录中，可用已授权收集的本机日志离线回放：
+
+```sh
+FY_TEST_ALLOW_UI=1 FY_INLINE_REPLAY_PATH=/absolute/path/to/events.jsonl \
+  scripts/run-learning-app-tests.sh InlineOCRFrameReplayTests
+```
+
+当前回放套件针对资料页独立字段和日期背景误合并场景，需要至少 10 个 `modal_scoped` 帧；不是任意日志通用验收器。它调用生产分组、过滤和跟踪，仅打印计数与耗时，不启动采集、发起网络请求或读取凭据。历史文字日志可能已有上游过滤缺字，回放不能恢复缺失观察，也不能替代安装后的现场采样。
+
+本轮采样开关已停止，日志未复制到文档或发布包；验证计数见 [界面 OCR 稳定说明](inline-ocr-stability.md)。

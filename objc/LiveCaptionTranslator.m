@@ -2,7 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
 #import <Vision/Vision.h>
-#import <Security/Security.h>
+#import "FYLocalAPIKeyStore.h"
 #import "learning/FYLearningModels.h"
 #import "learning/FYLearningStore.h"
 #import "learning/FYLearningAnalyzer.h"
@@ -33,60 +33,6 @@
 #import "learning/FYGlobalShortcuts.h"
 
 static NSString *const SettingsKey = @"LiveCaptionTranslator.settings.v1";
-static NSString *const FYAPIKeyService = @"com.nanami.yiya.translation";
-static NSString *const FYAPIKeyAccount = @"api-key";
-
-#ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
-static NSString *FYTestKeychainValue;
-static BOOL FYTestKeychainFailWrites;
-static OSStatus FYReadAPIKey(NSString **value) {
-    if (value) { *value = FYTestKeychainValue; }
-    return FYTestKeychainValue ? errSecSuccess : errSecItemNotFound;
-}
-static OSStatus FYWriteAPIKey(NSString *value) {
-    if (FYTestKeychainFailWrites) { return errSecAuthFailed; }
-    FYTestKeychainValue = value.length ? [value copy] : nil;
-    return errSecSuccess;
-}
-#else
-static NSDictionary *FYAPIKeyQuery(void) {
-    return @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-             (__bridge id)kSecAttrService: FYAPIKeyService,
-             (__bridge id)kSecAttrAccount: FYAPIKeyAccount};
-}
-static OSStatus FYReadAPIKey(NSString **value) {
-    if (value) { *value = nil; }
-    NSMutableDictionary *query = [FYAPIKeyQuery() mutableCopy];
-    query[(__bridge id)kSecReturnData] = @YES;
-    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
-    CFTypeRef result = NULL;
-    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
-    if (status != errSecSuccess) { return status; }
-    NSData *data = CFBridgingRelease(result);
-    NSString *decoded = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (!decoded) { return errSecDecode; }
-    if (value) { *value = decoded; }
-    return errSecSuccess;
-}
-static OSStatus FYWriteAPIKey(NSString *value) {
-    NSDictionary *query = FYAPIKeyQuery();
-    if (!value.length) {
-        OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
-        return status == errSecItemNotFound ? errSecSuccess : status;
-    }
-    NSData *data = [value dataUsingEncoding:NSUTF8StringEncoding];
-    if (!data) { return errSecParam; }
-    NSMutableDictionary *item = [query mutableCopy];
-    item[(__bridge id)kSecValueData] = data;
-    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
-    if (status == errSecDuplicateItem) {
-        status = SecItemUpdate((__bridge CFDictionaryRef)query,
-                               (__bridge CFDictionaryRef)@{(__bridge id)kSecValueData: data});
-    }
-    return status;
-}
-#endif
-
 static NSString *FYAppearanceColorHex(NSColor *color) {
     NSColor *rgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
     if (!rgb) { return @"#593E2B"; }
@@ -671,6 +617,14 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 // 最近一次真正渲染过的译文/原文块：几何变化时用它重排，不重新请求翻译。
 @property(nonatomic, copy) NSArray<NSString *> *lastInlineRenderedTranslations;
 @property(nonatomic, copy) NSArray<OCRTextItem *> *lastInlineRenderedItems;
+@property(nonatomic, strong) FYInlineOCRFrameStabilizer *inlineFrameStabilizer;
+// A raw OCR string can stay identical while its line boundaries change. Require
+// two matching frames before replacing the currently rendered grouping.
+@property(nonatomic, copy) NSArray<NSString *> *inlinePendingGroupedTexts;
+@property(nonatomic) NSInteger inlinePendingGroupedCount;
+@property(nonatomic, copy) NSArray<NSValue *> *lastInlineLayoutBoxes;
+@property(nonatomic, copy) NSString *lastInlineLayoutContentKey;
+@property(nonatomic, copy) NSString *lastInlineLayoutGeometryKey;
 // 最近一次渲染时用的几何上下文。和 lastDisplayGeometryToken 不一致 =
 // 画面目标/区域已经变了但贴译还是按旧几何渲染的 → 必须重排（哪怕文本一个字都没变）。
 @property(nonatomic, copy) NSString *lastInlineRenderGeometryToken;
@@ -696,6 +650,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic) NSUInteger inlineOverflowCount;
 @property(nonatomic) NSUInteger inlineOverflowPanelCount;
 @property(nonatomic, strong) NSArray<NSDictionary *> *inlineOverflowEntries;
+@property(nonatomic) NSUInteger inlineOverflowCandidateCount;
+@property(nonatomic) NSUInteger inlineOverflowCandidateFrames;
+@property(nonatomic) NSTimeInterval inlineOverflowEmptySince;
+- (void)expireInlineOverflowEntryIfNeeded;
 @property(nonatomic, strong) id inlineOverflowChoiceKeyMonitor;
 @property(nonatomic, strong) id inlineExpandedReadingKeyMonitor;
 @property(nonatomic, strong) NSPanel *captureCalibrationPanel;
@@ -763,6 +721,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) NSSlider *batchWidthSlider;
 @property(nonatomic, strong) NSSlider *batchHeightSlider;
 @property(nonatomic, strong) NSColorWell *batchTextColorWell;
+@property(nonatomic, strong) NSTimer *batchAppearanceTimer;
 @property(nonatomic, strong) NSSegmentedControl *captionThemeControl;
 @property(nonatomic, strong) NSButton *stableTextCheckbox;
 @property(nonatomic, strong) NSButton *fastOCRCheckbox;
@@ -820,6 +779,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) FYOCRStabilityOwner *ocrStabilityOwner;
 @property(nonatomic, copy) NSString *stableCandidate;
 @property(nonatomic) NSInteger stableCandidateCount;
+@property(nonatomic, copy) NSString *inlineOCRPendingText;
+@property(nonatomic) NSInteger inlineOCRPendingCount;
 @property(nonatomic) NSInteger translationCount;
 @property(nonatomic, strong) NSMutableArray<NSPanel *> *inlineTranslationPanels;
 @property(nonatomic, strong) NSMutableArray<NSPanel *> *inlineLongCardPanels;
@@ -1006,6 +967,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.inlineManualOffsetAge = [NSMutableDictionary dictionary];
     self.inlineStableBlockIDs = [NSMutableDictionary dictionary];
     self.inlineTranslationCache = [NSMutableDictionary dictionary];
+    self.inlineFrameStabilizer = [FYInlineOCRFrameStabilizer new];
     self.lastTranslatedNormalizedText = @"";
     self.lastSubmittedNormalizedText = @"";
     self.stableCandidate = @"";
@@ -1853,7 +1815,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)selectWordAtCharacterIndex:(NSUInteger)characterIndex {
-    NSString *text = self.learningSourceTextView.string ?: @"";
+    NSString *text = [self.learningSourceTextView.string copy] ?: @"";
     NSString *sentenceID = self.displayedSentenceID;
     NSInteger version = self.displayedVersion;
     NSInteger generation = ++self.vocabSelectionGeneration;
@@ -3021,7 +2983,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSStackView *row = [self horizontalStack];
     [row addArrangedSubview:[NSButton buttonWithTitle:@"测试翻译" target:self action:@selector(testTranslation:)]];
     [stack addArrangedSubview:row];
-    [stack addArrangedSubview:[self label:@"实时翻译使用实时模型；翻译当前界面使用模型名；语法分析使用学习模型，留空则复用模型名。API Key 保存在 macOS 钥匙串。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
+    [stack addArrangedSubview:[self label:@"实时翻译使用实时模型；翻译当前界面使用模型名；语法分析使用学习模型，留空则复用模型名。API Key 保存在本机应用数据文件；同一版本自动读取，新版本需重新填写。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
     [stack addArrangedSubview:[self label:@"服务状态以测试翻译的结果为准。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
     self.serviceErrorLabel = [self label:@"" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor systemRedColor]];
     self.serviceErrorLabel.maximumNumberOfLines = 3;
@@ -3599,6 +3561,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 这条轮询保证"切到全屏投影"能在一拍之内被发现，而不是等下次 OCR 回调。
     // 正在手动框选识别区域时不重排，避免和用户的操作抢面板。
     if (self.running && !self.selectingCaptureRegion) { [self refreshDisplayGeometryIfNeeded:NO]; }
+    [self expireInlineOverflowEntryIfNeeded];
     // 仍然走可覆盖的 translationTargetIsForeground（测试沿用同一个接缝）。
     BOOL targetActive = !self.selectingCaptureRegion && [self translationTargetIsForeground];
     NSArray *visibleWindows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
@@ -3629,7 +3592,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     BOOL expanded = self.inlineExpandedReadingPanel != nil;
     for (NSPanel *panel in overlays) {
         panel.level = overlayLevel;
-        if (FYOverlayShouldShow(targetActive, expanded, panel == self.inlineExpandedReadingPanel)) {
+        BOOL hasContent = panel != self.inlineOverflowPanel || self.inlineOverflowCount > 0;
+        if (hasContent && FYOverlayShouldShow(targetActive, expanded, panel == self.inlineExpandedReadingPanel)) {
             if (!panel.isVisible) { [panel orderFrontRegardless]; }
         } else if (panel.isVisible) {
             [panel orderOut:nil];
@@ -3769,29 +3733,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSInteger languageSegment = self.languageControl.selectedSegment;
     self.learningCoordinator.japaneseMode = (languageSegment == 0);
 
-    // 在**主线程**上把几何快照好：后台线程不该读 AppKit 控件。
-    // 采集卡模式下画面不是屏幕内容，浮窗不可能出现在视频里；
-    // 而且视频像素坐标和屏幕坐标没有可靠换算，套用窗口比例会误排除真实对白，所以留空。
-    NSMutableArray<NSValue *> *exclusionSnapshot = [NSMutableArray array];
-    WindowItem *snapshotWindow = captureCard ? nil : [self displayTargetWindowItem];
-    if (snapshotWindow) {
-        NSRect windowFrame = [self appKitFrameForWindowItem:snapshotWindow];
-        if (NSWidth(windowFrame) >= 2 && NSHeight(windowFrame) >= 2) {
-            NSMutableArray<NSPanel *> *panels = [NSMutableArray array];
-            if (self.captionPanel) { [panels addObject:self.captionPanel]; }
-            [panels addObjectsFromArray:self.inlineTranslationPanels];
-            [panels addObjectsFromArray:self.inlineLongCardPanels];
-            for (NSPanel *panel in panels) {
-                NSRect frame = panel.frame;
-                CGFloat nx = (NSMinX(frame) - NSMinX(windowFrame)) / NSWidth(windowFrame);
-                CGFloat ny = (NSMinY(frame) - NSMinY(windowFrame)) / NSHeight(windowFrame);
-                CGFloat nw = NSWidth(frame) / NSWidth(windowFrame);
-                CGFloat nh = NSHeight(frame) / NSHeight(windowFrame);
-                if (nw <= 0 || nh <= 0) { continue; }
-                [exclusionSnapshot addObject:[NSValue valueWithRect:NSMakeRect(nx, ny, nw, nh)]];
-            }
-        }
-    }
+    // 两种输入都不包含译芽浮窗：窗口截图只取 IncludingWindow，采集卡只取视频帧。
+    // 不能按屏幕浮窗位置遮掉这些干净源图，否则恢复模态过滤后会把真实正文误删。
+    NSArray<NSValue *> *exclusionSnapshot = @[];
 
     CGRect ocrScope=[self selectedOCRScope];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -3814,7 +3758,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             NSArray *scoped=[FYOCRManager recognizeImage:fullImage topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
                 return [self recognizeTextItemsInImage:cropped fastOCR:fastOCR languageSegment:languageSegment error:innerError];
             } error:&error];
-            ocrText=[FYOCRManager postprocessedTextForItems:scoped renderedTexts:RenderedTranslationSet(self.captionTextLabel.stringValue,self.inlineTranslationCache) blocks:&ocrBlocks];
+            ocrText=[FYOCRManager sourceTextForItems:scoped blocks:&ocrBlocks];
         }
         NSTimeInterval pass1Duration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         [[FYRuntimeDiagnostics shared] recordEvent:@"ocr" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"blocks": @(ocrBlocks.count), @"error_code": @(error.code), @"elapsed_ms": @(pass1Duration * 1000), @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage))}];
@@ -3882,6 +3826,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
             NSString *normalized = NormalizeForComparison(ocrText);
             if (normalized.length < 2) {
+                if ([self effectiveModeSegment] == ContentModeUI) { [self.inlineFrameStabilizer observeItems:@[]]; }
+                [[self stabilityOwner] reset];
                 FYTrace(trace, @"skip", @{@"reason": @"ocr_empty"});
                 [self setStatus:[NSString stringWithFormat:@"等待识别字幕 · OCR %.1fs", ocrDuration]];
                 self.inFlight = NO;
@@ -3895,7 +3841,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             NSInteger tracePreviousMode = self.detectedModeSegment;
             {
                 NSInteger previousMode = self.detectedModeSegment;
-                NSInteger committedMode = [self stableContentModeForBlocks:ocrBlocks];
+                // Keep the user's chooser/reading card alive during OCR dropouts.
+                NSInteger committedMode = (self.inlineOverflowChoicePanel || self.inlineExpandedReadingPanel)
+                    ? previousMode : [self stableContentModeForBlocks:ocrBlocks];
                 if (previousMode != committedMode) {
                     FYTrace(trace, @"caption_drop", @{@"reason": @"mode_changed", @"previous_mode": @(previousMode), @"mode": @(committedMode)});
                     NSString *switched = committedMode == ContentModeUI ? @"自动判别：功能界面 → 切换为贴译" : @"自动判别：剧情对白 → 切换为字幕";
@@ -3907,6 +3855,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                     [self clearInlineTranslationPanels];
                     self.lastTranslatedNormalizedText = nil;
                     self.lastSubmittedNormalizedText = nil;
+                    [[self stabilityOwner] reset];
                     self.latestTranslationLabel.stringValue = @"等待译文";
                     self.latestSourceLabel.stringValue = @"";
                 }
@@ -3915,19 +3864,68 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             FYTrace(trace, @"mode", @{@"auto_mode": @YES, @"previous_mode": @(tracePreviousMode),
                                      @"mode": @([self effectiveModeSegment]), @"candidate_mode": @(self.candidateModeSegment),
                                      @"candidate_hits": @(self.candidateModeHits)});
+            NSInteger currentFrameMode = [self effectiveModeSegment];
+            NSArray<OCRTextItem *> *observedUIItems = currentFrameMode == ContentModeUI
+                ? [self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:modalScopedBlocks] strict:NO]
+                : nil;
+            NSArray<OCRTextItem *> *currentUIItems = nil;
+            if (currentFrameMode == ContentModeUI) {
+                FYTrace(trace, @"ocr", @{@"stage": @"inline_grouped", @"ocr_lines": FYTraceOCRLines(observedUIItems),
+                                         @"blocks": @(observedUIItems.count)});
+                currentUIItems = [self.inlineFrameStabilizer observeItems:observedUIItems];
+                if (!self.inlineFrameStabilizer.ready) {
+                    FYTrace(trace, @"stable", @{@"reason": @"inline_frame_confirming", @"stable_count": @1});
+                    [self setStatus:@"正在确认界面文字"];
+                    self.inFlight = NO;
+                    return;
+                }
+                FYTrace(trace, @"ocr", @{@"stage": @"inline_stable", @"ocr_lines": FYTraceOCRLines(currentUIItems),
+                                         @"blocks": @(currentUIItems.count)});
+                normalized = NormalizeForComparison([[currentUIItems valueForKey:@"text"] componentsJoinedByString:@"\n"]);
+            }
             double translatedSimilarity = SimilarityRatio(normalized, self.lastTranslatedNormalizedText ?: @"");
             double submittedSimilarity = SimilarityRatio(normalized, self.lastSubmittedNormalizedText ?: @"");
-            NSInteger currentFrameMode = [self effectiveModeSegment];
 
             // 「文本相同」只能跳过**网络翻译**，不能跳过窗口边界/映射复核和贴译重排。
             // 实际显示目标（OBS 编辑器 ↔ 全屏投影）换过、而渲染还是按旧目标做的时候，
             // 必须继续往下走：走的是缓存命中路径（translateInlineTextItems 直接命中缓存），
             // 不会重新请求翻译，但会用**这一帧**的原文块把贴译排到新位置上。
-            BOOL sameTextAsRendered = [self isSameSubtitleText:normalized comparedTo:self.lastTranslatedNormalizedText];
+            BOOL sameTextAsRendered = currentFrameMode == ContentModeUI
+                ? [normalized isEqualToString:(self.lastTranslatedNormalizedText ?: @"")]
+                : [self isSameSubtitleText:normalized comparedTo:self.lastTranslatedNormalizedText];
             BOOL geometryChangedSinceRender = currentFrameMode == ContentModeUI &&
                 ![(self.lastInlineRenderGeometryToken ?: @"") isEqualToString:(self.lastDisplayGeometryToken ?: @"")];
+            if (currentFrameMode == ContentModeUI && currentUIItems.count == self.lastInlineRenderedItems.count) {
+                for (NSUInteger index = 0; index < currentUIItems.count; index++) {
+                    CGRect old = self.lastInlineRenderedItems[index].boundingBox;
+                    CGRect now = currentUIItems[index].boundingBox;
+                    if (MAX(MAX(fabs(NSMinX(old)-NSMinX(now)), fabs(NSMinY(old)-NSMinY(now))),
+                            MAX(fabs(NSWidth(old)-NSWidth(now)), fabs(NSHeight(old)-NSHeight(now)))) >= 0.010) {
+                        geometryChangedSinceRender = YES;
+                        break;
+                    }
+                }
+            }
+            BOOL groupingChangedSinceRender = NO;
+            if (currentFrameMode == ContentModeUI && currentUIItems.count > 0 && self.lastInlineRenderedItems.count > 0) {
+                NSArray<NSString *> *currentTexts = [currentUIItems valueForKey:@"text"];
+                NSArray<NSString *> *renderedTexts = [self.lastInlineRenderedItems valueForKey:@"text"];
+                if (![currentTexts isEqualToArray:renderedTexts]) {
+                    if ([currentTexts isEqualToArray:self.inlinePendingGroupedTexts]) { self.inlinePendingGroupedCount += 1; }
+                    else { self.inlinePendingGroupedTexts = currentTexts; self.inlinePendingGroupedCount = 1; }
+                    groupingChangedSinceRender = self.inlinePendingGroupedCount >= 2;
+                } else {
+                    self.inlinePendingGroupedTexts = nil;
+                    self.inlinePendingGroupedCount = 0;
+                }
+            }
 
-            if (sameTextAsRendered && !geometryChangedSinceRender) {
+            if (sameTextAsRendered && !geometryChangedSinceRender && !groupingChangedSinceRender) {
+                self.inlineOCRPendingText = nil;
+                self.inlineOCRPendingCount = 0;
+                // A restored frame interrupts a candidate correction. Without
+                // this reset, intermittent OCR noise can accumulate two hits.
+                [[self stabilityOwner] reset];
                 // 文本没变时不再走渲染路径，展开态记账要在这里补一次：
                 // 否则"这一块已从页面消失"会停在第一帧，阅读卡一直留在画面上。
             [self advanceExpandedReadingState];
@@ -3940,6 +3938,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated_geometry_changed"});
                 [self setStatus:[NSString stringWithFormat:@"画面位置变化 · 用已有译文重排 · OCR %.1fs", ocrDuration]];
             }
+            // UI OCR changes have already been confirmed per on-screen block by
+            // inlineFrameStabilizer. A second whole-page text gate would make a
+            // real edit wait indefinitely when unrelated background text jitters.
 
             // 节流阈值按模式分开：
             //   对白模式 4 秒 —— 防 OCR 抖动、防同一句台词反复请求
@@ -3947,7 +3948,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             //                      让它等满 4 秒没道理，实测会变成“过了 5 秒才翻出来”
             NSTimeInterval attemptThrottle = [self translationAttemptThrottleForMode:currentFrameMode];
 
-            if ([[self translationState] shouldThrottleText:normalized geometryChanged:geometryChangedSinceRender interval:attemptThrottle
+            if (!groupingChangedSinceRender && [[self translationState] shouldThrottleText:normalized geometryChanged:geometryChangedSinceRender interval:attemptThrottle
                 equivalent:^BOOL(NSString *current, NSString *previous) { return [self isSameSubtitleText:current comparedTo:previous]; }
                 now:^NSDate *{ return [NSDate date]; }]) {
             [self advanceExpandedReadingState];
@@ -3992,7 +3993,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             NSInteger frameMode = [self effectiveModeSegment];
 
             if (frameMode == ContentModeUI) {
-                NSMutableArray<OCRTextItem *> *uiItems = [[self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:modalScopedBlocks] strict:NO] mutableCopy];
+                NSMutableArray<OCRTextItem *> *uiItems = [currentUIItems mutableCopy];
                 if (uiItems.count == 0) {
                     FYTrace(trace, @"skip", @{@"reason": @"ui_no_translatable_items", @"route": @"ui"});
                     if (captureCard) {
@@ -4078,18 +4079,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             // 对白模式：对白框照常进悬浮字幕窗，上方的选项单独贴到原选项旁边。
             // 街景招牌、公告牌这类环境文本不会进 band，所以不会被翻译。
             FuyiDiagLog(@"  -> ROUTE DIALOGUE(caption)");
-            // 断掉反馈环：字幕窗里正显示着的译文、以及贴译面板上的译文，
-            // 都可能被这一轮 OCR 读回来当成“新的对白”。实测名字框旁的译文被读成
-            // 一行新对白，屏幕上就多出莫名其妙的句子。
-            NSSet<NSString *> *alreadyRendered = RenderedTranslationSet(self.captionTextLabel.stringValue,
-                                                                       self.inlineTranslationCache);
-            NSMutableArray<OCRTextItem *> *freshBlocks = [NSMutableArray arrayWithCapacity:ocrBlocks.count];
-            for (OCRTextItem *block in ocrBlocks) {
-                NSString *normalizedBlock = NormalizeForComparison(block.text);
-                if (normalizedBlock.length > 0 && [alreadyRendered containsObject:normalizedBlock]) { continue; }
-                [freshBlocks addObject:block];
-            }
-            NSArray<OCRTextItem *> *dialogueSource = freshBlocks;
+            // Both capture paths contain only source pixels. Matching an existing
+            // translation does not make an original date/name/kanji an overlay.
+            NSArray<OCRTextItem *> *dialogueSource = ocrBlocks;
 
             NSArray<OCRTextItem *> *bandItems = SubtitleBandItemsFromBlocks(dialogueSource);
             NSMutableArray<OCRTextItem *> *dialogueItems = [NSMutableArray array];
@@ -4842,7 +4834,18 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     }
     BOOL batchAppearanceChanged = sender && (sender == self.batchFontSizeSlider ||
         sender == self.batchWidthSlider || sender == self.batchHeightSlider || sender == self.batchTextColorWell);
-    if (batchAppearanceChanged) { [self applyBatchAppearanceToLayoutEngine]; }
+    if (batchAppearanceChanged) {
+        // 连续滑条只提交最新尺寸；不要在每个鼠标事件里测量、避让并刷新所有窗口。
+        // 字色只影响绘制，原位更新即可，保留字号、选区和滚动位置。
+        [self applyBatchAppearanceToLayoutEngine];
+        if (sender == self.batchTextColorWell) {
+            [self refreshInlinePanelTextAppearance];
+        } else {
+            [self scheduleBatchAppearanceLayout];
+        }
+        [self scheduleSettingsSave];
+        return;
+    }
     if (sender && (sender==self.manualOCRScopeCheckbox || sender==self.regionXSlider || sender==self.regionYSlider || sender==self.regionWidthSlider || sender==self.regionHeightSlider)) {
         self.translationGeneration+=1;
         [self.translationTaskOwner cancelActiveTask];
@@ -4855,20 +4858,29 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     }
     [self clampRegionSliders];
     [self updateCaptionAppearance];
-    if (batchAppearanceChanged && self.lastInlineRenderedTranslations.count > 0 && self.lastInlineRenderedItems.count > 0) {
-        NSRect placement = NSZeroRect;
-        if ([self inlinePlacementRect:&placement reason:NULL]) {
-            self.lastInlineTranslationKey = nil;
-            self.lastInlineLayoutResult = nil;
-            [self showInlineTranslations:self.lastInlineRenderedTranslations forItems:self.lastInlineRenderedItems placementRect:placement];
-        }
-    }
     [self updateThemeSummary];
     [self updateOCRPreviewIfVisible];
     if (self.running && sender == self.intervalSlider) {
         [self restartTimerIfRunning];
     }
     [self scheduleSettingsSave];
+}
+
+- (void)scheduleBatchAppearanceLayout {
+    if (self.batchAppearanceTimer || self.lastInlineRenderedTranslations.count == 0 || self.lastInlineRenderedItems.count == 0) { return; }
+    __weak typeof(self) weakSelf = self;
+    self.batchAppearanceTimer = [NSTimer timerWithTimeInterval:1.0 / 30.0 repeats:NO block:^(NSTimer *timer) {
+        AppDelegate *app = weakSelf;
+        app.batchAppearanceTimer = nil;
+        NSRect placement = NSZeroRect;
+        // 读取执行时的内容和几何：停止、换页或换窗口后不恢复旧字幕。
+        if (app.lastInlineRenderedTranslations.count > 0 && app.lastInlineRenderedItems.count > 0 &&
+            [app inlinePlacementRect:&placement reason:NULL]) {
+            [app showInlineTranslations:app.lastInlineRenderedTranslations forItems:app.lastInlineRenderedItems placementRect:placement];
+        }
+    }];
+    // AppKit 的滑条在事件跟踪模式中运行；普通模式的 timer 会等到松手才刷新。
+    [NSRunLoop.mainRunLoop addTimer:self.batchAppearanceTimer forMode:NSRunLoopCommonModes];
 }
 
 - (void)selectOCRRegion:(id)sender {
@@ -5153,6 +5165,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         NSArray<OCRTextItem *> *blocks = [FYOCRManager recognizeImage:image topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
             return [self recognizeTextItemsInImage:cropped fastOCR:NO languageSegment:languageSegment error:innerError];
         } error:&error];
+        blocks = [self blocksInsideModalIfPresent:blocks inImage:image normalizedExclusions:@[]];
         NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         CGImageRelease(image);
 
@@ -5355,14 +5368,14 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.saveTimer = nil;
     if (self.loadingSettings) { return; }
     if (self.credentialLoadFailed) {
-        self.serviceErrorLabel.stringValue = @"无法读取钥匙串，设置未保存。请检查钥匙串访问权限。";
+        self.serviceErrorLabel.stringValue = @"无法读取本机 API Key 文件，设置未保存。请检查文件访问权限。";
         return;
     }
     NSString *apiKey = self.apiKeyField.stringValue ?: @"";
     if (![apiKey isEqualToString:self.persistedAPIKey ?: @""]) {
-        OSStatus keyStatus = FYWriteAPIKey(apiKey);
-        if (keyStatus != errSecSuccess) {
-            self.serviceErrorLabel.stringValue = @"API Key 无法保存到钥匙串，设置未保存。请检查钥匙串访问权限。";
+        FYAPIKeyStatus keyStatus = FYWriteAPIKey(apiKey);
+        if (keyStatus != FYAPIKeySuccess) {
+            self.serviceErrorLabel.stringValue = @"API Key 无法保存到本机文件，设置未保存。请检查文件访问权限。";
             return;
         }
         self.persistedAPIKey = apiKey;
@@ -5437,6 +5450,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     FYCrashLifecycle(@"normal-termination");
+    [self.batchAppearanceTimer invalidate];
+    self.batchAppearanceTimer = nil;
     [self.overlayVisibilityTimer invalidate];
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
     [self saveSettings:nil];
@@ -5492,14 +5507,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 老存档没有这个键 —— 默认给 Flash：实时翻译用推理模型会卡到没法用
     self.realtimeModelField.stringValue = settings[@"realtimeModel"] ?: @"deepseek-flash";
     self.learningModelField.stringValue = settings[@"learningModel"] ?: @"";
-    NSString *legacyKey = [settings[@"apiKey"] isKindOfClass:NSString.class] ? settings[@"apiKey"] : @"";
     NSString *storedKey = nil;
-    OSStatus keyStatus = FYReadAPIKey(&storedKey);
-    if (keyStatus == errSecItemNotFound && legacyKey.length) {
-        keyStatus = FYWriteAPIKey(legacyKey);
-        if (keyStatus == errSecSuccess) { storedKey = legacyKey; }
-    }
-    if (keyStatus == errSecSuccess || (keyStatus == errSecItemNotFound && !legacyKey.length)) {
+    FYAPIKeyStatus keyStatus = FYReadAPIKey(&storedKey);
+    if (keyStatus == FYAPIKeySuccess || keyStatus == FYAPIKeyNotFound) {
         self.apiKeyField.stringValue = storedKey ?: @"";
         self.persistedAPIKey = self.apiKeyField.stringValue;
         self.credentialLoadFailed = NO;
@@ -5509,10 +5519,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             [[NSUserDefaults standardUserDefaults] setObject:sanitized forKey:SettingsKey];
         }
     } else {
-        self.apiKeyField.stringValue = legacyKey;
+        self.apiKeyField.stringValue = @"";
         self.persistedAPIKey = nil;
         self.credentialLoadFailed = YES;
-        self.serviceErrorLabel.stringValue = @"无法读取或迁移 API Key；原设置已保留。请检查钥匙串访问权限。";
+        self.serviceErrorLabel.stringValue = @"无法读取本机 API Key 文件；原文件已保留。请检查文件访问权限。";
     }
     // 识别输入源与采集卡设备：只恢复选择，不自动启动采集（权限也不会在这里申请）。
     self.inputSourceSegment = [settings[@"inputSource"] integerValue] == 1 ? 1 : 0;
@@ -5538,9 +5548,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 // 几何判定、联合去重与长短分类都在 FYInlineGrouper 里，这里不重复堆条件。
 - (NSArray<OCRTextItem *> *)mergedInlineTextItemsFromItems:(NSArray<OCRTextItem *> *)items {
     if (items.count == 0) { return @[]; }
-    NSMutableArray<FYInlineTextLine *> *lines = [NSMutableArray arrayWithCapacity:items.count];
-    for (NSUInteger index = 0; index < items.count; index++) {
-        OCRTextItem *item = items[index];
+    NSArray<OCRTextItem *> *visualLines = [FYOCRManager splitMultilineItems:items];
+    NSMutableArray<FYInlineTextLine *> *lines = [NSMutableArray arrayWithCapacity:visualLines.count];
+    for (NSUInteger index = 0; index < visualLines.count; index++) {
+        OCRTextItem *item = visualLines[index];
         [lines addObject:[FYInlineTextLine lineWithText:(item.text ?: @"")
                                                    rect:item.boundingBox
                                              confidence:item.confidence
@@ -5622,44 +5633,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         [candidates addObject:item];
     }
 
-    [candidates sortUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) {
-        // 第一关键字：正文优先、按钮垫底。这样上限截断时先牺牲按钮，不会挤掉正文。
-        BOOL leftButton = [self isButtonLikeInlineText:NormalizeForComparison(left.text)];
-        BOOL rightButton = [self isButtonLikeInlineText:NormalizeForComparison(right.text)];
-        if (leftButton != rightButton) { return leftButton ? NSOrderedDescending : NSOrderedAscending; }
-
-        double leftScore = [self inlinePriorityForText:left.text normalized:NormalizeForComparison(left.text) boundingBox:left.boundingBox];
-        double rightScore = [self inlinePriorityForText:right.text normalized:NormalizeForComparison(right.text) boundingBox:right.boundingBox];
-        if (leftScore > rightScore) { return NSOrderedAscending; }
-        if (leftScore < rightScore) { return NSOrderedDescending; }
-        CGFloat leftTop = CGRectGetMaxY(left.boundingBox);
-        CGFloat rightTop = CGRectGetMaxY(right.boundingBox);
-        if (fabs(leftTop - rightTop) > 0.025) {
-            return leftTop > rightTop ? NSOrderedAscending : NSOrderedDescending;
-        }
-        return left.boundingBox.origin.x < right.boundingBox.origin.x ? NSOrderedAscending : NSOrderedDescending;
-    }];
-
-    // 两级上限：正文先占满 20 条，按钮只吃**剩下的**额度。
-    // 这样按钮永远排在最后，且绝不会挤掉正文 —— 之前是按钮也占正文名额。
-    NSUInteger contentLimit = MIN((NSUInteger)20, candidates.count);
-    NSMutableArray<OCRTextItem *> *contentItems = [NSMutableArray array];
-    NSMutableArray<OCRTextItem *> *buttonItems = [NSMutableArray array];
-    for (OCRTextItem *item in candidates) {
-        if ([self isButtonLikeInlineText:NormalizeForComparison(item.text)]) {
-            [buttonItems addObject:item];
-        } else {
-            [contentItems addObject:item];
-        }
-    }
-    NSMutableArray<OCRTextItem *> *selected = [NSMutableArray array];
-    [selected addObjectsFromArray:[contentItems subarrayWithRange:NSMakeRange(0, MIN(contentLimit, contentItems.count))]];
-    NSUInteger remaining = contentLimit > selected.count ? contentLimit - selected.count : 0;
-    if (remaining > 0) {
-        [selected addObjectsFromArray:[buttonItems subarrayWithRange:NSMakeRange(0, MIN(remaining, buttonItems.count))]];
-    }
-    NSArray<OCRTextItem *> *topItems = selected;
-    NSArray<OCRTextItem *> *readingOrder = [topItems sortedArrayUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) {
+    // 过滤只判断观察本身是否有效，不按全屏块数截断。
+    // 否则无关正文拆成两块就会挤掉一直存在的字段，跟踪器将这种删减误判为消失，
+    // 继而让邻近译文换位、集中入口增减。空间不足由布局结果处理，译文仍完整列出。
+    NSArray<OCRTextItem *> *readingOrder = [candidates sortedArrayUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) {
         CGFloat leftTop = CGRectGetMaxY(left.boundingBox);
         CGFloat rightTop = CGRectGetMaxY(right.boundingBox);
         if (fabs(leftTop - rightTop) > 0.025) {
@@ -5670,8 +5647,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         return NSOrderedSame;
     }];
 
-    // 最后再按阅读顺序输出，但**按钮统一挪到队尾**：
-    // 贴译是按这个顺序逐条生成的，按钮排最后就不会和正文抢显示位置。
+    // 按阅读顺序输出，按钮统一挪到队尾，不影响正文的先行布局。
     NSMutableArray<OCRTextItem *> *ordered = [NSMutableArray array];
     for (OCRTextItem *item in readingOrder) {
         if (![self isButtonLikeInlineText:NormalizeForComparison(item.text)]) { [ordered addObject:item]; }
@@ -5819,7 +5795,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 // 按钮/导航类小标签（詳細・戻る・閉じる…）。
-// 它们值得翻，但不该占掉正文的位置 —— 排序时排到最后，超上限时先牺牲它们。
+// 它们值得翻；阅读顺序中排到最后，让正文先参与布局。
 - (BOOL)isButtonLikeInlineText:(NSString *)normalized {
     if (normalized.length == 0 || normalized.length > 8) { return NO; }
     NSString *lower = normalized.lowercaseString;
@@ -5934,6 +5910,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)clearInlineTranslationPanels {
+    [self.batchAppearanceTimer invalidate];
+    self.batchAppearanceTimer = nil;
     [self closeExpandedInlineReadingCard];
     for (NSPanel *panel in self.inlineTranslationPanels) {
         [panel close];
@@ -5948,12 +5926,21 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 译文按新几何重排出来（换窗口后闪现上一条译文）。
     self.lastInlineRenderedTranslations = nil;
     self.lastInlineRenderedItems = nil;
+    [self.inlineFrameStabilizer reset];
+    self.lastInlineLayoutBoxes = nil;
+    self.lastInlineLayoutContentKey = nil;
+    self.lastInlineLayoutGeometryKey = nil;
+    self.inlineOCRPendingText = nil;
+    self.inlineOCRPendingCount = 0;
     self.lastInlineRenderGeometryToken = nil;
     // 边缘入口「还有 N 条译文」属于上一帧的场景，一起收掉。
     [self.inlineOverflowPanel close];
     self.inlineOverflowPanel = nil;
     self.inlineOverflowEntries = @[];
     self.inlineOverflowCount = 0;
+    self.inlineOverflowPanelCount = 0;
+    self.inlineOverflowCandidateFrames = 0;
+    self.inlineOverflowEmptySince = 0;
     [self closeInlineOverflowChoice];
     // 画面换页/停止/切换窗口时清掉手动位置：绝不把偏移继承给其它块或下一场景。
     [self.inlineManualOffsets removeAllObjects];
@@ -5976,7 +5963,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSUInteger count = MIN(translations.count, items.count);
     for (NSUInteger index = 0; index < count; index++) {
         OCRTextItem *item = items[index];
-        [identity appendFormat:@"%@\n%@\n%.4f:%.4f:%.4f:%.4f\n",
+        [identity appendFormat:@"%@\n%@\n%.2f:%.2f:%.2f:%.2f\n",
          NormalizeForComparison(item.text), Trim(translations[index]),
          item.boundingBox.origin.x, item.boundingBox.origin.y,
          item.boundingBox.size.width, item.boundingBox.size.height];
@@ -6001,7 +5988,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     if (!NSEqualRects(content.frame, NSMakeRect(0, 0, NSWidth(layout.frame), NSHeight(layout.frame)))) {
         content.frame = NSMakeRect(0, 0, NSWidth(layout.frame), NSHeight(layout.frame));
     }
-    if (![label.stringValue isEqualToString:translation]) {
+    if (![label.stringValue isEqualToString:translation] || ![label.font isEqual:layout.font]) {
+        label.font = layout.font;
         label.attributedStringValue = [self inlinePanelAttributedText:translation font:layout.font];
     }
     if (!NSEqualRects(label.frame, layout.labelFrame)) { label.frame = layout.labelFrame; }
@@ -6037,14 +6025,56 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 落位区域也进入内容指纹：窗口移动/缩放后即使页面文字没变，也必须重新布局，
     // 否则贴译会停在旧坐标上、跟原文错位（手动拖动过的位置同样要重新夹到可见区域内）。
     // 实际显示目标也进指纹：OBS 编辑器↔全屏投影是**另一个窗口**，同一段文字必须重排。
+    FYInlineLayoutEngine *engine = self.inlineLayoutEngine;
+    NSString *geometryKey = [NSString stringWithFormat:@"|t=%u|vp=%.1f,%.1f,%.1f,%.1f|style=%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
+                             [self displayTargetWindowID],
+                             NSMinX(windowFrame), NSMinY(windowFrame), NSWidth(windowFrame), NSHeight(windowFrame),
+                             engine.shortFontSize, engine.coverFontSize, engine.longBodyFontSize,
+                             engine.minimumLongBodyFontSize, engine.longTitleFontSize, engine.compactEntryFontSize,
+                             engine.shortMaxWidth, engine.cardMaxWidth, engine.cardMaxHeight];
     NSString *identity = [[self inlineTranslationIdentityForTranslations:translations forItems:items]
-                          stringByAppendingFormat:@"|t=%u|vp=%.1f,%.1f,%.1f,%.1f",
-                          [self displayTargetWindowID],
-                          NSMinX(windowFrame), NSMinY(windowFrame), NSWidth(windowFrame), NSHeight(windowFrame)];
+                          stringByAppendingString:geometryKey];
+    NSMutableString *contentKey = [NSMutableString stringWithFormat:@"%lu:%lu|",
+                                  (unsigned long)translations.count, (unsigned long)items.count];
+    for (NSUInteger index = 0; index < MIN(translations.count, items.count); index++) {
+        [contentKey appendFormat:@"%@\n%@\n", NormalizeForComparison(items[index].text), Trim(translations[index])];
+    }
+    // 两位小数仍有桶边界：0.0049 → 0.0059 只动了约 1px，却会跨桶。
+    // 跟上次实际布局的框比较，避免逐帧比较把真正的缓慢移动也吞掉。
+    BOOL minorOCRJitter = self.lastInlineLayoutResult &&
+        [self.lastInlineLayoutContentKey isEqualToString:contentKey] &&
+        [self.lastInlineLayoutGeometryKey isEqualToString:geometryKey] &&
+        self.lastInlineLayoutBoxes.count == items.count;
+    for (NSUInteger index = 0; minorOCRJitter && index < items.count; index++) {
+        NSRect before = self.lastInlineLayoutBoxes[index].rectValue;
+        NSRect now = items[index].boundingBox;
+        minorOCRJitter = fabs(NSMinX(before) - NSMinX(now)) < 0.003 &&
+            fabs(NSMinY(before) - NSMinY(now)) < 0.003 &&
+            fabs(NSWidth(before) - NSWidth(now)) < 0.003 &&
+            fabs(NSHeight(before) - NSHeight(now)) < 0.003;
+    }
     // 页面文字没变：只把已有面板重新显示出来，绝不 close / 重建。
     // （旧实现每帧 clear + 新建 NSPanel，这正是贴译一闪一闪的原因。）
-    if (self.lastInlineTranslationKey && [self.lastInlineTranslationKey isEqualToString:identity] &&
-        self.lastInlineLayoutResult) {
+    if ((self.lastInlineTranslationKey && [self.lastInlineTranslationKey isEqualToString:identity] &&
+         self.lastInlineLayoutResult) || minorOCRJitter) {
+        if (minorOCRJitter) {
+            // 跳过重排时仍要把这一帧轻微抖动后的原始身份映回面板身份。
+            if (!self.inlineStableBlockIDs) { self.inlineStableBlockIDs = [NSMutableDictionary dictionary]; }
+            for (NSUInteger index = 0; index < items.count; index++) {
+                OCRTextItem *item = items[index];
+                FYInlineTextBlock *block = [self inlineLayoutBlockForItem:item order:(NSInteger)index];
+                NSString *stableID = [FYInlineBlockMatcher stableBlockIDForBlock:block
+                                                                           text:block.text
+                                                                    sourceFrame:[self appKitFrameForOCRItem:item inWindowFrame:windowFrame]
+                                                                 previousResult:self.lastInlineLayoutResult];
+                if (stableID.length > 0) { self.inlineStableBlockIDs[block.blockID] = stableID; }
+            }
+            for (NSPanel *panel in self.inlineLongCardPanels) {
+                FYInlineLongCardView *card = [panel.contentView isKindOfClass:FYInlineLongCardView.class]
+                    ? (FYInlineLongCardView *)panel.contentView : nil;
+                if (card) { card.showsSelectedBadge = [self.inlineBlockSnapshot.blockID isEqualToString:panel.identifier]; }
+            }
+        }
         // 内容没变也要推进展开态记账（上一帧的排版结果里还有没有这一块）。
         [self advanceExpandedReadingState];
         [self refreshOverlayVisibility:nil];
@@ -6088,14 +6118,14 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             // 诊断要能看出"到底是什么放不下"：原文框、长卡尺寸、紧凑入口尺寸、逐候选被拒原因
             // （含冲突的是哪一块、交叠多厚），而不是一句"所有候选冲突"。
             FuyiDiagLog(@"    UNPLACEABLE <%@> srcFrame=(%.0f,%.0f,%.0f,%.0f) longCard=(%.0fx%.0f) compactEntry=(%.0fx%.0f) viewport=(%.0f,%.0f,%.0f,%.0f) reason=<%@> rejected=[%@]",
-                        FYDiagTextLength(item.text),
+                        Shorten(item.text, 24),
                         placement.sourceFrame.origin.x, placement.sourceFrame.origin.y,
                         placement.sourceFrame.size.width, placement.sourceFrame.size.height,
                         placement.longCardSize.width, placement.longCardSize.height,
                         placement.compactEntrySize.width, placement.compactEntrySize.height,
                         windowFrame.origin.x, windowFrame.origin.y, NSWidth(windowFrame), NSHeight(windowFrame),
-                        FYDiagTextLength(placement.reason),
-                        [NSString stringWithFormat:@"count:%lu", (unsigned long)placement.rejectedCandidates.count]);
+                        placement.reason,
+                        [placement.rejectedCandidates componentsJoinedByString:@" | "] ?: @"");
             continue;
         }
         // 紧凑入口一律用长卡视图渲染：它可能是"多行但被判成短块"的段落降级出来的，
@@ -6152,22 +6182,22 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         // 紧凑入口额外打出长卡尺寸与入口尺寸，方便判断"是尺寸问题还是真的没地方"。
         if (placement.mode == FYInlineDisplayModeCompactEntry) {
             FuyiDiagLog(@"    COMPACT-ENTRY src=<%@> longCard=(%.0fx%.0f) entry=(%.0fx%.0f) anchor=%ld panel=(%.0f,%.0f,%.0f,%.0f) reason=%@",
-                        FYDiagTextLength(item.text),
+                        Shorten(item.text, 24),
                         placement.longCardSize.width, placement.longCardSize.height,
                         placement.compactEntrySize.width, placement.compactEntrySize.height,
                         (long)placement.anchor,
                         panel.frame.origin.x, panel.frame.origin.y, NSWidth(panel.frame), NSHeight(panel.frame),
-                        FYDiagTextLength(placement.reason));
+                        placement.reason);
         }
-        FuyiDiagLog(@"    PANEL src=<%@> box=(%.3f,%.3f,%.3f,%.3f) srcFrame=(%.0f,%.0f,%.0f,%.0f) mode=%ld anchor=%ld panel=(%.0f,%.0f,%.0f,%.0f) reason=%@",
-                    FYDiagTextLength(item.text),
+        FuyiDiagLog(@"    PANEL src=<%@> box=(%.3f,%.3f,%.3f,%.3f) srcFrame=(%.0f,%.0f,%.0f,%.0f) mode=%ld font=%.2f anchor=%ld panel=(%.0f,%.0f,%.0f,%.0f) reason=%@",
+                    Shorten(item.text, 24),
                     item.boundingBox.origin.x, item.boundingBox.origin.y,
                     item.boundingBox.size.width, item.boundingBox.size.height,
                     placement.sourceFrame.origin.x, placement.sourceFrame.origin.y,
                     placement.sourceFrame.size.width, placement.sourceFrame.size.height,
-                    (long)placement.mode, (long)placement.anchor,
+                    (long)placement.mode, placement.font.pointSize, (long)placement.anchor,
                     panel.frame.origin.x, panel.frame.origin.y, NSWidth(panel.frame), NSHeight(panel.frame),
-                    FYDiagTextLength(placement.reason));
+                    placement.reason);
     }
 
     // 这一帧多出来的旧面板关掉。
@@ -6212,6 +6242,11 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.lastInlineUnplaceableCount = unplaceable;
     self.lastInlineCompactEntryCount = compactEntries;
     self.lastInlineTranslationKey = identity;
+    self.lastInlineLayoutContentKey = [contentKey copy];
+    self.lastInlineLayoutGeometryKey = geometryKey;
+    NSMutableArray<NSValue *> *layoutBoxes = [NSMutableArray arrayWithCapacity:items.count];
+    for (OCRTextItem *item in items) { [layoutBoxes addObject:[NSValue valueWithRect:item.boundingBox]]; }
+    self.lastInlineLayoutBoxes = layoutBoxes;
     // 记下这次渲染用的几何上下文：文本没变但几何变了时，靠它判断必须重排。
     self.lastInlineRenderGeometryToken = self.lastDisplayGeometryToken ?: @"";
     // 极端降级：确实连折叠入口都贴不到原文旁边的块，在游戏显示区域边缘给一个总入口。
@@ -6225,8 +6260,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     for (FYInlinePlacement *placement in result.placements) {
         if (placement.variantDiagnostics.count == 0) { continue; }
         FuyiDiagLog(@"    CARD-VARIANTS <%@> 块=%@",
-                    FYDiagTextLength(placement.block.text),
-                    [NSString stringWithFormat:@"count:%lu", (unsigned long)placement.variantDiagnostics.count]);
+                    Shorten([placement.block.text stringByReplacingOccurrencesOfString:@"\n" withString:@" "], 20),
+                    [placement.variantDiagnostics componentsJoinedByString:@" | "]);
     }
 [self advanceExpandedReadingState];
     [self refreshOverlayVisibility:nil];
@@ -6252,25 +6287,74 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                              @"title": title,
                              @"item": item ?: (id)NSNull.null}];
     }
-    self.inlineOverflowEntries = entries;
-    self.inlineOverflowCount = entries.count;
-    if (entries.count == 0 || self.inlineExpandedReadingPanel) {
-        if (self.inlineOverflowPanel) { [self.inlineOverflowPanel orderOut:nil]; self.inlineOverflowPanel.ignoresMouseEvents = YES; }
-        [self closeInlineOverflowChoice];
+    // 选择列表打开期间保持按钮 tag、条目和面板不变，直到用户选择或关闭。
+    BOOL chooserOpen = self.inlineOverflowChoicePanel != nil;
+    if (chooserOpen) { return; }
+    if (entries.count == 0) {
+        // 单帧 OCR 漏块时保留入口；持续没有条目才由可见性轮询收掉。
+        if (self.inlineOverflowEmptySince == 0) { self.inlineOverflowEmptySince = [NSDate timeIntervalSinceReferenceDate]; }
+        [self expireInlineOverflowEntryIfNeeded];
         return;
     }
-    if (self.inlineOverflowPanel && self.inlineOverflowPanelCount != entries.count) {
-        [self.inlineOverflowPanel close];
-        self.inlineOverflowPanel = nil;   // 条数变了要重建（文案里有 N）
+    self.inlineOverflowEmptySince = 0;
+    if (self.inlineExpandedReadingPanel) {
+        [self.inlineOverflowPanel orderOut:nil];
+        self.inlineOverflowPanel.ignoresMouseEvents = YES;
+        return;
     }
     if (!self.inlineOverflowPanel) {
+        self.inlineOverflowEntries = entries;
+        self.inlineOverflowCount = entries.count;
         [self buildInlineOverflowEntryForViewport:viewport];
         self.inlineOverflowPanelCount = entries.count;
+    } else if (self.inlineOverflowPanelCount == entries.count) {
+        self.inlineOverflowEntries = entries;
+        self.inlineOverflowCount = entries.count;
+        self.inlineOverflowCandidateFrames = 0;
+    } else {
+        // N 和 N±1 交替时不改文案，也不销毁窗口；新条数连续出现两帧才采纳。
+        if (self.inlineOverflowCandidateCount == entries.count) {
+            self.inlineOverflowCandidateFrames++;
+        } else {
+            self.inlineOverflowCandidateCount = entries.count;
+            self.inlineOverflowCandidateFrames = 1;
+        }
+        if (self.inlineOverflowCandidateFrames >= 2) {
+            self.inlineOverflowEntries = entries;
+            self.inlineOverflowCount = entries.count;
+            self.inlineOverflowPanelCount = entries.count;
+            self.inlineOverflowCandidateFrames = 0;
+            NSString *title = [NSString stringWithFormat:@"还有 %lu 条译文 · 查看", (unsigned long)entries.count];
+            FYInlineLongCardView *card = (FYInlineLongCardView *)self.inlineOverflowPanel.contentView;
+            NSTextField *label = [card.subviews.firstObject isKindOfClass:NSTextField.class]
+                ? (NSTextField *)card.subviews.firstObject : nil;
+            CGSize size = [self.inlineLayoutEngine foldedEntrySizeForViewport:viewport title:title hint:@"" action:@""];
+            NSRect frame = self.inlineOverflowPanel.frame;
+            frame.size = size;
+            [self.inlineOverflowPanel setFrame:frame display:NO];
+            card.frame = NSMakeRect(0, 0, size.width, size.height);
+            label.frame = NSMakeRect(NSMinX(label.frame), NSMinY(label.frame),
+                                     MAX((CGFloat)60, size.width - NSMinX(label.frame) * 2), NSHeight(label.frame));
+            label.stringValue = title;
+            [self.inlineOverflowPanel displayIfNeeded];
+        }
     }
     if (!self.inlineOverflowPanel) { return; }
     [self positionInlineOverflowEntryInViewport:viewport];
     if (!self.inlineOverflowPanel.isVisible) { [self.inlineOverflowPanel orderFrontRegardless]; }
     self.inlineOverflowPanel.ignoresMouseEvents = NO;
+}
+
+- (void)expireInlineOverflowEntryIfNeeded {
+    if (self.inlineOverflowEmptySince == 0 || self.inlineOverflowChoicePanel ||
+        [NSDate timeIntervalSinceReferenceDate] - self.inlineOverflowEmptySince < 1.5) { return; }
+    [self.inlineOverflowPanel close];
+    self.inlineOverflowPanel = nil;
+    self.inlineOverflowEntries = @[];
+    self.inlineOverflowCount = 0;
+    self.inlineOverflowPanelCount = 0;
+    self.inlineOverflowCandidateFrames = 0;
+    self.inlineOverflowEmptySince = 0;
 }
 
 // 边缘入口的尺寸与位置：按文字量尺寸，并**纳入统一避让** ——
@@ -6848,6 +6932,10 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
             ![entryCard.foldedEntryHintLabel.stringValue isEqualToString:expectedHint]) {
             compactCopyChanged = YES;
         }
+        NSTextField *title = [entryCard.subviews.firstObject isKindOfClass:NSTextField.class]
+            ? (NSTextField *)entryCard.subviews.firstObject : nil;
+        compactCopyChanged = compactCopyChanged || ![title.font isEqual:[self.inlineLayoutEngine compactEntryFont]] ||
+            (entryCard.foldedEntryHintLabel && ![entryCard.foldedEntryHintLabel.font isEqual:[self.inlineLayoutEngine foldedEntryHintFont]]);
     }
     if (!compactCopyChanged && [existing isKindOfClass:FYInlineLongCardView.class] && NSEqualSizes(existing.frame.size, frame.size) &&
         [(FYInlineLongCardView *)existing showsSelectedBadge] == selected &&
@@ -7347,6 +7435,11 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 // 贴译（原位短贴片 + 长阅读卡）使用固定的「奶油棕花境」主题。
 // 用户改字幕配色 / 主题 / 透明度时，贴译不能再跟着变成灰黑底白字。
 // 分组器：几何判定在独立组件里，这里只注入“按钮词”这一项项目内约定。
+- (FYInlineOCRFrameStabilizer *)inlineFrameStabilizer {
+    if (!_inlineFrameStabilizer) { _inlineFrameStabilizer = [FYInlineOCRFrameStabilizer new]; }
+    return _inlineFrameStabilizer;
+}
+
 - (FYInlineGrouper *)inlineGrouper {
     if (!_inlineGrouper) {
         FYInlineGrouper *grouper = [FYInlineGrouper defaultGrouper];
@@ -7411,6 +7504,39 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     for (NSPanel *panel in panels) {
         NSView *content = panel.contentView;
         if (content.layer) { content.layer.backgroundColor = fill.CGColor; }
+    }
+}
+
+- (void)applyInlineTextColor:(NSColor *)color toView:(NSView *)view {
+    if ([view isKindOfClass:NSTextField.class]) {
+        NSTextField *label = (NSTextField *)view;
+        NSAttributedString *current = label.attributedStringValue;
+        // 正文用富文本设置颜色，textColor 属性可能仍是 AppKit 默认的半透明标签色。
+        NSColor *oldColor = current.length > 0 ? [current attribute:NSForegroundColorAttributeName atIndex:0 effectiveRange:NULL] : nil;
+        oldColor = oldColor ?: label.textColor;
+        CGFloat alpha = oldColor ? oldColor.alphaComponent : 1;
+        NSColor *textColor = fabs(alpha - color.alphaComponent) < 0.001 ? color : [color colorWithAlphaComponent:alpha];
+        if (![oldColor isEqual:textColor] || ![label.textColor isEqual:textColor]) {
+            NSMutableAttributedString *text = [current mutableCopy];
+            [text addAttribute:NSForegroundColorAttributeName value:textColor range:NSMakeRange(0, text.length)];
+            label.textColor = textColor;
+            label.attributedStringValue = text;
+        }
+    }
+    for (NSView *child in view.subviews) {
+        if ([view isKindOfClass:FYInlineLongCardView.class] && child == ((FYInlineLongCardView *)view).expandedFooterLabel) { continue; }
+        [self applyInlineTextColor:color toView:child];
+    }
+}
+
+- (void)refreshInlinePanelTextAppearance {
+    NSMutableArray<NSPanel *> *panels = [self.inlineTranslationPanels mutableCopy] ?: [NSMutableArray array];
+    [panels addObjectsFromArray:self.inlineLongCardPanels ?: @[]];
+    if (self.inlineExpandedReadingPanel) { [panels addObject:self.inlineExpandedReadingPanel]; }
+    if (self.inlineOverflowPanel) { [panels addObject:self.inlineOverflowPanel]; }
+    if (self.inlineOverflowChoicePanel) { [panels addObject:self.inlineOverflowChoicePanel]; }
+    for (NSPanel *panel in panels) {
+        [self applyInlineTextColor:[self inlinePanelTextColor] toView:panel.contentView];
     }
 }
 - (NSColor *)inlinePanelBorderColor {
@@ -8293,8 +8419,9 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 
 - (NSString *)recognizeTextBlocksInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment blocks:(NSArray<OCRTextItem *> **)outBlocks error:(NSError **)error {
     NSArray<OCRTextItem *> *items = [self recognizeTextItemsInImage:image fastOCR:fastOCR languageSegment:languageSegment error:error];
-    NSSet<NSString *> *rendered = RenderedTranslationSet(self.captionTextLabel.stringValue, self.inlineTranslationCache);
-    return [FYOCRManager postprocessedTextForItems:items renderedTexts:rendered blocks:outBlocks];
+    // IncludingWindow and capture-card frames exclude our overlay windows.
+    // Text-only feedback filtering would delete unchanged dates and shared kanji.
+    return [FYOCRManager sourceTextForItems:items blocks:outBlocks];
 }
 
 - (NSArray<OCRTextItem *> *)recognizeTextItemsInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment error:(NSError **)error {
@@ -8449,78 +8576,11 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     return modeSegment == ContentModeUI ? 1.2 : 4.0;
 }
 
-// 当画面里存在“详情弹窗/模态窗”时，丢掉不在它范围内的文字（那是上一级页面的残留）。
-// 弹窗用像素找：中间一大块又亮又连片的矩形。找不到就原样返回（不影响普通画面）。
-// 真弹窗会把背景压暗；普通界面里的大亮块（照片、邮件预览）周围仍是正常亮度。
-// 这是区分“弹窗”和“就是一块亮区域”的本质特征 —— 只靠尺寸和位置分不开：
-// 实测邮件界面 x=0.15..0.85（中心 0.50，够大也居中）却被误判成弹窗，说明被裁掉一半。
-static BOOL ModalSurroundingsAreDimmer(unsigned char *pixels, size_t width, size_t height, size_t bytesPerRow, CGRect rect) { return FYOCRModalSurroundingsAreDimmer(pixels,width,height,bytesPerRow,rect); }
-
-// 检测到的亮矩形够不够格当“弹窗”。抽成函数是为了能直接测：
-// 既要**够大**，也要**水平居中** —— 弹窗是居中的，普通界面里的大亮块（照片、插图）
-// 往往偏在一边。实测「我的房间」那张房间照片 x=0.15..0.57（中心 0.36）被误判成弹窗，
-// 12 条文字被裁到 4 条，底部说明整段消失。
-static BOOL ModalRectQualifiesForCropping(CGRect rect) { return FYOCRModalRectQualifiesForCropping(rect); }
-
-// 弹窗裁剪（丢掉弹窗外文字）**默认关闭**。
-// 原因：实测无法可靠区分「真弹窗」和「普通界面里的大亮块」——
-//   详情弹窗(真)   x=0.20..0.80 y=0.17..0.46  区内均亮165 周围148 差17
-//   我的房间(误判) x=0.15..0.57 y=0.33..0.67  区内195 周围168 差27
-//   邮件界面(误判) x=0.15..0.85 y=0.29..0.97  区内222 周围172 差50
-// 尺寸、是否居中、亮度差都分不开（真弹窗的亮度差反而最小）。
-// 而误判代价很大：普通界面底部那两行说明会被整段裁掉（已发生 3 次）。
-// 需要时把这里改成 YES 即可恢复（检测代码保留着）。
-static const BOOL kModalScopingEnabled = NO;
-
+// 保留对普通亮色页面的保护：仅在同时识别到面板、暗背景和底部关闭按钮时隐藏背景。
 - (NSArray<OCRTextItem *> *)blocksInsideModalIfPresent:(NSArray<OCRTextItem *> *)blocks
                                               inImage:(CGImageRef)image
                                     normalizedExclusions:(NSArray<NSValue *> *)exclusionValues {
-    if (!kModalScopingEnabled) { return blocks; }
-    if (blocks.count == 0 || !image) { return blocks; }
-    NSUInteger exclusionCount = exclusionValues.count;
-    CGRect *exclusions = NULL;
-    if (exclusionCount > 0) {
-        exclusions = (CGRect *)calloc(exclusionCount, sizeof(CGRect));
-        if (!exclusions) { return blocks; }
-        for (NSUInteger index = 0; index < exclusionCount; index++) {
-            exclusions[index] = exclusionValues[index].rectValue;
-        }
-    }
-
-    GrayBuffer buffer = GrayBufferFromImage(image);
-    CGRect modalRect = CGRectZero;
-    BOOL found = NO;
-    if (buffer.pixels) {
-        found = DetectBrightContentRegion(buffer.pixels, buffer.width, buffer.height,
-                                          buffer.bytesPerRow, &modalRect, NULL,
-                                          exclusions, exclusionCount);
-    }
-    if (exclusions) { free(exclusions); }
-
-    // 没找到弹窗就原样返回；对白框本身也常常是一块亮矩形，这里只要求“够大”才算弹窗
-    if (!found) {
-        GrayBufferRelease(&buffer);
-        FuyiDiagLog(@"    MODAL-DETAIL found=0 -> 不裁剪");
-        return blocks;
-    }
-    // 除了“够大”，还要求**水平居中** —— 弹窗是居中的，而普通界面里的大亮块
-    // （实测「我的房间」那张房间照片：x=0.15..0.57，中心 0.36）并不居中。
-    // 不加这条会把整屏文字裁掉大半：实测 12 条被砍到 4 条，底部说明整段消失。
-    CGFloat modalCenterX = CGRectGetMidX(modalRect);
-    BOOL dimmedSurroundings = ModalSurroundingsAreDimmer(buffer.pixels, buffer.width, buffer.height,
-                                                         buffer.bytesPerRow, modalRect);
-    GrayBufferRelease(&buffer);
-    if (!ModalRectQualifiesForCropping(modalRect) || !dimmedSurroundings) {
-        FuyiDiagLog(@"    MODAL-DETAIL found=1 但不合格 x=%.2f..%.2f y=%.2f..%.2f 中心x=%.2f w=%.2f h=%.2f -> 不裁剪",
-                    modalRect.origin.x, CGRectGetMaxX(modalRect), modalRect.origin.y, CGRectGetMaxY(modalRect),
-                    modalCenterX, modalRect.size.width, modalRect.size.height);
-        return blocks;
-    }
-    FuyiDiagLog(@"    MODAL-DETAIL found=1 x=%.2f..%.2f y=%.2f..%.2f 面板排除区=%lu",
-                modalRect.origin.x, CGRectGetMaxX(modalRect), modalRect.origin.y, CGRectGetMaxY(modalRect),
-                (unsigned long)exclusionValues.count);
-
-    return [FYOCRManager items:blocks inModalRegion:modalRect exclusions:exclusionValues];
+    return [FYOCRManager items:blocks scopedToModalInImage:image exclusions:exclusionValues];
 }
 
 - (NSInteger)effectiveModeSegment {
@@ -8609,9 +8669,38 @@ static const BOOL kModalScopingEnabled = NO;
 - (NSInteger)stableCandidateCount { return [self stabilityOwner].count; }
 - (void)setStableCandidateCount:(NSInteger)value { [self stabilityOwner].count=value; }
 - (BOOL)isStableText:(NSString *)normalized {
-    return [[self stabilityOwner] observe:normalized equivalent:^BOOL(NSString *current, NSString *previous) {
+    BOOL stable = [[self stabilityOwner] observe:normalized equivalent:^BOOL(NSString *current, NSString *previous) {
         return [self isSameSubtitleText:current comparedTo:previous];
     }];
+    // Small real corrections must eventually translate, while one/two-frame
+    // substitutions caused by compression need not replace a complete caption.
+    if (stable && [self effectiveModeSegment] == ContentModeDialogue && self.languageControl.selectedSegment == 0 &&
+        self.lastTranslatedNormalizedText.length &&
+        SimilarityRatio(normalized, self.lastTranslatedNormalizedText) >= 0.85 &&
+        ![self isSameSubtitleText:normalized comparedTo:self.lastTranslatedNormalizedText]) {
+        return self.stableCandidateCount >= 3;
+    }
+    return stable;
+}
+
+- (BOOL)shouldAcceptInlineOCRCorrection:(NSString *)text comparedTo:(NSString *)rendered {
+    // 动态背景可能让同一界面的 OCR 文字偶发增删或误识别。相似界面的新读数
+    // 连续出现三帧才替换已显示的译文；明显换页仍立即响应。
+    if (rendered.length == 0 || SimilarityRatio(text, rendered) < 0.75) {
+        self.inlineOCRPendingText = nil;
+        self.inlineOCRPendingCount = 0;
+        return YES;
+    }
+    if ([self.inlineOCRPendingText isEqualToString:text]) {
+        self.inlineOCRPendingCount++;
+    } else {
+        self.inlineOCRPendingText = text;
+        self.inlineOCRPendingCount = 1;
+    }
+    if (self.inlineOCRPendingCount < 3) { return NO; }
+    self.inlineOCRPendingText = nil;
+    self.inlineOCRPendingCount = 0;
+    return YES;
 }
 
 - (BOOL)isSameSubtitleText:(NSString *)text comparedTo:(NSString *)previous {
@@ -8619,8 +8708,13 @@ static const BOOL kModalScopingEnabled = NO;
     NSString *right = previous ?: @"";
     if (left.length < 2 || right.length < 2) { return NO; }
     if ([left isEqualToString:right]) { return YES; }
-    if ([self effectiveModeSegment] == ContentModeDialogue && self.languageControl.selectedSegment == 0 &&
-        [FYDialogueComparisonKey(left) isEqualToString:FYDialogueComparisonKey(right)]) { return YES; }
+    if ([self effectiveModeSegment] == ContentModeDialogue && self.languageControl.selectedSegment == 0) {
+        // A long sentence with one changed negation/number can still be >90%
+        // similar. Only harmless OCR punctuation shares the frame identity;
+        // clipped frames are checked directionally against the complete source
+        // by the learning coordinator, after consecutive-frame confirmation.
+        return [FYDialogueComparisonKey(left) isEqualToString:FYDialogueComparisonKey(right)];
+    }
 
     NSUInteger maxLength = MAX(left.length, right.length);
     NSUInteger lengthDelta = left.length > right.length ? left.length - right.length : right.length - left.length;

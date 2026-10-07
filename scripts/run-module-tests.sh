@@ -23,6 +23,11 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
 "$OUT/OCRPostprocessingTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/InlineOCRFrameStabilizerTests.m" "$ROOT_DIR/objc/FYOCRManager.m" \
+  -framework Cocoa -framework Vision -o "$OUT/InlineOCRFrameStabilizerTests"
+"$OUT/InlineOCRFrameStabilizerTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationManagerTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/TranslationManagerTests"
 "$OUT/TranslationManagerTests"
@@ -31,6 +36,11 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
   "$ROOT_DIR/tests/InlineTextPolicyTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \
   -framework Cocoa -o "$OUT/InlineTextPolicyTests"
 "$OUT/InlineTextPolicyTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/InlineFontStabilityTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \
+  -framework Cocoa -o "$OUT/InlineFontStabilityTests"
+"$OUT/InlineFontStabilityTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationTaskTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \

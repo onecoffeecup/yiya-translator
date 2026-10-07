@@ -71,6 +71,27 @@ static NSArray<NSString *> *FYDialogueKeyLines(NSString *text) {
 
 BOOL FYDialogueIsIncompleteFrame(NSString *candidate, NSString *complete) {
     NSArray<NSString *> *shortLines = FYDialogueKeyLines(candidate), *fullLines = FYDialogueKeyLines(complete);
+    // A control bar can cut off the only body line, or the last line of a box.
+    // Accept only a long exact prefix ending at an unfinished connective. A
+    // general substring/fuzzy match would swallow new short replies, negation
+    // and question endings. Inspect raw punctuation before comparison removes it.
+    if (shortLines.count > 0 && shortLines.count == fullLines.count) {
+        NSString *raw = [candidate stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        NSString *shortTail = shortLines.lastObject, *fullTail = fullLines.lastObject;
+        NSCharacterSet *terminals = [NSCharacterSet characterSetWithCharactersInString:@"。.!！?？…‥・･\"」』）)"];
+        BOOL aligned = raw.length && ![terminals characterIsMember:[raw characterAtIndex:raw.length - 1]];
+        for (NSUInteger i = 0; i + 1 < shortLines.count; i++) {
+            aligned &= [shortLines[i] isEqualToString:fullLines[i]];
+        }
+        BOOL unfinished = NO;
+        // の/が/けど/から can themselves finish a natural spoken utterance;
+        // do not use those endings as evidence of a missing continuation.
+        for (NSString *ending in @[@"は", @"を", @"に", @"で", @"へ", @"と", @"も", @"ので", @"、", @","]) {
+            if ([shortTail hasSuffix:ending]) { unfinished = YES; break; }
+        }
+        if (aligned && unfinished && shortTail.length >= 7 && fullTail.length >= shortTail.length + 5 &&
+            shortTail.length * 5 <= fullTail.length * 4 && [fullTail hasPrefix:shortTail]) { return YES; }
+    }
     // Require the same speaker and at least two aligned body lines. A fuzzy
     // whole-sentence similarity would also merge real questions and negations.
     if (shortLines.count < 3 || shortLines.count != fullLines.count ||

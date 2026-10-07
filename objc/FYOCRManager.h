@@ -33,6 +33,14 @@ typedef NS_ENUM(NSInteger, InlineBlockKind) {
 - (BOOL)observe:(NSString *)normalized equivalent:(BOOL (^)(NSString *current, NSString *previous))equivalent;
 - (void)reset;
 @end
+// Keeps UI OCR content and its geometry tied to the same on-screen regions
+// across frames. Transient missing/merged/misread observations do not replace
+// a confirmed block; sustained edits and page changes do.
+@interface FYInlineOCRFrameStabilizer : NSObject
+@property(nonatomic, readonly) BOOL ready;
+- (NSArray<OCRTextItem *> *)observeItems:(NSArray<OCRTextItem *> *)items;
+- (void)reset;
+@end
 FOUNDATION_EXPORT NSString *FYNormalizeOCRTextForComparison(NSString *value);
 // Synchronous recognition only when region is eligible; rejected output leaves caller slots untouched.
 FOUNDATION_EXPORT BOOL FYRecognizeOCRRefinement(NSArray<OCRTextItem *> *coarse, BOOL autoFit,
@@ -72,6 +80,11 @@ FOUNDATION_EXPORT BOOL FYOCRBlockSitsOnBrightBackdrop(OCRTextItem *block, const 
 // Region remapping intentionally mutates only boundingBox/nonempty lastLineBox.
 // resolve preserves surviving input order; merge sorts only when refinement is present.
 @interface FYOCRManager : NSObject
+// Require a centered bright panel, dim surround and an explicit dismiss control.
+// Ambiguous images pass through unchanged; no capture or extra OCR is performed.
++ (NSArray<OCRTextItem *> *)items:(NSArray<OCRTextItem *> *)blocks
+           scopedToModalInImage:(CGImageRef)image
+                    exclusions:(NSArray<NSValue *> *)exclusionValues;
 // Caller must qualify modal first; preserves legacy padding and <2-result fallback.
 + (NSArray<OCRTextItem *> *)items:(NSArray<OCRTextItem *> *)blocks
                   inModalRegion:(CGRect)modalRect
@@ -119,7 +132,10 @@ FOUNDATION_EXPORT BOOL FYOCRBlockSitsOnBrightBackdrop(OCRTextItem *block, const 
 + (void)remapItems:(NSArray<OCRTextItem *> *)items
     fromPixelCrop:(CGRect)crop
         imageSize:(CGSize)imageSize;
-// Explicit rendered-text snapshots; normalization and exclusion preserve legacy policy.
+// Clean source pixels: deduplicate overlapping OCR observations without excluding
+// original text that happens to equal an already displayed translation.
++ (NSString *)sourceTextForItems:(NSArray<OCRTextItem *> *)items blocks:(NSArray<OCRTextItem *> **)outBlocks;
+// Explicit rendered-text snapshots for callers whose image contains overlays.
 + (NSString *)postprocessedTextForItems:(NSArray<OCRTextItem *> *)items renderedTexts:(NSSet<NSString *> *)renderedTexts
     blocks:(NSArray<OCRTextItem *> **)outBlocks;
 + (BOOL)isOwnOverlayText:(NSString *)text;
@@ -130,6 +146,8 @@ FOUNDATION_EXPORT BOOL FYOCRBlockSitsOnBrightBackdrop(OCRTextItem *block, const 
 + (NSArray<OCRTextItem *> *)resolveOverlappingItems:(NSArray<OCRTextItem *> *)items;
 + (NSArray<OCRTextItem *> *)mergeCoarseItems:(NSArray<OCRTextItem *> *)coarse
                              refinedItems:(NSArray<OCRTextItem *> *)refined;
+// Vision may return several visual lines in one observation; inline layout needs line-level boxes.
++ (NSArray<OCRTextItem *> *)splitMultilineItems:(NSArray<OCRTextItem *> *)items;
 // String path deliberately retains one-character lines and Vision result order.
 + (NSString *)textFromRecognizedLines:(NSArray<NSString *> *)lines;
 - (NSString *)recognizeTextInImage:(CGImageRef)image

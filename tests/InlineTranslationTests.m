@@ -468,7 +468,7 @@ int main(void) {
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
             NSDictionary *backup = [[defaults objectForKey:SettingsKey] copy];
             [defaults setObject:@{@"apiKey": @"synthetic-legacy-key"} forKey:SettingsKey];
-            FYTestKeychainValue = nil;
+            FYTestLocalAPIKeyValue = nil;
             AppDelegate *settingsApp = [[AppDelegate alloc] init];
             [settingsApp createMainWindow];
             [settingsApp.mainWindow setContentSize:NSMakeSize(980, 660)];
@@ -481,31 +481,29 @@ int main(void) {
             Check(fabs(NSWidth(liveScroll.documentView.frame) - NSWidth(liveScroll.contentView.bounds)) < 2,
                   @"the 980-point workbench must fit the clip width without horizontal scrolling");
             [settingsApp createCaptionWindow];
-            FYTestKeychainFailWrites = YES;
             [settingsApp loadSettings];
-            Check([[[defaults objectForKey:SettingsKey] objectForKey:@"apiKey"] isEqual:@"synthetic-legacy-key"] &&
-                  settingsApp.credentialLoadFailed,
-                  @"a failed Keychain migration must preserve the old credential");
+            Check(settingsApp.apiKeyField.stringValue.length == 0 && !settingsApp.credentialLoadFailed,
+                  @"a new version must not reuse a legacy preferences credential");
+            settingsApp.apiKeyField.stringValue = @"synthetic-local-key";
+            FYTestLocalAPIKeyFailWrites = YES;
             [settingsApp saveSettings:nil];
-            Check([[[defaults objectForKey:SettingsKey] objectForKey:@"apiKey"] isEqual:@"synthetic-legacy-key"],
-                  @"other settings saves must not erase a failed migration");
-            FYTestKeychainFailWrites = NO;
-            [settingsApp loadSettings];
-            Check([settingsApp.apiKeyField.stringValue isEqual:@"synthetic-legacy-key"] &&
-                  [FYTestKeychainValue isEqual:@"synthetic-legacy-key"] &&
-                  [[defaults objectForKey:SettingsKey] objectForKey:@"apiKey"] == nil,
-                  @"successful migration must move the credential into Keychain and purge defaults");
+            Check(FYTestLocalAPIKeyValue == nil && settingsApp.persistedAPIKey.length == 0,
+                  @"a failed local write must not pretend the key was saved");
+            FYTestLocalAPIKeyFailWrites = NO;
             [settingsApp saveSettings:nil];
+            Check([FYTestLocalAPIKeyValue isEqual:@"synthetic-local-key"] &&
+                  [settingsApp.persistedAPIKey isEqual:@"synthetic-local-key"],
+                  @"successful save must persist the key outside preferences");
             NSDictionary *written = [defaults objectForKey:SettingsKey];
-            Check(written[@"apiKey"] == nil, @"settings must never persist an API Key");
+            Check(written[@"apiKey"] == nil, @"general settings must not persist an API Key");
             Check(written[@"autoModeEnabled"] == nil && written[@"manualMode"] == nil && written[@"mode"] == nil,
                   @"saved settings must no longer persist any manual mode fields");
             AppDelegate *reloaded = [[AppDelegate alloc] init];
             [reloaded createMainWindow];
             [reloaded createCaptionWindow];
             [reloaded loadSettings];
-            Check([reloaded.apiKeyField.stringValue isEqual:@"synthetic-legacy-key"],
-                  @"reloading must read the credential from Keychain");
+            Check([reloaded.apiKeyField.stringValue isEqual:@"synthetic-local-key"],
+                  @"reloading must read the saved local credential");
             Check([reloaded autoContentModeEnabled] && [reloaded effectiveModeSegment] == ContentModeDialogue,
                   @"reload must always start in auto-detection dialogue mode");
 
@@ -552,13 +550,13 @@ int main(void) {
                   settingsApp.serviceErrorLabel.stringValue.length > 0,
                   @"a failed service test must be visible near service settings");
             [settingsApp serviceSettingsChanged];
-            Check(FYTestKeychainValue == nil && [defaults objectForKey:SettingsKey][@"apiKey"] == nil,
-                  @"clearing a credential must remove it from Keychain without recreating plaintext defaults");
+            Check(FYTestLocalAPIKeyValue == nil && [defaults objectForKey:SettingsKey][@"apiKey"] == nil,
+                  @"clearing a credential must remove the local file without copying it into preferences");
             Check([settingsApp.serviceStatusLabel.stringValue isEqualToString:@"服务未测试"],
                   @"changing service settings must invalidate an old test result");
             if (backup) { [defaults setObject:backup forKey:SettingsKey]; }
             else { [defaults removeObjectForKey:SettingsKey]; }
-            FYTestKeychainValue = nil;
+            FYTestLocalAPIKeyValue = nil;
             [settingsApp.captionPanel orderOut:nil];
             [reloaded.captionPanel orderOut:nil];
         }
@@ -943,7 +941,7 @@ int main(void) {
 
         // 回归：按钮类文字必须排在队尾，且不能挤掉正文。
         // 贴译按这个顺序逐条生成，按钮排最后就不会和正文抢显示位置。
-        // 注意每条文本要唯一 —— 相同文本会被去重，那样就测不到上限行为。
+        // 夹具文字及位置明确独立，用来验证完整保留与正文先行的阅读顺序。
         AppDelegate *orderApp = [[AppDelegate alloc] init];
         NSMutableArray<OCRTextItem *> *buttonMixSample = [NSMutableArray array];
         for (NSUInteger i = 0; i < 12; i++) {
@@ -958,7 +956,7 @@ int main(void) {
         Check(buttonMixSample.count == 20, @"sanity: the ordering sample should contain 20 unique items");
 
         NSArray<OCRTextItem *> *ordered = [orderApp filteredInlineTextItems:buttonMixSample strict:NO];
-        Check(ordered.count == 20, @"all 20 unique items should survive the cap");
+        Check(ordered.count == 20, @"all eligible fields and controls survive filtering");
         NSInteger firstButtonIndex = -1;
         NSInteger lastContentIndex = -1;
         for (NSUInteger i = 0; i < ordered.count; i++) {
@@ -970,14 +968,14 @@ int main(void) {
         Check(lastContentIndex < firstButtonIndex,
               @"button labels must all come AFTER every content line (buttons sorted to the end)");
 
-        // 按钮不能挤掉正文：13 条正文 + 12 个按钮、上限 20 → 正文全部保留，按钮只补 7 个
+        // 超过旧 20 条上限：13 条正文和 12 个实际控制项均保留，控制项仍排在正文后。
         NSMutableArray<OCRTextItem *> *crowded = [NSMutableArray array];
         for (NSUInteger i = 0; i < 13; i++) {
             [crowded addObject:Item([NSString stringWithFormat:@"長い本文その%lu行目です", (unsigned long)i],
                                     CGRectMake(0.30, 0.90 - 0.04 * i, 0.32, 0.035))];
         }
         for (NSUInteger i = 0; i < 12; i++) {
-            [crowded addObject:Item([NSString stringWithFormat:@"項目%lu", (unsigned long)i],
+            [crowded addObject:Item([NSString stringWithFormat:@"%@%lu", buttonLabels[i % buttonLabels.count], (unsigned long)i],
                                     CGRectMake(0.85, 0.85 - 0.04 * i, 0.06, 0.03))];
         }
         NSArray<OCRTextItem *> *crowdedKept = [orderApp filteredInlineTextItems:crowded strict:NO];
@@ -987,8 +985,7 @@ int main(void) {
             if ([orderApp isButtonLikeInlineText:NormalizeForComparison(item.text)]) { keptButtons += 1; }
             else { keptContent += 1; }
         }
-        // 只断言“规律”而不是精确条数：条数受去重和评分影响，硬编码会变成脆弱测试
-        Check(keptContent + keptButtons <= 20, @"the cap should never exceed 20 items");
+        Check(keptContent == 13 && keptButtons == 12, @"all eligible content and controls survive a dense page");
         if (keptButtons > 0) {
             NSInteger firstBtn = -1;
             NSInteger lastContent = -1;
@@ -1503,28 +1500,19 @@ int main(void) {
         // 回归：只有“够大且水平居中”的亮矩形才算弹窗。
         // 实测「我的房间」界面里那张房间照片（x=0.15..0.57，中心 0.36）被误判成弹窗，
         // 12 条文字被裁到 4 条，底部那两行说明整段消失。
-        Check(ModalRectQualifiesForCropping(CGRectMake(0.20, 0.17, 0.60, 0.29)),
+        Check(FYOCRModalRectQualifiesForCropping(CGRectMake(0.20, 0.17, 0.60, 0.29)),
               @"a large horizontally-centred popup must qualify for modal cropping");
-        Check(!ModalRectQualifiesForCropping(CGRectMake(0.15, 0.33, 0.41, 0.34)),
+        Check(!FYOCRModalRectQualifiesForCropping(CGRectMake(0.15, 0.33, 0.41, 0.34)),
               @"an off-centre bright block (e.g. an in-game photo) must NOT be treated as a modal");
-        Check(!ModalRectQualifiesForCropping(CGRectMake(0.40, 0.30, 0.20, 0.30)),
+        Check(!FYOCRModalRectQualifiesForCropping(CGRectMake(0.40, 0.30, 0.20, 0.30)),
               @"a narrow block must not qualify even if centred");
-        Check(!ModalRectQualifiesForCropping(CGRectMake(0.30, 0.45, 0.40, 0.10)),
+        Check(!FYOCRModalRectQualifiesForCropping(CGRectMake(0.30, 0.45, 0.40, 0.10)),
               @"a short block must not qualify even if centred");
-        Check(!ModalRectQualifiesForCropping(CGRectMake(0.05, 0.30, 0.45, 0.30)),
+        Check(!FYOCRModalRectQualifiesForCropping(CGRectMake(0.05, 0.30, 0.45, 0.30)),
               @"a left-aligned block must not qualify");
 
-        // 回归：弹窗裁剪必须处于关闭状态。
-        // 它连续 3 次误伤正常界面（我的房间 / 邮件界面底部说明被整段裁掉）。
-        // 实测尺寸、居中、亮度差都无法区分真弹窗和普通界面里的大亮块，故默认关闭。
+        // 无图像证据时必须保留普通页面；完整弹窗/邮件反例在 ModalOverlayRegressionTests。
         {
-            NSString *srcPath = [NSString stringWithFormat:@"%s/../objc/LiveCaptionTranslator.m", __FILE__];
-            NSString *src = [NSString stringWithContentsOfFile:srcPath encoding:NSUTF8StringEncoding error:NULL];
-            if (src.length > 0) {
-                Check([src rangeOfString:@"static const BOOL kModalScopingEnabled = NO;"].location != NSNotFound,
-                      @"modal scoping must stay disabled by default (it repeatedly cropped away real UI text)");
-            }
-            // 关闭时，弹窗裁剪必须原样返回，一条都不能丢
             AppDelegate *modalApp = [[AppDelegate alloc] init];
             NSArray<OCRTextItem *> *sample = @[
                 Item(@"知り合いからのメールやアルバイト情報などを見ることができます。", CGRectMake(0.20, 0.10, 0.55, 0.05)),
@@ -1532,7 +1520,7 @@ int main(void) {
             ];
             NSArray<OCRTextItem *> *out = [modalApp blocksInsideModalIfPresent:sample inImage:NULL normalizedExclusions:@[]];
             Check(out.count == sample.count,
-                  @"with modal scoping disabled every block must be passed through untouched");
+                  @"without image evidence every block must be passed through untouched");
         }
 
         NSLog(@"Inline translation tests passed");

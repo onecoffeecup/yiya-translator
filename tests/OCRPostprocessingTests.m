@@ -210,7 +210,17 @@ int main(void) {
         [FYOCRManager remapItems:@[mapped] fromPixelCrop:CGRectMake(125,400,250,200) imageSize:CGSizeMake(1000,800)];
         Expect(NearRect(mapped.boundingBox,CGRectMake(.175,.325,.1,.025)), @"bounding box maps into source Vision coordinates");
         Expect(NearRect(mapped.lastLineBox,CGRectMake(.15,.275,.05,.0125)), @"nonempty last-line box maps with same transform");
-        Expect(NearRect(mapped.lineBoxes[0].rectValue,CGRectMake(.2,.3,.4,.1)) && [mapped.sourceBlockID isEqual:@"keep"] && mapped.confidence==.77, @"other metadata/lineBoxes intentionally retain legacy semantics");
+        Expect(NearRect(mapped.lineBoxes[0].rectValue,CGRectMake(.175,.325,.1,.025)) && [mapped.sourceBlockID isEqual:@"keep"] && mapped.confidence==.77,
+               @"per-line boxes map with the union box while unrelated metadata stays intact");
+        OCRTextItem *multiline=Item(@"帰宅部\n桜井琥一の弟。\nスリルは彼の活力。",.608,.079,.204,.164);
+        multiline.lineBoxes=@[[NSValue valueWithRect:CGRectMake(.610,.201,.070,.041)],
+                              [NSValue valueWithRect:CGRectMake(.610,.129,.154,.051)],
+                              [NSValue valueWithRect:CGRectMake(.609,.079,.203,.060)]];
+        NSArray<OCRTextItem *> *split=[FYOCRManager splitMultilineItems:@[multiline]];
+        Expect(split.count==3 && [split[0].text isEqual:@"帰宅部"] &&
+               [split[1].text isEqual:@"桜井琥一の弟。"] &&
+               NearRect(split[1].boundingBox,CGRectMake(.610,.129,.154,.051)),
+               @"Vision multiline observation retains separate text and character-range geometry");
         OCRTextItem *noLast=Item(@"無",0,0,1,1);
         [FYOCRManager remapItems:@[noLast] fromPixelCrop:CGRectMake(125,400,250,200) imageSize:CGSizeMake(1000,800)];
         Expect(CGRectEqualToRect(noLast.lastLineBox,CGRectZero), @"empty last-line box remains empty");

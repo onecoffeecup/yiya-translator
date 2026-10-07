@@ -22,6 +22,7 @@ def excluded(path):
             or path.as_posix().startswith("docs/images/promo/")
             or path.as_posix() == "docs/重复修复候选验收清单-20261005.md"
             or path.as_posix() == "tests/MappingDebug.m"
+            or path.name == "api-key.json"
             or path.name.startswith((".env", "reference.sqlite"))
             or path.suffix.lower() in {".sqlite", ".sqlite3", ".db", ".log"}
             or path.suffix in {".pyc", ".pyo", ".pem", ".p12", ".pfx"})

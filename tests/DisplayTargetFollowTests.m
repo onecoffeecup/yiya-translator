@@ -80,6 +80,15 @@ static void (^gPendingResponse)(void);
 
 #pragma mark - 夹具
 
+// 几何套件的 OCR 是已确认的固定夹具；连续帧纠错不属于本套件。
+// 原启动路径初始化了新的帧确认器，这里显式提供同接口的稳定输入替身。
+@interface FollowConfirmedOCR : FYInlineOCRFrameStabilizer
+@end
+@implementation FollowConfirmedOCR
+- (BOOL)ready { return YES; }
+- (NSArray<OCRTextItem *> *)observeItems:(NSArray<OCRTextItem *> *)items { return items; }
+@end
+
 @interface FollowApp : AppDelegate
 @property(nonatomic, strong) NSArray<WindowItem *> *fixtureWindows;
 @property(nonatomic, strong) NSMutableDictionary<NSNumber *, NSValue *> *liveBounds;
@@ -190,6 +199,7 @@ static FollowApp *FollowMakeApp(FYLearningStore *store, FYLearningAnalyzer *anal
     app.liveBounds = [NSMutableDictionary dictionary];
     app.ocrFixture = @[];
     app.inlineTranslationCache = [NSMutableDictionary dictionary];
+    app.inlineFrameStabilizer = [FollowConfirmedOCR new];
     app.running = YES;
     app.usesScriptedTarget = NO;
     app.scriptedTargetID = 0;
@@ -323,7 +333,7 @@ static void TestDisplayTargetPolicy(FYLearningStore *store, FYLearningAnalyzer *
                                                  ambiguous:&ambiguous note:&note];
     Check(target == 0 && ambiguous, @"多个投影同时在前台时返回「无法确定」并标记歧义");
 
-    // 用户选的是投影窗口，投影关掉、回到编辑器：选中窗口不在屏幕上时跟随唯一的画面窗口。
+    // 用户选的是投影窗口，投影关掉、回到编辑器：跟随唯一的画面窗口。
     FollowSetWindowSelection(app, projector, @"OBS · 全屏投影");
     FollowRefreshWindowItems(app, @[FollowWindowItem(editor, @"OBS", @"编辑器", editorBounds),
                                    FollowWindowItem(projector, @"OBS", @"全屏投影", screen)]);

@@ -1,5 +1,31 @@
 #import "FYWindowManager.h"
 static void Check(BOOL ok,NSString *message){if(!ok){NSLog(@"FAIL %@",message);exit(1);}}
+
+static NSDictionary *TargetWindow(uint32_t wid, NSString *owner, NSString *title, CGRect bounds) {
+    return @{(id)kCGWindowNumber:@(wid), (id)kCGWindowOwnerPID:@100,
+             (id)kCGWindowOwnerName:owner, (id)kCGWindowName:title,
+             (id)kCGWindowLayer:@0,
+             (id)kCGWindowBounds:CFBridgingRelease(CGRectCreateDictionaryRepresentation(bounds))};
+}
+static void CheckOBSTargetSelection(void) {
+    FYWindowManager *manager=[FYWindowManager new];
+    CGRect screen=CGDisplayBounds(CGMainDisplayID());
+    CGRect preview=CGRectMake(screen.origin.x+20,screen.origin.y+60,480,302);
+    NSDictionary *editor=TargetWindow(10,@"OBS Studio",@"OBS 32.2.2 - 配置文件: 未命名 - 场景: 未命名",screen);
+    NSDictionary *projector=TargetWindow(20,@"OBS Studio",@"投影 - 预览",preview);
+    NSDictionary *fullscreen=TargetWindow(30,@"OBS Studio",@"Fullscreen Projector (Preview)",screen);
+    BOOL ambiguous=NO; NSString *note=nil;
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[editor,projector] selectedID:20 ownerPID:100 ambiguous:&ambiguous note:&note]==10 && !ambiguous,@"foreground OBS editor takes over covered small projector rather than keeping hidden projector coordinates");
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[editor] selectedID:20 ownerPID:100 ambiguous:&ambiguous note:&note]==10,@"closed projector returns to the remaining OBS editor");
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[editor] selectedID:10 ownerPID:100 ambiguous:&ambiguous note:&note]==10,@"explicitly selected OBS main window remains available");
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[fullscreen,editor] selectedID:10 ownerPID:100 ambiguous:&ambiguous note:&note]==30,@"actual fullscreen projector still replaces selected editor");
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[editor,fullscreen] selectedID:20 ownerPID:100 ambiguous:&ambiguous note:&note]==0 && ambiguous,@"equally large remaining picture windows require an explicit choice");
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[projector,editor] selectedID:20 ownerPID:100 ambiguous:&ambiguous note:&note]==20,@"foreground small projector keeps its own geometry when editor is behind it");
+    NSDictionary *actualEditor=TargetWindow(95338,@"OBS Studio",@"OBS 32.2.2 - 配置文件: 未命名 - 场景: 未命名",CGRectMake(0,38,1644,956));
+    NSDictionary *actualProjector=TargetWindow(95900,@"OBS Studio",@"投影 - 预览",CGRectMake(0,38,480,302));
+    Check([manager resolveDisplayTargetWindowIDInWindowList:@[actualEditor,actualProjector] selectedID:95900 ownerPID:100 ambiguous:&ambiguous note:&note]==95338,@"screenshot regression: 1644x956 editor replaces covered 480x302 projector");
+}
+
 int main(void){@autoreleasepool{
     Check(FYTargetQualifiesForOverlay(100,100,NO,YES,NO),@"foreground projector owner keeps overlay");
     Check(!FYTargetQualifiesForOverlay(200,100,YES,YES,NO),@"other foreground app hides overlay");
@@ -24,5 +50,6 @@ int main(void){@autoreleasepool{
     Check(duplicate.targetOnScreen && duplicate.targetPID==0 && !duplicate.ownerHasOnScreenWindow,@"first target with missing owner is not replaced by later duplicate");
     FYWindowVisibilitySnapshot prefix=FYWindowVisibilityInList(20,100,visible);
     Check(prefix.targetOnScreen && prefix.targetPID==100 && prefix.ownerHasOnScreenWindow,@"known owner appearing before target remains visible in single pass");
-    NSLog(@"PASS WindowPolicyTests: 14 assertions, no AppDelegate or UI initialization");
+    CheckOBSTargetSelection();
+    NSLog(@"PASS WindowPolicyTests: 21 assertions, no AppDelegate or UI initialization");
 }return 0;}

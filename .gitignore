@@ -34,3 +34,6 @@ __pycache__/
 /jlpt-n2-*
 # 第三方词表（CC BY-NC 4.0，禁商用）；文字资料包单独备作 Release 附件，来源和校验清单见 docs/data/。
 /output/
+
+# Runtime API credentials are never public source artifacts.
+api-key.json

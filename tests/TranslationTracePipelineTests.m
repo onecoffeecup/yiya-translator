@@ -157,12 +157,12 @@ int main(void) { @autoreleasepool {
     NSArray *partial = Fixture(@"明日はみんなで", .31);
     TracePipelineApp *off = RunSequence(full, partial);
     NSArray *offSources = [SubmittedSources copy], *offCaptions = [off.captions copy];
-    Require(MockRequests == 3 && ![NSFileManager.defaultManager fileExistsAtPath:log], @"disabled: same known three-request behavior and no log");
+    Require(MockRequests == 1 && ![NSFileManager.defaultManager fileExistsAtPath:log], @"disabled: clipped frames reuse the one complete translation, no log");
     ArmTrace(root);
     TracePipelineApp *on = RunSequence(full, partial);
-    Require(MockRequests == 3 && [offSources isEqual:SubmittedSources] && [offCaptions isEqual:on.captions], @"trace must preserve requests and displayed outputs");
+    Require(MockRequests == 1 && [offSources isEqual:SubmittedSources] && [offCaptions isEqual:on.captions], @"trace must preserve requests and displayed outputs");
     NSArray *records = Records(log);
-    Require(Count(records,@"request_submit") == 3 && Count(records,@"request_complete") == 3 && Count(records,@"caption_apply") == 3, @"real submit/response/apply call sites logged using mock transport");
+    Require(Count(records,@"request_submit") == 1 && Count(records,@"request_complete") == 1 && Count(records,@"caption_apply") == 3, @"one HTTP result plus reused full captions are logged using mock transport");
     Require(Count(records,@"ocr") == 18 && Count(records,@"stable") == 6 && Count(records,@"mode") == 6, @"every synthetic OCR frame and stability decision logged");
     for (NSDictionary *submit in records) {
         if (![submit[@"event"] isEqual:@"request_submit"]) { continue; }
@@ -176,10 +176,10 @@ int main(void) { @autoreleasepool {
         Require(response && apply, @"request completion and applied caption are linked");
     }
     TraceCycle(on, full);
-    Require(MockRequests == 3, @"unchanged frame skips request");
+    Require(MockRequests == 1, @"unchanged frame skips request");
     on.lastTranslatedNormalizedText = nil; on.lastSubmittedNormalizedText = nil;
-    TraceCycle(on, full);
-    Require(MockRequests == 3, @"cache hit does not submit another request");
+    TraceCycle(on, full); TraceCycle(on, full);
+    Require(MockRequests == 1, @"cache hit does not submit another request");
     BOOL hit = NO, skipped = NO;
     for (NSDictionary *r in Records(log)) {
         hit |= [r[@"event"] isEqual:@"cache"] && [r[@"cache_hit"] boolValue];
@@ -198,6 +198,8 @@ int main(void) { @autoreleasepool {
     Require(dropped, @"window change reason logged");
     TracePipelineApp *ui = TraceApp(); ui.fixtureMode = ContentModeUI;
     TraceCycle(ui, Fixture(@"設定メニュー", .3));
+    Require(ui.inlineApplies == 0, @"first UI frame waits for confirmation using the real stabilizer");
+    TraceCycle(ui, Fixture(@"設定メニュー", .3));
     Pump(^BOOL { return ui.inlineApplies == 1; });
     Require(Count(Records(log), @"inline_apply") == 1, @"UI transition route can correlate inline application");
     NSString *text = [NSString stringWithContentsOfFile:log encoding:NSUTF8StringEncoding error:NULL];
@@ -211,5 +213,5 @@ int main(void) { @autoreleasepool {
     TraceCycle(on, partial); TraceCycle(on, partial);
     Require([[[NSFileManager defaultManager] attributesOfItemAtPath:log error:NULL] fileSize] == bytes, @"stop dynamically suppresses all pipeline writes");
     Require(NSApp == nil && FYCurrentTrace() == nil, @"no app UI and no leaked trace context");
-    printf("PASS TranslationTracePipelineTests: off/on request parity=3; OCR/stability/cache/request/response/apply correlation; stale-window drop; inline route; credential exclusion; dynamic stop; synthetic capture and mock HTTP only\n");
+    printf("PASS TranslationTracePipelineTests: off/on request parity=1; OCR/stability/cache/request/response/apply correlation; stale-window drop; inline route; credential exclusion; dynamic stop; synthetic capture and mock HTTP only\n");
 } return 0; }
