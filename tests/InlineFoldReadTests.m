@@ -161,6 +161,10 @@ static NSArray<OCRTextItem *> *FoldProfileItemsJittered(void) {
 }
 
 static NSArray<NSString *> *FoldProfileTranslations(NSString *bodyTranslation) {
+    // 短译文如今会按正文实际行数收紧并直接显示；折叠交互夹具需要确实较长的译文。
+    if ([bodyTranslation isEqualToString:kFoldBodyTranslation]) {
+        bodyTranslation = [NSString stringWithFormat:@"%@\n%@\n%@", bodyTranslation, bodyTranslation, bodyTranslation];
+    }
     return @[@"◆樱井琉夏的喜好◆", @"身高", @"体重", @"打工", @"花店安妮莉", @"社团",
              @"回家部\n桜井琥一的弟弟。刺激是他的活力。", @"美代的笔记", bodyTranslation];
 }
@@ -665,7 +669,7 @@ static void TestSameTextTwoPlaces(void) {
     OCRTextItem *first = FoldItem(sharedText, CGRectMake(0.06, 0.42, 0.86, 0.28), InlineBlockKindLong, boxesA);
     OCRTextItem *second = FoldItem(sharedText, CGRectMake(0.06, 0.01, 0.86, 0.27), InlineBlockKindLong, boxesB);
     NSString *translationA = @"译文甲：这是第一处相同原文的译文。";
-    NSString *translationB = @"译文乙：这是第二处相同原文的译文。";
+    NSString *translationB = @"译文乙：这是第二处相同原文的译文。这里还有很多需要展开后阅读的说明，继续说明第二处原文的区别，以及后续的细节。";
     NSRect viewport = NSMakeRect(0, 0, 420, 300);
     FoldApp *app = FoldFixtureApp(viewport);
     [app showInlineTranslations:@[translationA, translationB] forItems:@[first, second] placementRect:viewport];

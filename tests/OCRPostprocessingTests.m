@@ -312,6 +312,18 @@ int main(void) {
         Expect([FYOCRManager contentModeForItems:@[fragment] fallback:0]==0 && [FYOCRManager contentModeForItems:@[fragment] fallback:1]==1, @"central short kana fragment cannot switch established mode");
         Expect([FYOCRManager contentModeForItems:@[help] fallback:0]==0, @"corner hint retains dialogue fallback");
         Expect([FYOCRManager contentModeForItems:@[sign] fallback:0]==1, @"unrelated environmental line selects UI without dialogue evidence");
+        source=Image(1000,800);
+        __block NSUInteger scopeCalls=0;
+        NSArray *scopedItems=[FYOCRManager recognizeImage:source topLeftScope:CGRectMake(.2,.25,.5,.5) recognizer:^NSArray *(CGImageRef crop,NSError **e) {
+            scopeCalls++;
+            Expect(CGImageGetWidth(crop)==500 && CGImageGetHeight(crop)==400,@"manual scope crops input before recognition");
+            return @[Item(@"框内",.1,.2,.4,.3)];
+        } error:NULL];
+        Expect(NearRect([scopedItems[0] boundingBox],CGRectMake(.25,.35,.2,.15)),@"manual scope restores bottom-left full-frame coordinates");
+        NSArray *full=@[Item(@"整画面",.1,.1,.2,.2)];
+        Expect([FYOCRManager recognizeImage:source topLeftScope:CGRectMake(0,0,1,1) recognizer:^NSArray *(CGImageRef image,NSError **e){Expect(image==source,@"automatic scope borrows unchanged full image");return full;} error:NULL]==full,@"automatic scope preserves output identity");
+        Expect([FYOCRManager recognizeImage:source topLeftScope:CGRectMake(2,0,.2,.2) recognizer:^NSArray *(CGImageRef crop,NSError **e){scopeCalls++;return full;} error:NULL].count==0 && scopeCalls==1,@"invalid manual region never expands to full frame");
+        CGImageRelease(source);
         source=Image(1000,800); FYOCRPixelBuffer buffer=FYCreateOCRPixelBuffer(source);
         Expect(buffer.pixels && buffer.context && buffer.width==480 && buffer.height==384 && buffer.bytesPerRow==480*4, @"sampling buffer scales width to 480 with original aspect ratio and RGBA stride");
         CGImageRelease(source); unsigned char sampled=buffer.pixels[0]; (void)sampled;

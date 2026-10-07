@@ -322,8 +322,10 @@ static void TestLayoutMailPageColumnBinding(void) {
     Check(body != nil, @"邮件页：长正文有排版结果");
     Check(body != nil && body.mode != FYInlineDisplayModeCompactEntry, @"邮件页：长正文不是紧凑入口");
     Check(body != nil && NSWidth(body.translationFrame) >= 300, @"邮件页：长卡宽度足够避免碎行");
-    Check(body != nil && NSHeight(body.translationFrame) >= [FYInlineLayoutEngine defaultEngine].minimumCardHeight - 1,
-          @"邮件页：长卡满足可读下限");
+    CGFloat lineHeight = body ? ceil(body.font.ascender - body.font.descender + body.font.leading) + [FYInlineLayoutEngine defaultEngine].longLineSpacing : 0;
+    Check(body != nil && (body.scrollable ? body.bodyViewportHeight >= lineHeight * 3 - 1
+                                         : body.bodyViewportHeight >= body.measuredContentHeight - 1),
+          @"邮件页：长卡按实际译文高度显示；滚动时保留三行视口");
 }
 
 static void TestLayoutLongCardReadability(void) {
@@ -364,19 +366,34 @@ static void TestLayoutCardHugsContent(void) {
     NSArray<FYInlineTextBlock *> *blocks = Group(lines);
     FYInlineLayoutEngine *engine = [FYInlineLayoutEngine defaultEngine];
 
-    // ① 很短：高度取下限（三行可读），但绝不需要滚动。
+    // ① 很短：只留一行正文，不被长文的三行可读下限撑高。
     NSString *shortText = @"活动开始了。";
     NSArray<FYInlineLayoutRequest *> *shortRequests = RequestsFromBlocks(blocks, @{blocks.firstObject.text: shortText}, viewport);
     FYInlinePlacement *shortPlacement = [engine layoutRequests:shortRequests viewport:viewport previous:nil].placements.firstObject;
     CGFloat shortChrome = shortPlacement.panelPadding * 2 + shortPlacement.titleBandHeight;
     Check(shortPlacement.mode == FYInlineDisplayModeFullCard && !shortPlacement.scrollable,
           @"贴合内容：很短的译文也是完整长卡且不滚动");
-    Check(fabs(NSHeight(shortPlacement.translationFrame) -
-               MAX(engine.minimumCardHeight, shortPlacement.measuredContentHeight + shortChrome)) <= 2,
-          [NSString stringWithFormat:@"贴合内容：卡高 = max(三行可读下限, 正文+内边距+标题带)（实际 %.0f）",
+    Check(NSHeight(shortPlacement.translationFrame) < engine.minimumCardHeight - 10 &&
+          fabs(NSHeight(shortPlacement.translationFrame) -
+               MAX(shortChrome + ceil(shortPlacement.font.ascender - shortPlacement.font.descender + shortPlacement.font.leading) + engine.longLineSpacing,
+                   shortPlacement.measuredContentHeight + shortChrome)) <= 2,
+          [NSString stringWithFormat:@"贴合内容：一行译文不预留三行空白（实际 %.0f）",
            NSHeight(shortPlacement.translationFrame)]);
 
-    // ② 中等长度：明显高于下限、但仍在一屏之内 → 卡高应等于正文文档高 + chrome。
+    // ② 两行译文：正文完整可见，卡片底部不再多留第三行。
+    FYInlineLayoutRequest *twoLineRequest = [FYInlineLayoutRequest requestWithBlock:blocks.firstObject
+                                                                         translation:@"无所属小鹿班的班主任。用灵魂碰撞的热血教师。"
+                                                                         sourceFrame:CGRectMake(100, 250, 360, 100)];
+    FYInlinePlacement *twoLine = [engine layoutRequests:@[twoLineRequest] viewport:viewport previous:nil].placements.firstObject;
+    CGFloat twoLineHeight = ceil(twoLine.font.ascender - twoLine.font.descender + twoLine.font.leading) + engine.longLineSpacing;
+    CGFloat twoLineChrome = twoLine.panelPadding * 2 + twoLine.titleBandHeight;
+    Check(twoLine.measuredContentHeight > twoLineHeight && twoLine.measuredContentHeight < twoLineHeight * 3,
+          @"贴合内容：两行回归夹具确实换成两行");
+    Check(fabs(NSHeight(twoLine.translationFrame) - (twoLine.measuredContentHeight + twoLineChrome)) <= 2 &&
+          NSHeight(twoLine.translationFrame) < engine.minimumCardHeight - 5 && !twoLine.scrollable,
+          @"贴合内容：两行译文的卡高不预留第三行");
+
+    // ③ 中等长度：明显高于下限、但仍在一屏之内 → 卡高应等于正文文档高 + chrome。
     NSString *medium = @"新的季节活动即将开始。活动期间还会推出限定服装，请千万不要错过。"
                         "此外还计划公开期间限定的特别剧情，详情请查看官方网站。报名截止到本月底，"
                         "每天登录还能领取一份小礼物，累计登录七天可获得纪念道具。";

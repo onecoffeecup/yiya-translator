@@ -65,4 +65,4 @@ bash scripts/run-translation-trace-tests.sh
 
 ## 加载到安装版
 
-本次仅构建了 `.build/release/LiveCaptionTranslator`，没有替换安装版、重启应用或进行真实现场复现。加载新版需要先正常退出译芽，经授权运行 `bash scripts/install-app.sh`，再打开 `~/Applications/译芽.app`。安装脚本会打包、备份并替换原应用；它不是诊断开关的一部分。打开新版后，文字开关可动态启停，无需为每次采样重启。
+2026-10-07 更新的 v0.2.0 附件已包含此模块。更新本机安装版时，先正常退出译芽，再按首次打开说明替换应用；从源码构建则可运行 `bash scripts/install-app.sh`，它会备份并替换原应用。安装脚本不是诊断开关的一部分。新版打开后，文字开关可动态启停，无需为每次采样重启。

@@ -15,12 +15,13 @@ clang \
   -mmacosx-version-min=13.0 \
   -Wall \
   -include "$ROOT_DIR/tests/FYTestIsolation.h" \
-  -I "$ROOT_DIR/objc/learning" \
+  -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
   "$ROOT_DIR/tests/LearningTests.m" \
   "$ROOT_DIR/tests/FYTestIsolation.m" \
   "$ROOT_DIR/objc/learning/FYLearningModels.m" \
   "$ROOT_DIR/objc/learning/FYLearningStore.m" \
   "$ROOT_DIR/objc/learning/FYLearningAnalyzer.m" \
+  "$ROOT_DIR/objc/FYTranslationManager.m" \
   "$ROOT_DIR/objc/learning/FYJapaneseTokenizer.m" \
   "$ROOT_DIR/objc/learning/FYGrammarCatalog.m" \
   "$ROOT_DIR/objc/learning/FYLearningCoordinator.m" \

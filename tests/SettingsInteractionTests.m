@@ -37,7 +37,19 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     app.learningCoordinator=[[FYLearningCoordinator alloc] initWithStore:store analyzer:Analyzer(catalog) tokenizer:[FYJapaneseTokenizer new] catalog:catalog];
     [app createMainWindow];[app createCaptionWindow];
     [app.mainWindow makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
+    [app.mainWindow setContentSize:NSMakeSize(720,700)];[app selectPageAtIndex:4];Tick();
+    NSScrollView *narrowAppearance=(NSScrollView *)app.pages[4];
+    NSRect themeFrame=[app.captionThemeControl convertRect:app.captionThemeControl.bounds toView:narrowAppearance.contentView];
+    Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-720)<2 && app.mainStudyChatView.hidden &&
+            !app.mainChatToggle.enabled && NSWidth(narrowAppearance.frame)>500,@"narrow window keeps its requested width and releases AI space for readable settings");
+    Require(NSMinX(themeFrame)>=0 && NSMaxX(themeFrame)<=NSWidth(narrowAppearance.contentView.bounds)+1,@"all caption theme choices remain inside the visible settings column");
+    Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-narrow-with-ai-auto-collapsed.png"]);
+    [app.mainWindow setContentSize:NSMakeSize(1320,800)];Tick();
+    Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-1320)<2 && !app.mainStudyChatView.hidden && app.mainChatToggle.enabled,@"window regains its requested width and AI sidebar returns");
     if(!app.mainStudyChatView.hidden){[app toggleMainStudyChat:nil];}
+    [app.mainWindow setContentSize:NSMakeSize(720,700)];Tick();
+    [app.mainWindow setContentSize:NSMakeSize(1320,800)];Tick();
+    Require(app.mainStudyChatView.hidden,@"manual AI collapse remains the user's choice after a narrow/wide resize");
     [app selectPageAtIndex:4];[app.mainWindow.contentView layoutSubtreeIfNeeded];Tick();
     NSString *caption=app.captionTextLabel.stringValue;NSRect frame=app.captionPanel.frame;BOOL shown=app.captionPanelShownByUser;
     NSButton *preview=Button(app.pages[4],@selector(showCaptionAppearancePreview:));
@@ -49,9 +61,21 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     app.captionFontSizeSlider.doubleValue=56;app.captionThemeControl.selectedSegment=1;app.captionOpacitySlider.doubleValue=.85;
     [NSApp sendAction:app.captionFontSizeSlider.action to:app from:app.captionFontSizeSlider];Tick();
     Require(app.captionAppearancePreviewText.font.pointSize==56 && [app.captionAppearancePreviewText.textColor isEqual:[app captionTextColor]],@"style controls update preview immediately");
+    app.captionWidthSlider.doubleValue=640;
+    app.captionTextColorWell.color=[NSColor colorWithSRGBRed:0.42 green:0.21 blue:0.12 alpha:1];
+    [app controlValueChanged:app.captionTextColorWell];Tick();
+    Require(fabs(NSWidth(app.captionPanel.frame)-640)<2 && fabs(NSWidth(app.captionAppearancePreviewPanel.frame)-640)<2,@"single caption width controls both real and preview windows");
+    Require(app.captionTextColorCustomized && [app.captionTextLabel.textColor isEqual:app.captionTextColorWell.color] && [app.captionAppearancePreviewText.textColor isEqual:app.captionTextColorWell.color],@"selected caption color reaches real and preview text");
+    app.batchFontSizeSlider.doubleValue=22;app.batchWidthSlider.doubleValue=480;app.batchHeightSlider.doubleValue=280;
+    app.batchTextColorWell.color=[NSColor colorWithSRGBRed:0.31 green:0.19 blue:0.13 alpha:1];
+    [app controlValueChanged:app.batchTextColorWell];
+    Require(app.inlineLayoutEngine.shortFontSize==22 && app.inlineLayoutEngine.cardMaxWidth==480 && app.inlineLayoutEngine.cardMaxHeight==280,@"batch controls update measured subtitle geometry");
+    Require([[app inlinePanelTextColor] isEqual:app.batchTextColorWell.color] && ![[app inlinePanelTextColor] isEqual:[app captionTextColor]],@"batch color is independent from selected caption color");
+    [app resetCaptionTextColor:nil];
+    Require(!app.captionTextColorCustomized && [[app captionTextColor] isEqual:[app captionThemeTextColor]],@"selected caption color can follow the chosen theme again");
     [app.captionAppearancePreviewPanel.contentView layoutSubtreeIfNeeded];
     Require(NSMinY(app.captionAppearancePreviewText.frame)>=20 && NSMaxY(app.captionAppearancePreviewText.frame)<=NSMinY(app.captionAppearancePreviewBrand.frame),@"large text fits below the label and inside the preview");
-    app.captionFontSizeSlider.doubleValue=30;app.captionThemeControl.selectedSegment=3;[app updateCaptionAppearance];Tick();
+    app.captionFontSizeSlider.doubleValue=30;app.captionThemeControl.selectedSegment=3;app.captionWidthSlider.doubleValue=900;[app updateCaptionAppearance];Tick();
     Snapshot(app.captionAppearancePreviewPanel.contentView,[output stringByAppendingPathComponent:@"caption-preview.png"]);
     Require([app.captionTextLabel.stringValue isEqualToString:caption] && app.captionPanelShownByUser==shown,@"sample never replaces translation or changes its hide/show preference");
     [app selectPageAtIndex:5];Tick();Require(!app.captionAppearancePreviewPanel.isVisible,@"leaving appearance closes the preview");

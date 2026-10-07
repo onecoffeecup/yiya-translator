@@ -36,6 +36,7 @@ typedef NS_ENUM(NSInteger, FYTranslationURLValidationError) {
     FYTranslationURLMissingHost,
     FYTranslationURLUnsupportedComponents,
     FYTranslationURLMalformed,
+    FYTranslationURLInsecureRemoteHTTP,
 };
 // Invalid input returns nil and a localized error; diagnostics never include credentials/input URL.
 FOUNDATION_EXPORT NSURL *FYChatCompletionsURLWithError(NSString *baseURL, NSError **error);

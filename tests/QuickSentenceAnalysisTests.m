@@ -96,7 +96,9 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     Require(!app.quickSentenceRequested && !app.quickSentencePanel.isVisible && !app.quickSentenceAnalyzing,@"late response cannot reopen closed panel");
     [app showQuickSentence:nil];Pump(^BOOL{return requests==3;});
     pending(nil,nil,[NSError errorWithDomain:@"mock" code:500 userInfo:@{NSLocalizedDescriptionKey:@"模拟失败"}]);Pump(^BOOL{return !app.quickSentenceAnalyzing;});
-    Require(Shows(app.quickSentencePanel.contentView,@"模拟失败") && Shows(app.quickSentencePanel.contentView,@"这一句的语法"),@"failure stays in overlay");
+    Require(Shows(app.quickSentencePanel.contentView,@"网络连接失败") &&
+            !Shows(app.quickSentencePanel.contentView,@"模拟失败") &&
+            Shows(app.quickSentencePanel.contentView,@"这一句的语法"),@"sanitized failure stays in overlay");
     [app analyzeQuickSentence:nil];Require(requests==4 && app.quickSentenceAnalyzing,@"retry starts dedicated analysis");
     pending(Envelope(@"{\"schema_version\":1,\"grammar\":[],\"vocabulary\":[],\"sentence_note_zh\":\"句子说明\"}"),Response(),nil);Pump(^BOOL{return !app.quickSentenceAnalyzing;});
     [app closeStudyOverlay:nil];[app showQuickSentence:nil];Tick();Require(requests==4 && Shows(app.quickSentencePanel.contentView,@"句子说明"),@"reopening same analyzed snapshot reuses result");

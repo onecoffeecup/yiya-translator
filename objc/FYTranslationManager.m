@@ -90,6 +90,9 @@ NSURL *FYChatCompletionsURLWithError(NSString *baseURL, NSError **error) {
     if (!([scheme isEqual:@"https"] || [scheme isEqual:@"http"])) return FYInvalidServiceURL(error,FYTranslationURLInvalidScheme,@"翻译服务地址必须使用 http 或 https。");
     if (!components.host.length) return FYInvalidServiceURL(error,FYTranslationURLMissingHost,@"翻译服务地址缺少主机名。");
     if (components.user.length || components.password.length || components.query.length || components.fragment.length) return FYInvalidServiceURL(error,FYTranslationURLUnsupportedComponents,@"翻译服务地址不能包含用户名、密码、查询参数或片段。");
+    NSString *host=components.host.lowercaseString;
+    BOOL loopback=[host isEqual:@"localhost"] || [host isEqual:@"127.0.0.1"] || [host isEqual:@"::1"] || [host isEqual:@"[::1]"];
+    if ([scheme isEqual:@"http"] && !loopback) return FYInvalidServiceURL(error,FYTranslationURLInsecureRemoteHTTP,@"远程 HTTP 会明文传输 API Key；请改用 HTTPS。本机服务可使用 localhost、127.0.0.1 或 [::1]。");
     while ([baseURL hasSuffix:@"/"]) baseURL=[baseURL substringToIndex:baseURL.length-1];
     if (![baseURL hasSuffix:@"/chat/completions"]) baseURL=[baseURL stringByAppendingString:@"/chat/completions"];
     NSURL *url=[NSURL URLWithString:baseURL];
@@ -170,6 +173,7 @@ static NSString *FYTrimString(id value) {
                            sourceText:(NSString *)text systemPrompt:(NSString *)prompt
                             maxTokens:(NSInteger)maxTokens disableReasoning:(BOOL)disableReasoning
                                 error:(NSError **)error {
+    if (!FYChatCompletionsURLWithError(url.absoluteString, error)) { return nil; }
     NSMutableDictionary *payload = [@{@"model": model, @"messages": @[
         @{@"role": @"system", @"content": prompt}, @{@"role": @"user", @"content": FYTrimString(text)}],
         @"temperature": @0.2, @"max_tokens": @(MAX(120, maxTokens))} mutableCopy];

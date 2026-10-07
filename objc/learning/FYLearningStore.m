@@ -4,10 +4,14 @@
 const NSUInteger FYRecentSentenceLimit = 5;
 
 static NSError *FYStoreError(sqlite3 *db, NSString *message) {
-    const char *err = db ? sqlite3_errmsg(db) : "unknown";
     return [NSError errorWithDomain:@"FYLearningStore"
                                code:db ? sqlite3_errcode(db) : 0
-                           userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"%@ (%s)", message, err]}];
+                           userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
+static NSString *FYSQLiteStringOrEmpty(sqlite3_stmt *stmt, int column) {
+    const unsigned char *value = sqlite3_column_text(stmt, column);
+    return value ? ([NSString stringWithUTF8String:(const char *)value] ?: @"") : @"";
 }
 
 static NSDate *FYDateFromNumber(NSNumber *number) {
@@ -558,10 +562,10 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
 
 - (FYSentenceRecord *)sentenceRecordFromStatement:(sqlite3_stmt *)stmt {
     FYSentenceRecord *record = [[FYSentenceRecord alloc] init];
-    record.sentenceID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 0)] ?: @"";
-    record.sessionID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 1)] ?: @"";
+    record.sentenceID = FYSQLiteStringOrEmpty(stmt, 0);
+    record.sessionID = FYSQLiteStringOrEmpty(stmt, 1);
     record.kind = (FYSentenceKind)sqlite3_column_int(stmt, 2);
-    record.originalText = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 3)] ?: @"";
+    record.originalText = FYSQLiteStringOrEmpty(stmt, 3);
     record.latestVersion = sqlite3_column_int(stmt, 4);
     const unsigned char *translation = sqlite3_column_text(stmt, 5);
     record.latestTranslation = translation ? [NSString stringWithUTF8String:(const char *)translation] : nil;
@@ -635,9 +639,9 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                 sqlite3_bind_text(stmt, 1, FYTrimmed(sentenceID).UTF8String, -1, SQLITE_TRANSIENT);
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     FYSentenceVersion *v = [[FYSentenceVersion alloc] init];
-                    v.sentenceID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 0)] ?: @"";
+                    v.sentenceID = FYSQLiteStringOrEmpty(stmt, 0);
                     v.version = sqlite3_column_int(stmt, 1);
-                    v.text = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 2)] ?: @"";
+                    v.text = FYSQLiteStringOrEmpty(stmt, 2);
                     const unsigned char *translation = sqlite3_column_text(stmt, 3);
                     v.translation = translation ? [NSString stringWithUTF8String:(const char *)translation] : nil;
                     v.createdAt = FYDateFromNumber(@(sqlite3_column_double(stmt, 4)));
@@ -741,9 +745,9 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
 
 - (FYVocabularyEntry *)vocabularyEntryFromStatement:(sqlite3_stmt *)stmt {
     FYVocabularyEntry *entry = [[FYVocabularyEntry alloc] init];
-    entry.vocabularyID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 0)] ?: @"";
+    entry.vocabularyID = FYSQLiteStringOrEmpty(stmt, 0);
     entry.kind = (FYVocabularyKind)sqlite3_column_int(stmt, 1);
-    entry.surface = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 2)] ?: @"";
+    entry.surface = FYSQLiteStringOrEmpty(stmt, 2);
     const unsigned char *lemma = sqlite3_column_text(stmt, 3);
     entry.lemma = lemma ? [NSString stringWithUTF8String:(const char *)lemma] : nil;
     const unsigned char *reading = sqlite3_column_text(stmt, 4);
@@ -829,13 +833,13 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                 sqlite3_bind_text(stmt, 1, FYTrimmed(vocabularyID).UTF8String, -1, SQLITE_TRANSIENT);
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     FYVocabularyExample *example = [[FYVocabularyExample alloc] init];
-                    example.vocabularyID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 0)] ?: @"";
-                    example.sentenceID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 1)] ?: @"";
+                    example.vocabularyID = FYSQLiteStringOrEmpty(stmt, 0);
+                    example.sentenceID = FYSQLiteStringOrEmpty(stmt, 1);
                     example.version = sqlite3_column_int(stmt, 2);
-                    example.sourceTextSnapshot = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 3)] ?: @"";
+                    example.sourceTextSnapshot = FYSQLiteStringOrEmpty(stmt, 3);
                     const unsigned char *translation = sqlite3_column_text(stmt, 4);
                     example.translationSnapshot = translation ? [NSString stringWithUTF8String:(const char *)translation] : nil;
-                    example.selectedRangeText = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 5)] ?: @"";
+                    example.selectedRangeText = FYSQLiteStringOrEmpty(stmt, 5);
                     [examples addObject:example];
                 }
                 sqlite3_finalize(stmt);
@@ -951,7 +955,7 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         if(!error){
             if(sqlite3_prepare_v2(self.db,"SELECT sentence_id,version,source,translation FROM sentence_bookmarks ORDER BY bookmarked_at DESC",-1,&stmt,NULL)==SQLITE_OK){
                 int rc;while((rc=sqlite3_step(stmt))==SQLITE_ROW){
-                    NSString *sid=[NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt,0)];NSString *source=[NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt,2)];
+                    NSString *sid=FYSQLiteStringOrEmpty(stmt,0);NSString *source=FYSQLiteStringOrEmpty(stmt,2);
                     const unsigned char *translation=sqlite3_column_text(stmt,3);
                     [values addObject:[FYRequestIdentity identityWithSentenceID:sid version:sqlite3_column_int64(stmt,1) requestID:NSUUID.UUID.UUIDString sourceText:source translation:translation?[NSString stringWithUTF8String:(const char *)translation]:@""]];
                 }if(rc!=SQLITE_DONE){error=FYStoreError(self.db,@"读取句子收藏失败");}sqlite3_finalize(stmt);
@@ -999,13 +1003,13 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
             if (sqlite3_prepare_v2(self.db, sql, -1, &stmt, NULL) == SQLITE_OK) {
                 while (sqlite3_step(stmt) == SQLITE_ROW) {
                     FYGrammarBookmark *bookmark = [[FYGrammarBookmark alloc] init];
-                    bookmark.bookmarkID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 0)] ?: @"";
+                    bookmark.bookmarkID = FYSQLiteStringOrEmpty(stmt, 0);
                     const unsigned char *catalogID = sqlite3_column_text(stmt, 1);
                     bookmark.catalogID = catalogID ? [NSString stringWithUTF8String:(const char *)catalogID] : nil;
-                    bookmark.name = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 2)] ?: @"";
-                    bookmark.sentenceID = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 3)] ?: @"";
+                    bookmark.name = FYSQLiteStringOrEmpty(stmt, 2);
+                    bookmark.sentenceID = FYSQLiteStringOrEmpty(stmt, 3);
                     bookmark.version = sqlite3_column_int(stmt, 4);
-                    bookmark.sourceTextSnapshot = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, 5)] ?: @"";
+                    bookmark.sourceTextSnapshot = FYSQLiteStringOrEmpty(stmt, 5);
                     const unsigned char *translation = sqlite3_column_text(stmt, 6);
                     bookmark.translationSnapshot = translation ? [NSString stringWithUTF8String:(const char *)translation] : nil;
                     bookmark.bookmarkedAt = FYDateFromNumber(@(sqlite3_column_double(stmt, 7)));

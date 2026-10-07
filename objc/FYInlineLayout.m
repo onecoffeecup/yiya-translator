@@ -1134,7 +1134,7 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
 /// 长卡测量：从原文宽度出发尝试有限几个宽度，选第一个能完整容纳译文的宽度；
 /// 都放不下就用最宽的那个并在卡内滚动。高度按**完整译文**计算，优先贴合内容、减少空白，
-/// 但不低于可读下限（内边距 + 标题 + 三行正文）。
+/// 短译文按实际正文高度收紧；超过三行的译文仍保留三行可读下限。
 - (void)prepareLongPlacement:(FYInlinePlacement *)placement
              widthCandidates:(NSArray<NSNumber *> *)widths
                   windowInner:(CGFloat)windowInner
@@ -1161,8 +1161,13 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         chosenContent = content;
         if (content <= capBody) { fits = YES; break; }
     }
-    CGFloat height = fits ? (chosenContent + chrome) : cap;
-    height = FYInlineClamp(height, MIN(minimumHeight, windowInner), MIN(cap, windowInner));
+    CGFloat contentHeight = chosenContent + chrome;
+    // 三行是长文滚动时的可读下限，不是所有长卡的固定高度。短译文只占一两行时，
+    // 以实际测量高度为准，同时至少留出完整的一行，避免出现只有标题的细条。
+    CGFloat readableMinimum = MIN(minimumHeight,
+                                  MAX(chrome + [self longCardLineHeight:placement], contentHeight));
+    CGFloat height = fits ? contentHeight : cap;
+    height = FYInlineClamp(height, MIN(readableMinimum, windowInner), MIN(cap, windowInner));
     CGFloat viewportHeight = MAX(0, height - chrome);
     placement.translationFrame = NSMakeRect(0, 0, chosenWidth, height);
     placement.measuredContentHeight = chosenContent;
@@ -1346,14 +1351,8 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
             CGFloat depth = (hit.size.width > 0 && hit.size.height > 0) ? MIN(hit.size.width, hit.size.height) : 0;
             if (depth > candidate.occlusionDepth) {
                 candidate.occlusionDepth = depth;
-                // 轻微遮挡（≤10pt）标记为可接受，不影响候选的合法性判定
-                if (depth <= 10) {
-                    candidate.rejection = [NSString stringWithFormat:@"轻微遮挡第 %@ 个原文块（%ld×%ld，交叠 %.0fpt，可接受）",
-                                           sourceIndices[index], (long)lround(hit.size.width), (long)lround(hit.size.height), depth];
-                } else {
-                    candidate.rejection = [NSString stringWithFormat:@"遮挡第 %@ 个原文块（%ld×%ld，交叠 %.0fpt）",
-                                           sourceIndices[index], (long)lround(hit.size.width), (long)lround(hit.size.height), depth];
-                }
+                candidate.rejection = [NSString stringWithFormat:@"遮挡第 %@ 个原文块（%ld×%ld，交叠 %.0fpt）",
+                                       sourceIndices[index], (long)lround(hit.size.width), (long)lround(hit.size.height), depth];
             }
         }
     }
@@ -1599,9 +1598,8 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     [order sortUsingComparator:^NSComparisonResult(NSNumber *left, NSNumber *right) {
         NSUInteger leftIndex = left.unsignedIntegerValue, rightIndex = right.unsignedIntegerValue;
         NSUInteger leftLegal = 0, rightLegal = 0;
-        // 放宽遮挡容忍度：≤10pt 的轻微交叠视为合法候选
-        for (FYInlineCandidate *candidate in candidateLists[leftIndex]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 10) { leftLegal++; } }
-        for (FYInlineCandidate *candidate in candidateLists[rightIndex]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 10) { rightLegal++; } }
+        for (FYInlineCandidate *candidate in candidateLists[leftIndex]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 0) { leftLegal++; } }
+        for (FYInlineCandidate *candidate in candidateLists[rightIndex]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 0) { rightLegal++; } }
         // 长正文一个合法长卡候选都没有 = 只能靠紧凑入口。它必须排在可调整的短贴片之前，
         // 否则小贴片会先把它附近（以及它自己那一片）的空地占满，入口再也放不下，
         // 整段正文就从画面上消失 —— 短贴片至少还有"覆盖自身/左右"这些可选项。
@@ -1637,14 +1635,13 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
             if (loopCandidate.hardRejection) { continue; }
             FYInlineCandidate *candidate = loopCandidate;
             FYInlineCandidate *usable = candidate;
-            if (candidate.occlusionDepth > 10) {
-                // 遮挡超过 10pt：尝试微移消解
+            if (candidate.occlusionDepth > 0) {
+                // 仅在容差内微移，不能让卡片覆盖其它原文。
                 usable = [self candidate:candidate resolvingSliverWithin:self.stabilityTolerance
                                 viewport:viewport placement:placement
                             otherSources:sourceFrames placedFrames:placedFrames];
                 if (!usable) { continue; }
             }
-            // 遮挡 ≤10pt：直接接受，视为轻微遮挡可接受
             BOOL conflict = NO;
             for (NSValue *value in placedFrames) {
                 CGRect hit = CGRectIntersection(value.rectValue, usable.frame);

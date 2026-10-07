@@ -102,6 +102,11 @@ FOUNDATION_EXPORT BOOL FYOCRBlockSitsOnBrightBackdrop(OCRTextItem *block, const 
 + (BOOL)isFurigana:(OCRTextItem *)small nearLargerLineInItems:(NSArray<OCRTextItem *> *)blocks;
 + (BOOL)looksLikeUIFrame:(NSArray<OCRTextItem *> *)blocks;
 + (NSString *)dialogueTextWithoutTrailingButton:(NSString *)text;
+// Explicit top-left normalized scope; full-frame returns recognizer output unchanged.
+// Invalid/empty manual scope returns no items (never falls back to the full frame).
++ (NSArray<OCRTextItem *> *)recognizeImage:(CGImageRef)image topLeftScope:(CGRect)scope
+    recognizer:(NSArray<OCRTextItem *> *(^)(CGImageRef cropped, NSError **error))recognizer
+    error:(NSError **)error;
 // Synchronous preparation/recognition/remap; injected recognizer retains caller filtering.
 + (NSString *)recognizeEnlargedImage:(CGImageRef)image visionRegion:(CGRect)region
     recognizer:(NSString *(^)(CGImageRef scaled, NSArray<OCRTextItem *> **items, NSError **error))recognizer

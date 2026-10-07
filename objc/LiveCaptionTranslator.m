@@ -30,6 +30,31 @@
 
 static NSString *const SettingsKey = @"LiveCaptionTranslator.settings.v1";
 
+static NSString *FYAppearanceColorHex(NSColor *color) {
+    NSColor *rgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    if (!rgb) { return @"#593E2B"; }
+    return [NSString stringWithFormat:@"#%02X%02X%02X",
+            (int)lround(MIN(MAX(rgb.redComponent, 0), 1) * 255),
+            (int)lround(MIN(MAX(rgb.greenComponent, 0), 1) * 255),
+            (int)lround(MIN(MAX(rgb.blueComponent, 0), 1) * 255)];
+}
+
+static NSColor *FYAppearanceColorFromHex(NSString *hex, NSColor *fallback) {
+    if (![hex isKindOfClass:NSString.class] || hex.length != 7 || ![hex hasPrefix:@"#"]) { return fallback; }
+    unsigned value = 0;
+    NSScanner *scanner = [NSScanner scannerWithString:[hex substringFromIndex:1]];
+    if (![scanner scanHexInt:&value] || !scanner.isAtEnd) { return fallback; }
+    return [NSColor colorWithSRGBRed:((value >> 16) & 255) / 255.0
+                              green:((value >> 8) & 255) / 255.0 blue:(value & 255) / 255.0 alpha:1];
+}
+
+static NSColor *FYAppearanceBackdropForText(NSColor *textColor) {
+    NSColor *rgb = [textColor colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+    CGFloat brightness = rgb ? 0.2126 * rgb.redComponent + 0.7152 * rgb.greenComponent +
+        0.0722 * rgb.blueComponent : 0;
+    return brightness > 0.58 ? FYAdventureColor(@"ink") : FYAdventureColor(@"cream");
+}
+
 // ==== 临时诊断（设 FUYI_DIAG=1 或创建 /tmp/fuyi-diag-armed 时启用）====
 // 统一的诊断开关。任何会落盘的诊断行为（写日志、保存屏幕截图）都必须经过它；
 // 否则正式分发版会在用户不知情的情况下，把屏幕内容写到 /tmp 里。
@@ -333,10 +358,18 @@ NSInteger DetectContentModeForBlocks(NSArray<OCRTextItem *> *blocks, NSInteger f
 
 typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, BOOL cancelled);
 
+@interface FYRegionSelectionPanel : NSPanel
+@end
+@implementation FYRegionSelectionPanel
+- (BOOL)canBecomeKeyWindow { return YES; }
+@end
+
 @interface RegionSelectionView : NSView
 @property(nonatomic) NSPoint startPoint;
 @property(nonatomic) CGRect selectionRect;
 @property(nonatomic, copy) RegionSelectionCompletion completion;
+@property(nonatomic) CGFloat helpFontSize;
+@property(nonatomic, strong) NSColor *helpTextColor;
 @end
 
 @implementation RegionSelectionView
@@ -350,32 +383,41 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
-    [[NSColor colorWithWhite:0 alpha:0.22] setFill];
+    [[NSColor colorWithWhite:0 alpha:0.12] setFill];
     NSRectFill(self.bounds);
 
+    CGFloat size = MIN((CGFloat)56, MAX((CGFloat)14, self.helpFontSize));
+    NSColor *ink = self.helpTextColor ?: FYAdventureColor(@"ink");
+    NSString *help = @"在游戏画面内拖动框选 · Esc 取消";
+    while (size > 14 && [help sizeWithAttributes:@{NSFontAttributeName: FYUIFont(size, NSFontWeightBold)}].width > NSWidth(self.bounds) - 40) {
+        size -= 1;
+    }
     NSDictionary *attributes = @{
-        NSFontAttributeName: FYUIFont(24, NSFontWeightBold),
-        NSForegroundColorAttributeName: NSColor.whiteColor
+        NSFontAttributeName: FYUIFont(size, NSFontWeightBold),
+        NSForegroundColorAttributeName: ink
     };
-    NSString *help = @"拖动框选 OCR 字幕区域，松手确认。按 Esc 取消";
     NSSize helpSize = [help sizeWithAttributes:attributes];
-    [help drawAtPoint:NSMakePoint((NSWidth(self.bounds) - helpSize.width) / 2.0, 24) withAttributes:attributes];
+    NSRect helpFrame = NSMakeRect(MAX((CGFloat)8, (NSWidth(self.bounds) - helpSize.width) / 2.0 - 12),
+        8, MIN(NSWidth(self.bounds) - 16, helpSize.width + 24), helpSize.height + 16);
+    [[FYAppearanceBackdropForText(ink) colorWithAlphaComponent:0.96] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:helpFrame xRadius:9 yRadius:9] fill];
+    [help drawAtPoint:NSMakePoint(NSMinX(helpFrame) + 12, NSMinY(helpFrame) + 8) withAttributes:attributes];
 
     if (self.selectionRect.size.width <= 0 || self.selectionRect.size.height <= 0) {
         return;
     }
 
     NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:self.selectionRect xRadius:8 yRadius:8];
-    [[NSColor colorWithCalibratedRed:0.16 green:0.55 blue:1 alpha:0.16] setFill];
+    [[FYAdventureColor(@"leaf") colorWithAlphaComponent:0.18] setFill];
     [path fill];
-    [[NSColor colorWithCalibratedRed:0.13 green:0.48 blue:1 alpha:1] setStroke];
+    [ink setStroke];
     path.lineWidth = 4;
     [path stroke];
 
     NSString *sizeText = [NSString stringWithFormat:@"%.0f x %.0f", self.selectionRect.size.width, self.selectionRect.size.height];
     NSDictionary *sizeAttributes = @{
-        NSFontAttributeName: FYUIFont(13, NSFontWeightBold),
-        NSForegroundColorAttributeName: NSColor.whiteColor
+        NSFontAttributeName: FYUIFont(MAX((CGFloat)12, size * 0.65), NSFontWeightBold),
+        NSForegroundColorAttributeName: ink
     };
     [sizeText drawAtPoint:NSMakePoint(NSMinX(self.selectionRect) + 10, NSMinY(self.selectionRect) + 10) withAttributes:sizeAttributes];
 }
@@ -415,7 +457,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 @end
 
-@interface AppDelegate : NSObject <NSApplicationDelegate, NSTextFieldDelegate, NSSharingServiceDelegate>
+@interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, NSSharingServiceDelegate>
 @property(nonatomic, strong) NSWindow *mainWindow;
 @property(nonatomic, strong) FYReferenceDictionary *referenceDictionary;
 @property(nonatomic) NSUInteger sourceHoverGeneration;
@@ -448,6 +490,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic) BOOL captionDockHasAnchor;
 @property(nonatomic, strong) NSLayoutConstraint *workspaceWidth;
 @property(nonatomic, strong) NSLayoutConstraint *mainChatWidth;
+@property(nonatomic, strong) NSLayoutConstraint *mainWindowContentWidth;
+@property(nonatomic) BOOL mainChatWantsVisible;
 @property(nonatomic, strong) NSButton *mainChatToggle;
 @property(nonatomic) BOOL studyChatOverlayRequested;
 @property(nonatomic) BOOL quickSentenceRequested;
@@ -499,6 +543,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic) BOOL quickSentenceAnalyzing;
 @property(nonatomic) NSInteger quickAnalysisGeneration;
 @property(nonatomic, strong) NSPanel *regionSelectionPanel;
+@property(nonatomic, strong) id regionSelectionKeyMonitor;
+@property(nonatomic) BOOL selectOCRRegionAfterCaptureCalibration;
 @property(nonatomic, strong) NSPanel *ocrPreviewPanel;
 @property(nonatomic, strong) NSTextField *ocrPreviewLabel;
 @property(nonatomic, strong) NSView *captionContainer;
@@ -624,10 +670,18 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) NSSlider *captionOpacitySlider;
 @property(nonatomic, strong) NSSlider *captionFontSizeSlider;
 @property(nonatomic, strong) NSSlider *captionHeightSlider;
+@property(nonatomic, strong) NSSlider *captionWidthSlider;
+@property(nonatomic, strong) NSColorWell *captionTextColorWell;
+@property(nonatomic) BOOL captionTextColorCustomized;
+@property(nonatomic, strong) NSSlider *batchFontSizeSlider;
+@property(nonatomic, strong) NSSlider *batchWidthSlider;
+@property(nonatomic, strong) NSSlider *batchHeightSlider;
+@property(nonatomic, strong) NSColorWell *batchTextColorWell;
 @property(nonatomic, strong) NSSegmentedControl *captionThemeControl;
 @property(nonatomic, strong) NSButton *stableTextCheckbox;
 @property(nonatomic, strong) NSButton *fastOCRCheckbox;
 @property(nonatomic, strong) NSButton *autoFitRegionCheckbox;
+@property(nonatomic, strong) NSButton *manualOCRScopeCheckbox;
 @property(nonatomic, strong) NSTextField *baseURLField;
 @property(nonatomic, strong) NSTextField *modelField;
 @property(nonatomic, strong) NSTextField *realtimeModelField;
@@ -875,6 +929,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [self updateCaptionWindowWithText:@"" status:@"已暂停"];
 
     [self.mainWindow makeKeyAndOrderFront:nil];
+    [self updateMainChatForWindowWidth];
     NSNotificationCenter *workspaceCenter = NSWorkspace.sharedWorkspace.notificationCenter;
     for (NSString *name in @[NSWorkspaceDidActivateApplicationNotification, NSWorkspaceDidHideApplicationNotification, NSWorkspaceActiveSpaceDidChangeNotification]) {
         [workspaceCenter addObserver:self selector:@selector(refreshOverlayVisibility:) name:name object:nil];
@@ -886,6 +941,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
     return NO;
+}
+
+- (void)windowDidResize:(NSNotification *)notification {
+    if (notification.object != self.mainWindow) { return; }
+    self.mainWindowContentWidth.constant=NSWidth(self.mainWindow.contentView.bounds);
+    [self updateMainChatForWindowWidth];
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)visible {
@@ -995,7 +1056,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                                                       defer:NO];
     self.mainWindow.title = @"译芽";
     self.mainWindow.backgroundColor = FYAdventureColor(@"shell");
-    self.mainWindow.minSize = NSMakeSize(980, 660);
+    self.mainWindow.minSize = NSMakeSize(720, 660);
+    self.mainWindow.contentMinSize = NSMakeSize(720, 660);
+    self.mainWindow.delegate = self;
     self.mainWindow.appearance = [NSAppearance appearanceNamed:NSAppearanceNameAqua];
 
     NSStackView *root = [[NSStackView alloc] init];
@@ -1031,14 +1094,18 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [root addArrangedSubview:right];
     self.mainStudyChatView=[self makeStudyChatViewForOverlay:NO];
     [root addArrangedSubview:self.mainStudyChatView];
+    self.mainChatWantsVisible = YES;
     self.workspaceWidth=[right.widthAnchor constraintEqualToAnchor:root.widthAnchor constant:-510];
     self.mainChatWidth=[self.mainStudyChatView.widthAnchor constraintEqualToConstant:320];
 
     self.mainWorkspaceRoot=root;
-    // Keep document fitting sizes from driving the outer window. The workspace
-    // fills a frame-driven content host, so native edge resizing stays usable.
+    // Keep document fitting sizes from changing the outer window after a page
+    // mounts. Update this constraint from windowDidResize for user resizing.
     NSView *windowHost=[[NSView alloc] initWithFrame:self.mainWindow.contentView.bounds];
     windowHost.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
+    self.mainWindowContentWidth=[windowHost.widthAnchor constraintEqualToConstant:NSWidth(windowHost.bounds)];
+    self.mainWindowContentWidth.priority=1000;
+    self.mainWindowContentWidth.active=YES;
     windowHost.wantsLayer=YES;windowHost.layer.backgroundColor=FYAdventureColor(@"canvas").CGColor;
     FYAdventureBanner *banner=[FYAdventureBanner new];
     banner.translatesAutoresizingMaskIntoConstraints=NO;
@@ -1507,7 +1574,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSStackView *page = [self verticalStack];
     NSStackView *appearance = [self verticalStack];
     appearance.spacing = 10;
-    [appearance addArrangedSubview:[self cardTitle:@"悬浮字幕"]];
+    [appearance addArrangedSubview:[self cardTitle:@"框选字幕 · 单条悬浮译文"]];
     [appearance addArrangedSubview:[self captionCard]];
     [appearance addArrangedSubview:[self workspaceButton:@"打开字幕预览" action:@selector(showCaptionAppearancePreview:) primary:NO]];
     [appearance addArrangedSubview:[self mutedLabel:@"预览使用示例文字，调整字号、配色和透明度会即时更新。"]];
@@ -1537,6 +1604,11 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [styleRow addArrangedSubview:self.themeSummaryLabel];
     [appearance addArrangedSubview:styleRow];
     [page addArrangedSubview:[self cardWithStack:appearance]];
+
+    NSStackView *batch = [self verticalStack];
+    [batch addArrangedSubview:[self cardTitle:@"批量字幕 · 界面贴译"]];
+    [batch addArrangedSubview:[self batchCaptionCard]];
+    [page addArrangedSubview:[self cardWithStack:batch]];
 
     return page;
 }
@@ -2605,6 +2677,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [self controlValueChanged:self.captionThemeControl];
 }
 
+- (void)resetCaptionTextColor:(id)sender {
+    self.captionTextColorCustomized = NO;
+    self.captionTextColorWell.color = [self captionThemeTextColor];
+    [self controlValueChanged:self.captionThemeControl];
+}
+
 - (void)updateThemeSummary {
     self.themeSummaryLabel.stringValue = [NSString stringWithFormat:@"%.0f pt / %.0f%%",
                                            self.captionFontSizeSlider.doubleValue,
@@ -2777,6 +2855,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.windowCardNoteLabel.lineBreakMode = NSLineBreakByWordWrapping;
     [stack addArrangedSubview:self.windowCardNoteLabel];
 
+    self.manualOCRScopeCheckbox=[NSButton checkboxWithTitle:@"仅翻译手动框选区域（默认关闭）" target:self action:@selector(controlValueChanged:)];
+    self.manualOCRScopeCheckbox.state=NSControlStateValueOff;
+    [stack addArrangedSubview:self.manualOCRScopeCheckbox];
+    NSTextField *scopeHint=[self mutedLabel:@"关闭时自动识别整画面；开启后实时翻译和当前界面只读框内。这不是视频画面校准。"];
+    scopeHint.maximumNumberOfLines=0;
+    [stack addArrangedSubview:scopeHint];
     NSStackView *regionButtonRow = [self verticalStack];
     [regionButtonRow addArrangedSubview:[NSButton buttonWithTitle:@"手动框选 OCR 区域" target:self action:@selector(selectOCRRegion:)]];
     [regionButtonRow addArrangedSubview:[NSButton buttonWithTitle:@"显示 OCR 框" target:self action:@selector(showOCRPreview:)]];
@@ -2867,13 +2951,44 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.captionOpacitySlider = [self sliderWithMin:0 max:0.95 value:0.58 action:@selector(controlValueChanged:)];
     self.captionFontSizeSlider = [self sliderWithMin:18 max:56 value:30 action:@selector(controlValueChanged:)];
     self.captionHeightSlider = [self sliderWithMin:120 max:340 value:180 action:@selector(controlValueChanged:)];
+    self.captionWidthSlider = [self sliderWithMin:360 max:1200 value:900 action:@selector(controlValueChanged:)];
     self.captionThemeControl = [self segmentedWithLabels:@[@"黑底白字", @"白底黑字", @"粉底深字", @"译芽花境"] action:@selector(controlValueChanged:)];
     self.captionThemeControl.selectedSegment = 3;
+    self.captionTextColorWell = [[NSColorWell alloc] init];
+    self.captionTextColorWell.color = FYAdventureColor(@"ink");
+    self.captionTextColorWell.target = self;
+    self.captionTextColorWell.action = @selector(controlValueChanged:);
+    [self.captionTextColorWell.widthAnchor constraintEqualToConstant:60].active = YES;
+    [self.captionTextColorWell.heightAnchor constraintEqualToConstant:30].active = YES;
     [stack addArrangedSubview:[self settingsRowWithLabel:@"背景透明度" view:self.captionOpacitySlider]];
     [stack addArrangedSubview:[self settingsRowWithLabel:@"字号" view:self.captionFontSizeSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"最小高度" view:self.captionHeightSlider]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"字幕框宽度" view:self.captionWidthSlider]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"字幕框最小高度" view:self.captionHeightSlider]];
     [stack addArrangedSubview:[self settingsRowWithLabel:@"样式" view:self.captionThemeControl]];
-    [stack addArrangedSubview:[self label:@"字幕窗可以直接拖动；字号、透明度和样式也会同步到实时贴译。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
+    NSStackView *colorRow = [self horizontalStack];
+    [colorRow addArrangedSubview:self.captionTextColorWell];
+    [colorRow addArrangedSubview:[NSButton buttonWithTitle:@"跟随样式" target:self action:@selector(resetCaptionTextColor:)]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"译文字色" view:colorRow]];
+    [stack addArrangedSubview:[self mutedLabel:@"字号与字色控制单条悬浮译文和框选提示；字幕窗可直接拖动，长句会自动增高。"]];
+    return stack;
+}
+
+- (NSView *)batchCaptionCard {
+    NSStackView *stack = [self verticalStack];
+    self.batchFontSizeSlider = [self sliderWithMin:13 max:30 value:16 action:@selector(controlValueChanged:)];
+    self.batchWidthSlider = [self sliderWithMin:240 max:720 value:560 action:@selector(controlValueChanged:)];
+    self.batchHeightSlider = [self sliderWithMin:160 max:500 value:330 action:@selector(controlValueChanged:)];
+    self.batchTextColorWell = [[NSColorWell alloc] init];
+    self.batchTextColorWell.color = FYAdventureColor(@"ink");
+    self.batchTextColorWell.target = self;
+    self.batchTextColorWell.action = @selector(controlValueChanged:);
+    [self.batchTextColorWell.widthAnchor constraintEqualToConstant:60].active = YES;
+    [self.batchTextColorWell.heightAnchor constraintEqualToConstant:30].active = YES;
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"译文字号" view:self.batchFontSizeSlider]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"最大宽度" view:self.batchWidthSlider]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"长卡最大高度" view:self.batchHeightSlider]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"译文字色" view:self.batchTextColorWell]];
+    [stack addArrangedSubview:[self mutedLabel:@"批量贴译继续使用奶油底和圆体；短贴片、长卡共用这里的字号和字色。空间不足时仍会收起为查看入口。"]];
     return stack;
 }
 
@@ -2939,7 +3054,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (void)showCaptionAppearancePreview:(id)sender {
     if (!self.captionAppearancePreviewPanel) {
-        CGFloat width = MIN((CGFloat)900,NSWidth((self.mainWindow.screen ?: NSScreen.mainScreen).visibleFrame)-80);
+        CGFloat width = MIN(self.captionWidthSlider.doubleValue, NSWidth((self.mainWindow.screen ?: NSScreen.mainScreen).visibleFrame) - 80);
         NSPanel *panel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0,0,MAX(480,width),180)
             styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO];
         panel.title = @"字幕样式预览 · 示例文字";
@@ -2976,6 +3091,11 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (void)updateCaptionAppearancePreview {
     if (!self.captionAppearancePreviewPanel) { return; }
+    NSRect visible = (self.mainWindow.screen ?: NSScreen.mainScreen).visibleFrame;
+    CGFloat desiredWidth = MAX((CGFloat)320, MIN(self.captionWidthSlider.doubleValue, NSWidth(visible) - 80));
+    if (fabs(NSWidth(self.captionAppearancePreviewPanel.frame) - desiredWidth) >= 1) {
+        [self.captionAppearancePreviewPanel setContentSize:NSMakeSize(desiredWidth, NSHeight(self.captionAppearancePreviewPanel.contentView.bounds))];
+    }
     self.captionAppearancePreviewContainer.fillColor = [self captionBackgroundColorWithAlpha:self.captionOpacitySlider.doubleValue];
     self.captionAppearancePreviewContainer.edgeColor = [self captionBorderColor];
     self.captionAppearancePreviewText.font = FYUIFont(self.captionFontSizeSlider.doubleValue,NSFontWeightRegular);
@@ -3582,6 +3702,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         }
     }
 
+    CGRect ocrScope=[self selectedOCRScope];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSDate *ocrStart = [NSDate date];
         NSError *error = nil;
@@ -3595,7 +3716,15 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             [png writeToFile:@"/tmp/fuyi-last-frame.png" atomically:YES];
         }
-        NSString *ocrText = [self recognizeTextBlocksInImage:fullImage fastOCR:fastOCR languageSegment:languageSegment blocks:&ocrBlocks error:&error];
+        NSString *ocrText;
+        if (CGRectEqualToRect(ocrScope,CGRectMake(0,0,1,1))) {
+            ocrText=[self recognizeTextBlocksInImage:fullImage fastOCR:fastOCR languageSegment:languageSegment blocks:&ocrBlocks error:&error];
+        } else {
+            NSArray *scoped=[FYOCRManager recognizeImage:fullImage topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
+                return [self recognizeTextItemsInImage:cropped fastOCR:fastOCR languageSegment:languageSegment error:innerError];
+            } error:&error];
+            ocrText=[FYOCRManager postprocessedTextForItems:scoped renderedTexts:RenderedTranslationSet(self.captionTextLabel.stringValue,self.inlineTranslationCache) blocks:&ocrBlocks];
+        }
         NSTimeInterval pass1Duration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         [[FYRuntimeDiagnostics shared] recordEvent:@"ocr" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"blocks": @(ocrBlocks.count), @"error_code": @(error.code), @"elapsed_ms": @(pass1Duration * 1000), @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage))}];
         FYTrace(trace, @"ocr", @{@"stage": @"pass1_filtered", @"ocr_lines": FYTraceOCRLines(ocrBlocks),
@@ -3613,6 +3742,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         // 区域已经很大时，放大既没有精度收益，又白白多花一整个 OCR 周期。
         FYApplyOCRRefinement(ocrBlocks, autoFit,
             ^NSString *(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error) {
+                CGRect visionScope=CGRectMake(ocrScope.origin.x,1-CGRectGetMaxY(ocrScope),ocrScope.size.width,ocrScope.size.height);
+                region=CGRectIntersection(region,visionScope);
+                if (CGRectIsNull(region) || CGRectIsEmpty(region)) return nil;
                 return [self recognizeEnlargedRegionOfImage:fullImage
                     regionX:region.origin.x regionY:region.origin.y
                     regionWidth:region.size.width regionHeight:region.size.height
@@ -4607,9 +4739,39 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [self setStatus:@"已打开系统设置的相机权限页：允许译芽后回到应用点「重连采集卡」"];
 }
 
+- (CGRect)selectedOCRScope {
+    if (self.manualOCRScopeCheckbox.state != NSControlStateValueOn) return CGRectMake(0,0,1,1);
+    return CGRectMake(self.regionXSlider.doubleValue,self.regionYSlider.doubleValue,self.regionWidthSlider.doubleValue,self.regionHeightSlider.doubleValue);
+}
+
 - (void)controlValueChanged:(id)sender {
+    if (sender == self.captionTextColorWell) { self.captionTextColorCustomized = YES; }
+    if (sender == self.captionThemeControl && !self.captionTextColorCustomized) {
+        self.captionTextColorWell.color = [self captionThemeTextColor];
+    }
+    BOOL batchAppearanceChanged = sender && (sender == self.batchFontSizeSlider ||
+        sender == self.batchWidthSlider || sender == self.batchHeightSlider || sender == self.batchTextColorWell);
+    if (batchAppearanceChanged) { [self applyBatchAppearanceToLayoutEngine]; }
+    if (sender && (sender==self.manualOCRScopeCheckbox || sender==self.regionXSlider || sender==self.regionYSlider || sender==self.regionWidthSlider || sender==self.regionHeightSlider)) {
+        self.translationGeneration+=1;
+        [self.translationTaskOwner cancelActiveTask];
+        [[self translationState] reset];
+        [[self stabilityOwner] reset];
+        self.inFlight=NO;
+        self.lastOCRedCaptureFrameIndex=0;
+        [self hideInlineTranslationPanelsForGeometryChange];
+        [self.inlineTranslationCache removeAllObjects];
+    }
     [self clampRegionSliders];
     [self updateCaptionAppearance];
+    if (batchAppearanceChanged && self.lastInlineRenderedTranslations.count > 0 && self.lastInlineRenderedItems.count > 0) {
+        NSRect placement = NSZeroRect;
+        if ([self inlinePlacementRect:&placement reason:NULL]) {
+            self.lastInlineTranslationKey = nil;
+            self.lastInlineLayoutResult = nil;
+            [self showInlineTranslations:self.lastInlineRenderedTranslations forItems:self.lastInlineRenderedItems placementRect:placement];
+        }
+    }
     [self updateThemeSummary];
     [self updateOCRPreviewIfVisible];
     if (self.running && sender == self.intervalSlider) {
@@ -4619,23 +4781,72 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)selectOCRRegion:(id)sender {
+    [self refreshDisplayGeometryIfNeeded:YES];
     WindowItem *window = [self displayTargetWindowItem];
     if (!window) {
-        [self setStatus:[self captureCardInputEnabled] ? @"请先选择游戏画面所在的显示窗口" : @"请先选择要翻译的窗口"];
+        NSString *message = [self captureCardInputEnabled] ? @"请先选择游戏画面所在的显示窗口" : @"请先选择要翻译的窗口";
+        [self setStatus:message];
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = message;
+        alert.informativeText = @"在「窗口」列表中选择显示游戏画面的窗口，再点击手动框选。";
+        [alert addButtonWithTitle:@"知道了"];
+        [alert beginSheetModalForWindow:self.mainWindow completionHandler:nil];
         return;
     }
 
+    NSRect scopeViewport=[self appKitFrameForWindowItem:window];
+    if ([self captureCardInputEnabled]) {
+        CGSize frameSize = CGSizeZero;
+        if (![self.captureCardInput latestFrameSize:&frameSize]) {
+            [self setStatus:@"请先连接采集卡并等待画面，再框选 OCR 区域"];
+            NSAlert *alert = [[NSAlert alloc] init];
+            alert.messageText = @"采集卡还没有画面";
+            alert.informativeText = @"手动 OCR 范围按采集视频保存。先连接采集卡，收到画面后再框选。";
+            [alert addButtonWithTitle:@"重连采集卡"];
+            [alert addButtonWithTitle:@"取消"];
+            __weak typeof(self) weakSelf = self;
+            [alert beginSheetModalForWindow:self.mainWindow completionHandler:^(NSModalResponse response) {
+                if (response == NSAlertFirstButtonReturn) { [weakSelf reconnectCaptureDevice:nil]; }
+            }];
+            return;
+        }
+        if (![self inlinePlacementRect:&scopeViewport reason:NULL]) {
+            [self setStatus:@"请先定位视频画面，再框选 OCR 区域"];
+            NSAlert *alert = [[NSAlert alloc] init];
+            alert.messageText = @"还没有定位视频画面";
+            alert.informativeText = @"先在目标窗口框出采集视频的位置；完成后会继续框选 OCR 区域。";
+            [alert addButtonWithTitle:@"定位视频画面"];
+            [alert addButtonWithTitle:@"取消"];
+            __weak typeof(self) weakSelf = self;
+            [alert beginSheetModalForWindow:self.mainWindow completionHandler:^(NSModalResponse response) {
+                if (response == NSAlertFirstButtonReturn) {
+                    weakSelf.selectOCRRegionAfterCaptureCalibration = YES;
+                    [weakSelf beginCaptureCardCalibration:nil];
+                    if (!weakSelf.captureCalibrationPanel) {
+                        weakSelf.selectOCRRegionAfterCaptureCalibration = NO;
+                    }
+                }
+            }];
+            return;
+        }
+    }
+    CGFloat screenTop=NSMaxY(NSScreen.mainScreen.frame);
+    CGRect quartzViewport=CGRectMake(NSMinX(scopeViewport),screenTop-NSMaxY(scopeViewport),NSWidth(scopeViewport),NSHeight(scopeViewport));
     NSScreen *targetScreen = [self screenForWindowItem:window] ?: NSScreen.mainScreen;
-    NSRect panelFrame = targetScreen.frame;
+    NSRect panelFrame = NSIntersectionRect(scopeViewport, targetScreen.frame);
     if (NSWidth(panelFrame) < 80 || NSHeight(panelFrame) < 80) {
-        [self setStatus:@"当前屏幕太小，无法框选"];
+        [self setStatus:@"游戏画面未在当前屏幕上，请将它显示出来后重试"];
         return;
     }
 
     [self hideInterfaceForRegionSelection];
+    if (self.regionSelectionKeyMonitor) {
+        [NSEvent removeMonitor:self.regionSelectionKeyMonitor];
+        self.regionSelectionKeyMonitor = nil;
+    }
     [self.regionSelectionPanel close];
 
-    self.regionSelectionPanel = [[NSPanel alloc] initWithContentRect:panelFrame
+    self.regionSelectionPanel = [[FYRegionSelectionPanel alloc] initWithContentRect:panelFrame
                                                            styleMask:NSWindowStyleMaskBorderless
                                                              backing:NSBackingStoreBuffered
                                                                defer:NO];
@@ -4647,12 +4858,18 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
     RegionSelectionView *selectionView = [[RegionSelectionView alloc] initWithFrame:NSMakeRect(0, 0, NSWidth(panelFrame), NSHeight(panelFrame))];
     selectionView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    selectionView.helpFontSize = self.captionFontSizeSlider.doubleValue;
+    selectionView.helpTextColor = [self captionTextColor];
 
     __weak typeof(self) weakSelf = self;
     selectionView.completion = ^(CGRect selectedRect, CGSize viewSize, BOOL cancelled) {
         AppDelegate *strongSelf = weakSelf;
         if (!strongSelf) { return; }
 
+        if (strongSelf.regionSelectionKeyMonitor) {
+            [NSEvent removeMonitor:strongSelf.regionSelectionKeyMonitor];
+            strongSelf.regionSelectionKeyMonitor = nil;
+        }
         [strongSelf.regionSelectionPanel close];
         strongSelf.regionSelectionPanel = nil;
 
@@ -4663,24 +4880,25 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         }
 
         CGRect quartzSelection = [strongSelf quartzRectFromSelectionRect:selectedRect panelFrame:panelFrame];
-        CGRect clippedSelection = CGRectIntersection(quartzSelection, window.bounds);
+        CGRect clippedSelection = CGRectIntersection(quartzSelection, quartzViewport);
 
         if (CGRectIsNull(clippedSelection) || clippedSelection.size.width < 24 || clippedSelection.size.height < 24) {
             [strongSelf restoreInterfaceAfterRegionSelectionShowingOCRPreview:NO];
-            [strongSelf setStatus:@"框选区域没有落在目标窗口里"];
+            [strongSelf setStatus:@"框选区域没有落在游戏画面里"];
             return;
         }
 
-        double x = (clippedSelection.origin.x - window.bounds.origin.x) / window.bounds.size.width;
-        double y = (clippedSelection.origin.y - window.bounds.origin.y) / window.bounds.size.height;
-        double width = clippedSelection.size.width / window.bounds.size.width;
-        double height = clippedSelection.size.height / window.bounds.size.height;
+        double x = (clippedSelection.origin.x - quartzViewport.origin.x) / quartzViewport.size.width;
+        double y = (clippedSelection.origin.y - quartzViewport.origin.y) / quartzViewport.size.height;
+        double width = clippedSelection.size.width / quartzViewport.size.width;
+        double height = clippedSelection.size.height / quartzViewport.size.height;
 
         strongSelf.regionXSlider.doubleValue = MAX(0, MIN(1, x));
         strongSelf.regionYSlider.doubleValue = MAX(0, MIN(1, y));
         strongSelf.regionWidthSlider.doubleValue = MAX(0.05, MIN(1, width));
         strongSelf.regionHeightSlider.doubleValue = MAX(0.05, MIN(1, height));
-        [strongSelf controlValueChanged:nil];
+        strongSelf.manualOCRScopeCheckbox.state=NSControlStateValueOn;
+        [strongSelf controlValueChanged:strongSelf.manualOCRScopeCheckbox];
         [strongSelf saveSettings:nil];
         [strongSelf restoreInterfaceAfterRegionSelectionShowingOCRPreview:YES];
         [strongSelf setStatus:[NSString stringWithFormat:@"OCR 区域已更新：x %.2f y %.2f w %.2f h %.2f",
@@ -4691,10 +4909,15 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     };
 
     self.regionSelectionPanel.contentView = selectionView;
+    [NSApp activateIgnoringOtherApps:YES];
     [self.regionSelectionPanel makeKeyAndOrderFront:nil];
     [self.regionSelectionPanel makeFirstResponder:selectionView];
-    [NSApp activateIgnoringOtherApps:YES];
-    [self setStatus:@"拖动框选 QuickTime 里的字幕区域"];
+    self.regionSelectionKeyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
+        if (event.keyCode != 53 || !weakSelf.regionSelectionPanel) { return event; }
+        selectionView.completion(CGRectZero, selectionView.bounds.size, YES);
+        return nil;
+    }];
+    [self setStatus:@"在游戏画面内拖动框选 OCR 区域，Esc 取消"];
 }
 
 - (void)hideInterfaceForRegionSelection {
@@ -4752,7 +4975,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.regionYSlider.doubleValue = 0.52;
     self.regionWidthSlider.doubleValue = 0.90;
     self.regionHeightSlider.doubleValue = 0.42;
-    [self controlValueChanged:nil];
+    [self controlValueChanged:self.regionHeightSlider];
 }
 
 - (void)useLargeSubtitleRegion:(id)sender {
@@ -4760,7 +4983,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.regionYSlider.doubleValue = 0.42;
     self.regionWidthSlider.doubleValue = 0.96;
     self.regionHeightSlider.doubleValue = 0.52;
-    [self controlValueChanged:nil];
+    [self controlValueChanged:self.regionHeightSlider];
 }
 
 - (void)useFullWindowRegion:(id)sender {
@@ -4768,7 +4991,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.regionYSlider.doubleValue = 0;
     self.regionWidthSlider.doubleValue = 1;
     self.regionHeightSlider.doubleValue = 1;
-    [self controlValueChanged:nil];
+    [self controlValueChanged:self.regionHeightSlider];
 }
 
 - (void)useInterfaceFullWindowPreset:(id)sender {
@@ -4832,10 +5055,13 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSInteger languageSegment = self.languageControl.selectedSegment;
     self.learningCoordinator.japaneseMode = (languageSegment == 0);
     [self setStatus:@"正在识别当前界面"];
+    CGRect ocrScope=[self selectedOCRScope];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSDate *ocrStart = [NSDate date];
         NSError *error = nil;
-        NSArray<OCRTextItem *> *blocks = [self recognizeTextItemsInImage:image fastOCR:NO languageSegment:languageSegment error:&error];
+        NSArray<OCRTextItem *> *blocks = [FYOCRManager recognizeImage:image topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
+            return [self recognizeTextItemsInImage:cropped fastOCR:NO languageSegment:languageSegment error:innerError];
+        } error:&error];
         NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         CGImageRelease(image);
 
@@ -5045,9 +5271,17 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         @"captionOpacity": @(self.captionOpacitySlider.doubleValue),
         @"captionFontSize": @(self.captionFontSizeSlider.doubleValue),
         @"captionHeight": @(self.captionHeightSlider.doubleValue),
+        @"captionWidth": @(self.captionWidthSlider.doubleValue),
+        @"captionTextColor": FYAppearanceColorHex(self.captionTextColorWell.color),
+        @"captionTextColorCustomized": @(self.captionTextColorCustomized),
+        @"batchFontSize": @(self.batchFontSizeSlider.doubleValue),
+        @"batchMaxWidth": @(self.batchWidthSlider.doubleValue),
+        @"batchMaxHeight": @(self.batchHeightSlider.doubleValue),
+        @"batchTextColor": FYAppearanceColorHex(self.batchTextColorWell.color),
         @"captionTheme": @(self.captionThemeControl.selectedSegment),
         @"stableText": @(self.stableTextCheckbox.state == NSControlStateValueOn),
         @"fastOCR": @(self.fastOCRCheckbox.state == NSControlStateValueOn),
+        @"manualOCRScope": @(self.manualOCRScopeCheckbox.state == NSControlStateValueOn),
         @"autoFitRegion": @(self.autoFitRegionCheckbox.state == NSControlStateValueOn),
         @"baseURL": self.baseURLField.stringValue ?: @"",
         @"model": self.modelField.stringValue ?: @"",
@@ -5132,9 +5366,20 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.captionOpacitySlider.doubleValue = settings[@"captionOpacity"] ? [settings[@"captionOpacity"] doubleValue] : 0.58;
     self.captionFontSizeSlider.doubleValue = settings[@"captionFontSize"] ? [settings[@"captionFontSize"] doubleValue] : 30;
     self.captionHeightSlider.doubleValue = settings[@"captionHeight"] ? [settings[@"captionHeight"] doubleValue] : 180;
+    self.captionWidthSlider.doubleValue = settings[@"captionWidth"] ? [settings[@"captionWidth"] doubleValue] : 900;
     self.captionThemeControl.selectedSegment = settings[@"captionTheme"] ? [settings[@"captionTheme"] integerValue] : 3;
+    self.captionTextColorCustomized = [settings[@"captionTextColorCustomized"] boolValue];
+    self.captionTextColorWell.color = self.captionTextColorCustomized
+        ? FYAppearanceColorFromHex(settings[@"captionTextColor"], [self captionThemeTextColor])
+        : [self captionThemeTextColor];
+    self.batchFontSizeSlider.doubleValue = settings[@"batchFontSize"] ? [settings[@"batchFontSize"] doubleValue] : 16;
+    self.batchWidthSlider.doubleValue = settings[@"batchMaxWidth"] ? [settings[@"batchMaxWidth"] doubleValue] : 560;
+    self.batchHeightSlider.doubleValue = settings[@"batchMaxHeight"] ? [settings[@"batchMaxHeight"] doubleValue] : 330;
+    self.batchTextColorWell.color = FYAppearanceColorFromHex(settings[@"batchTextColor"], FYAdventureColor(@"ink"));
+    [self applyBatchAppearanceToLayoutEngine];
     self.stableTextCheckbox.state = settings[@"stableText"] ? ([settings[@"stableText"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
     self.fastOCRCheckbox.state = settings[@"fastOCR"] ? ([settings[@"fastOCR"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOff;
+    self.manualOCRScopeCheckbox.state=[settings[@"manualOCRScope"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff;
     self.autoFitRegionCheckbox.state = settings[@"autoFitRegion"] ? ([settings[@"autoFitRegion"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
     self.baseURLField.stringValue = settings[@"baseURL"] ?: @"https://api.openai.com/v1";
     self.modelField.stringValue = settings[@"model"] ?: @"gpt-4.1-mini";
@@ -6026,7 +6271,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSView *container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
     CGFloat inset = 12;
     NSFont *choiceFont = [self.inlineLayoutEngine compactEntryFont];
-    NSTextField *header = [self label:@"选择要读的译文" font:choiceFont color:self.uiInk];
+    NSTextField *header = [self label:@"选择要读的译文" font:choiceFont color:[self inlinePanelTextColor]];
     header.frame = NSMakeRect(inset, height - inset - headerHeight + 6, width - inset * 2, headerHeight - 6);
     header.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
     [container addSubview:header];
@@ -6358,7 +6603,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
         CGFloat padding = MAX((CGFloat)6, self.inlineLayoutEngine.compactEntryHorizontalPadding);
         FYInstallInlineFoldedEntry(card, cardWidth, padding, title, hint, action,
             [self.inlineLayoutEngine compactEntryFont], [self.inlineLayoutEngine foldedEntryHintFont],
-            [self inlinePanelTitleColor], self.uiInk, FYAdventureColor(@"mint"),
+            [self inlinePanelTitleColor], [self inlinePanelTextColor], [self inlinePanelTextColor],
             ^NSTextField *(NSString *text, NSFont *font, NSColor *color) {
                 return [self inlineCompactEntryLabel:text font:font color:color];
             });
@@ -6929,7 +7174,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     }
 }
 
-- (NSColor *)captionTextColor {
+- (NSColor *)captionThemeTextColor {
     switch ([self captionThemeIndex]) {
         case 3: return FYAdventureColor(@"ink");
         case 1:
@@ -6939,6 +7184,11 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
         default:
             return NSColor.whiteColor;
     }
+}
+
+- (NSColor *)captionTextColor {
+    return self.captionTextColorCustomized && self.captionTextColorWell
+        ? self.captionTextColorWell.color : [self captionThemeTextColor];
 }
 
 - (NSColor *)captionSecondaryTextColor {
@@ -6997,6 +7247,22 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     return _inlineLayoutEngine;
 }
 
+- (void)applyBatchAppearanceToLayoutEngine {
+    FYInlineLayoutEngine *engine = [self inlineLayoutEngine];
+    CGFloat size = self.batchFontSizeSlider ? self.batchFontSizeSlider.doubleValue : 16;
+    CGFloat width = self.batchWidthSlider ? self.batchWidthSlider.doubleValue : 560;
+    CGFloat height = self.batchHeightSlider ? self.batchHeightSlider.doubleValue : 330;
+    engine.shortFontSize = size;
+    engine.coverFontSize = size + 1;
+    engine.longBodyFontSize = size + 3;
+    engine.minimumLongBodyFontSize = MAX((CGFloat)12, size - 1);
+    engine.longTitleFontSize = MAX((CGFloat)12, size - 2);
+    engine.compactEntryFontSize = MAX((CGFloat)11, size - 3);
+    engine.cardMaxWidth = width;
+    engine.shortMaxWidth = width * 360.0 / 560.0;
+    engine.cardMaxHeight = height;
+}
+
 // 贴译背景不透明度：直接跟随现有「背景透明度」设置（与字幕同一数值），
 // 不新增第二套透明度设置，也不重置用户已有偏好。文字颜色始终完全不透明。
 - (CGFloat)inlinePanelFillAlpha {
@@ -7024,10 +7290,10 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     return FYAdventureColor(@"line");
 }
 - (NSColor *)inlinePanelTextColor {
-    return FYAdventureColor(@"ink");
+    return self.batchTextColorWell ? self.batchTextColorWell.color : FYAdventureColor(@"ink");
 }
 - (NSColor *)inlinePanelTitleColor {
-    return FYAdventureColor(@"quiet");
+    return [[self inlinePanelTextColor] colorWithAlphaComponent:0.82];
 }
 // 中文使用项目规定的华文圆体（短贴片正常字重；长卡正文与预览一致用粗圆体）。
 - (NSFont *)inlinePanelFontOfSize:(CGFloat)size {
@@ -7667,6 +7933,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         [weakSelf finishCaptureCardCalibration:screenRect windowFrame:windowFrame videoAspect:videoAspect deviceID:deviceID windowID:windowID];
     };
     view.onCancel = ^{
+        weakSelf.selectOCRRegionAfterCaptureCalibration = NO;
         [weakSelf endCaptureCardCalibration];
         [weakSelf setStatus:@"已取消调整贴译位置。"];
     };
@@ -7676,6 +7943,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     [panel makeFirstResponder:view];
     self.captureCalibrationKeyMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent *(NSEvent *event) {
         if (event.keyCode != 53) { return event; }
+        weakSelf.selectOCRRegionAfterCaptureCalibration = NO;
         [weakSelf endCaptureCardCalibration];
         [weakSelf setStatus:@"已取消调整贴译位置。"];
         return nil;
@@ -7699,6 +7967,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
                           windowID:(uint32_t)windowID {
     [self endCaptureCardCalibration];
     if (NSWidth(screenRect) < 40 || NSHeight(screenRect) < 40) {
+        self.selectOCRRegionAfterCaptureCalibration = NO;
         [self setStatus:@"框选区域太小，未保存。"];
         return;
     }
@@ -7706,6 +7975,10 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     [self scheduleSettingsSave];
     [self updateCaptureCalibrationStatus];
     [self setStatus:[NSString stringWithFormat:@"已按你框选的区域贴译（%.0f×%.0f）。", NSWidth(screenRect), NSHeight(screenRect)]];
+    if (self.selectOCRRegionAfterCaptureCalibration) {
+        self.selectOCRRegionAfterCaptureCalibration = NO;
+        [self selectOCRRegion:nil];
+    }
 }
 
 - (void)clearCaptureCardCalibration:(id)sender {
@@ -7776,6 +8049,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 
 - (NSRect)appKitOCRPreviewFrameForWindowItem:(WindowItem *)item {
     NSRect frame = [self appKitFrameForWindowItem:item];
+    if ([self captureCardInputEnabled] && ![self captureCardDisplayRectForWindow:item outRect:&frame]) return NSZeroRect;
     CGRect box = CGRectMake(self.regionXSlider.doubleValue, self.regionYSlider.doubleValue, self.regionWidthSlider.doubleValue, self.regionHeightSlider.doubleValue);
     return [FYGeometryManager frameForTopLeftNormalizedBox:box inViewport:frame];
 }
@@ -7815,13 +8089,13 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         // 中间完全透明，**一笔都不画**，只留边框：
         // 这样取景框不会给游戏画面增加任何遮挡，OCR 读到什么用户就看到什么。
         content.layer.backgroundColor = NSColor.clearColor.CGColor;
-        content.layer.borderColor = [NSColor colorWithCalibratedRed:0.10 green:0.43 blue:1 alpha:1].CGColor;
+        content.layer.borderColor = [self captionTextColor].CGColor;
         content.layer.borderWidth = 3;
         content.layer.cornerRadius = 8;
 
-        self.ocrPreviewLabel = [self label:@"OCR 识别区域" font:FYUIFont(13, NSFontWeightBold) color:NSColor.whiteColor];
+        self.ocrPreviewLabel = [self label:@"OCR 识别区域" font:FYUIFont(MAX((CGFloat)12, self.captionFontSizeSlider.doubleValue * 0.5), NSFontWeightBold) color:[self captionTextColor]];
         self.ocrPreviewLabel.wantsLayer = YES;
-        self.ocrPreviewLabel.layer.backgroundColor = [NSColor colorWithCalibratedRed:0.10 green:0.43 blue:1 alpha:0.92].CGColor;
+        self.ocrPreviewLabel.layer.backgroundColor = [FYAppearanceBackdropForText([self captionTextColor]) colorWithAlphaComponent:0.94].CGColor;
         self.ocrPreviewLabel.layer.cornerRadius = 5;
         self.ocrPreviewLabel.translatesAutoresizingMaskIntoConstraints = NO;
         [content addSubview:self.ocrPreviewLabel];
@@ -7833,6 +8107,10 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         self.ocrPreviewPanel.contentView = content;
     }
 
+    self.ocrPreviewPanel.contentView.layer.borderColor = [self captionTextColor].CGColor;
+    self.ocrPreviewLabel.font = FYUIFont(MAX((CGFloat)12, self.captionFontSizeSlider.doubleValue * 0.5), NSFontWeightBold);
+    self.ocrPreviewLabel.textColor = [self captionTextColor];
+    self.ocrPreviewLabel.layer.backgroundColor = [FYAppearanceBackdropForText([self captionTextColor]) colorWithAlphaComponent:0.94].CGColor;
     [self.ocrPreviewPanel setFrame:frame display:YES];
     [self.ocrPreviewPanel orderFrontRegardless];
     return YES;
@@ -8349,6 +8627,16 @@ static const BOOL kModalScopingEnabled = NO;
     self.captionTextLabel.font = FYUIFont(self.captionFontSizeSlider.doubleValue, NSFontWeightRegular);
     self.captionTextLabel.textColor = [self captionTextColor];
     self.captionBrandLabel.textColor = [self captionSecondaryTextColor];
+    if (self.captionPanel && self.captionWidthSlider) {
+        NSRect frame = self.captionPanel.frame;
+        NSRect visible = (self.captionPanel.screen ?: NSScreen.mainScreen).visibleFrame;
+        CGFloat width = MIN(self.captionWidthSlider.doubleValue, MAX((CGFloat)240, NSWidth(visible)));
+        if (fabs(NSWidth(frame) - width) >= 1) {
+            frame.size.width = width;
+            frame.origin.x = MIN(MAX(frame.origin.x, NSMinX(visible)), NSMaxX(visible) - width);
+            [self.captionPanel setFrame:frame display:YES animate:NO];
+        }
+    }
     [self resizeCaptionWindowForText:self.captionTextLabel.stringValue];
     [self updateCaptionAppearancePreview];
 }

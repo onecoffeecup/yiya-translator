@@ -775,18 +775,19 @@ static void TestLongCardReadability(void) {
             @"超长译文时正文视口仍不低于三行");
     IACheckLegality(hugeResult, hugeRequests, viewport, scenario2);
 
-    // 短译文（但原文是长正文）：仍然不能出现“只有标题的卡”。
-    NSString *scenario3 = @"长卡·短译文不低于可读下限";
+    // 短译文（但原文是长正文）：正文完整显示，同时不预留三行空白。
+    NSString *scenario3 = @"长卡·短译文按内容收紧";
     NSArray<FYInlineLayoutRequest *> *shortRequests = @[[FYInlineLayoutRequest requestWithBlock:body
                                                                                   translation:@"很短。"
                                                                                   sourceFrame:IADisplayFrameForBox(body.boundingBox, viewport)]];
     FYInlineLayoutResult *shortResult = [engine layoutRequests:shortRequests viewport:viewport previous:nil];
     FYInlinePlacement *shortPlacement = shortResult.placements.firstObject;
-    IACheck(NSHeight(shortPlacement.translationFrame) >= engine.minimumCardHeight - 1, scenario3,
-            [NSString stringWithFormat:@"短译文卡片高度 %.0f ≥ 最小可读高度 %.0f（不是只有标题的卡）",
+    IACheck(NSHeight(shortPlacement.translationFrame) < engine.minimumCardHeight - 5 && !shortPlacement.scrollable, scenario3,
+            [NSString stringWithFormat:@"短译文卡片高度 %.0f 不预留三行空白（长文下限 %.0f）",
              NSHeight(shortPlacement.translationFrame), engine.minimumCardHeight]);
-    IACheck(shortPlacement.bodyViewportHeight >= 3 * IALineHeight(engine, shortPlacement) - 1, scenario3,
-            [NSString stringWithFormat:@"短译文卡片正文视口 %.0f 仍 ≥ 三行", shortPlacement.bodyViewportHeight]);
+    IACheck(shortPlacement.bodyViewportHeight >= shortPlacement.measuredContentHeight - 1 &&
+            shortPlacement.bodyViewportHeight < 3 * IALineHeight(engine, shortPlacement), scenario3,
+            [NSString stringWithFormat:@"短译文正文完整可见且视口随内容收紧（%.0f）", shortPlacement.bodyViewportHeight]);
 }
 
 #pragma mark - E. 降级链

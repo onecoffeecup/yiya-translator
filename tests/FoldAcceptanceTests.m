@@ -172,8 +172,10 @@ static NSArray<OCRTextItem *> *AccCrowdedItems(void) {
 }
 
 static NSArray<NSString *> *AccCrowdedTranslations(void) {
+    // 短译文会贴合正文直接显示；这里用确实需要折叠的长译文验收入口。
+    NSString *longBody = [NSString stringWithFormat:@"%@\n%@\n%@", kAccBodyTranslation, kAccBodyTranslation, kAccBodyTranslation];
     return @[@"◆樱井琉夏的喜好◆", @"身高", @"体重", @"打工", @"花店安妮莉", @"社团",
-             @"回家部\n桜井琥一的弟弟。刺激是他的活力。", @"美代的笔记", kAccBodyTranslation];
+             @"回家部\n桜井琥一的弟弟。刺激是他的活力。", @"美代的笔记", longBody];
 }
 
 #pragma mark - 读取

@@ -49,7 +49,8 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     [session referenceSource:@"雨が降った。" translation:@"下雨了。"];
     NSUInteger before=session.messages.count;old(Envelope(@"过期回复"),Response(),nil);Tick();Require(session.messages.count==before,@"late answer cannot overwrite changed context");
     [session send:@"这句什么意思？"];Require([[(NSArray *)payload[@"messages"] lastObject][@"content"] containsString:@"雨が降った"],@"latest reference is explicit and used by next question");
-    pending(nil,nil,[NSError errorWithDomain:@"mock" code:500 userInfo:@{NSLocalizedDescriptionKey:@"模拟失败"}]);Pump(^BOOL{return !session.sending;});Require([session.messages.lastObject[@"status"] isEqualToString:@"error"],@"failure visible and sending recovers");
+    NSHTTPURLResponse *unauthorized=[[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"https://example.invalid/v1"] statusCode:401 HTTPVersion:@"HTTP/1.1" headerFields:@{}];
+    pending([@"secret.example.invalid/api-key" dataUsingEncoding:NSUTF8StringEncoding],unauthorized,nil);Pump(^BOOL{return !session.sending;});Require([session.messages.lastObject[@"status"] isEqualToString:@"error"] && [session.messages.lastObject[@"content"] containsString:@"HTTP 401"] && ![session.messages.lastObject[@"content"] containsString:@"secret.example.invalid"],@"HTTP failure visible without exposing server body and sending recovers");
     FYImmersiveTestApp *app=[FYImmersiveTestApp new];[app createMainWindow];[app createCaptionWindow];
     app.captionPanelShownByUser=YES;[app updateCaptionAppearance];[app.captionPanel.contentView layoutSubtreeIfNeeded];
     Require(NSHeight(app.captionPanel.frame)>=140 && NSHeight(app.captionContainer.frame)>=140,@"caption body cannot collapse to line");

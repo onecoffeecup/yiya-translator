@@ -207,8 +207,10 @@ static NSArray<OCRTextItem *> *RfCrowdedItems(void) {
 }
 
 static NSArray<NSString *> *RfCrowdedTranslations(void) {
+    // 入口专项测试使用长译文，避免短译文高度收紧后直接以完整长卡显示。
+    NSString *longBody = [NSString stringWithFormat:@"%@\n%@\n%@", kRfBodyTranslation, kRfBodyTranslation, kRfBodyTranslation];
     return @[@"◆樱井琉夏的喜好◆", @"身高", @"体重", @"打工", @"花店安妮莉", @"社团",
-             @"回家部\n桜井琥一的弟弟。刺激是他的活力。", @"美代的笔记", kRfBodyTranslation];
+             @"回家部\n桜井琥一的弟弟。刺激是他的活力。", @"美代的笔记", longBody];
 }
 
 static OCRTextItem *RfCrowdedBodyJittered(void) {

@@ -115,7 +115,9 @@ int main(int argc,const char *argv[]) {
         Require(app.learningAnalysisBusy && !app.grammarEmptyAnalyzeButton.enabled && app.grammarPointsPane.hidden,@"empty-state action must invoke analysis and prevent duplicate clicks while waiting");
         analysisDone(nil,nil,[NSError errorWithDomain:@"UITest" code:1 userInfo:@{NSLocalizedDescriptionKey:@"测试连接失败"}]);
         Pump(^BOOL{return !app.learningAnalysisBusy;});
-        Require([app.grammarEmptyHint.stringValue containsString:@"测试连接失败"] && app.grammarEmptyAnalyzeButton.enabled,@"analysis failure must remain readable with a retry action");
+        Require([app.grammarEmptyHint.stringValue containsString:@"网络连接失败"] &&
+                ![app.grammarEmptyHint.stringValue containsString:@"测试连接失败"] &&
+                app.grammarEmptyAnalyzeButton.enabled,@"analysis failure must show a safe message with a retry action");
         [app clearAnalysisDisplay];
         FYGrammarItem *grammar=[FYGrammarItem new];grammar.name=@"〜ないと";grammar.matchedText=@"しないと";
         grammar.matchedRange=[source rangeOfString:grammar.matchedText];grammar.meaning=@"如果不……就……";

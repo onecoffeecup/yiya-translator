@@ -1317,6 +1317,27 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     return [kept componentsJoinedByString:@"\n"];
 }
 
++ (NSArray<OCRTextItem *> *)recognizeImage:(CGImageRef)image topLeftScope:(CGRect)scope
+    recognizer:(NSArray<OCRTextItem *> *(^)(CGImageRef cropped, NSError **error))recognizer error:(NSError **)error {
+    if (CGRectEqualToRect(scope, CGRectMake(0,0,1,1))) return recognizer(image,error);
+    if (!image || !isfinite(scope.origin.x) || !isfinite(scope.origin.y) ||
+        !isfinite(scope.size.width) || !isfinite(scope.size.height) || scope.size.width<=0 || scope.size.height<=0) return @[];
+    CGRect bounded=CGRectIntersection(scope,CGRectMake(0,0,1,1));
+    if (CGRectIsNull(bounded) || CGRectIsEmpty(bounded)) return @[];
+    CGSize size=CGSizeMake(CGImageGetWidth(image),CGImageGetHeight(image));
+    CGRect crop=CGRectIntersection(CGRectIntegral(CGRectMake(bounded.origin.x*size.width,bounded.origin.y*size.height,
+        bounded.size.width*size.width,bounded.size.height*size.height)),CGRectMake(0,0,size.width,size.height));
+    CGImageRef cropped=CGImageCreateWithImageInRect(image,crop);
+    if (!cropped) {
+        if (error) *error=[NSError errorWithDomain:@"LiveCaptionTranslator" code:901 userInfo:@{NSLocalizedDescriptionKey:@"无法读取手动识别区域。"}];
+        return @[];
+    }
+    NSArray<OCRTextItem *> *items=recognizer(cropped,error);
+    CGImageRelease(cropped);
+    [self remapItems:items fromPixelCrop:crop imageSize:size];
+    return items;
+}
+
 - (NSArray<OCRTextItem *> *)recognizeTextItemsInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment error:(NSError **)error {
     __block NSMutableArray<OCRTextItem *> *items = [NSMutableArray array];
     __block NSError *requestError = nil;

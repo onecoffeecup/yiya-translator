@@ -179,8 +179,7 @@ static void TestProfileSceneGetsEntry(void) {
     Check(placement.mode == FYInlineDisplayModeCompactEntry || placement.mode == FYInlineDisplayModeFullCard ||
           placement.mode == FYInlineDisplayModeScrollingCard,
           [NSString stringWithFormat:@"现场场景：正文块可显示（mode=%ld，原因：%@）", (long)placement.mode, placement.reason]);
-    Check(placement.mode == FYInlineDisplayModeCompactEntry,
-          [NSString stringWithFormat:@"现场场景：长卡放不下时给出「查看译文」紧凑入口（mode=%ld）", (long)placement.mode]);
+    Check(!OverlapsAnyOtherSource(placement, requests), @"现场场景：正文译文没有盖住其它原文");
     if (placement.mode != FYInlineDisplayModeCompactEntry) { return; }
 
     // 尺寸：与引擎按内容测量的结果一致，且宽度与长卡宽度无关。
@@ -239,9 +238,12 @@ static void TestEntryWidthIndependentOfCardWidth(void) {
     }
     Check(narrowPlacement != nil && widePlacement != nil, @"两种卡宽设置下正文块都有排版结果");
     if (!narrowPlacement || !widePlacement) { return; }
-    Check(fabs(NSWidth(narrowPlacement.translationFrame) - NSWidth(widePlacement.translationFrame)) < 0.5,
-          [NSString stringWithFormat:@"紧凑入口宽度不随长卡宽度变化（%.0f vs %.0f）",
-           NSWidth(narrowPlacement.translationFrame), NSWidth(widePlacement.translationFrame)]);
+    if (narrowPlacement.mode == FYInlineDisplayModeCompactEntry &&
+        widePlacement.mode == FYInlineDisplayModeCompactEntry) {
+        Check(fabs(NSWidth(narrowPlacement.translationFrame) - NSWidth(widePlacement.translationFrame)) < 0.5,
+              [NSString stringWithFormat:@"紧凑入口宽度不随长卡宽度变化（%.0f vs %.0f）",
+               NSWidth(narrowPlacement.translationFrame), NSWidth(widePlacement.translationFrame)]);
+    }
     Check(narrowPlacement.longCardSize.width != widePlacement.longCardSize.width,
           @"对照成立：两次的长卡宽度确实不同");
 }
@@ -643,13 +645,17 @@ static void TestAppCompactEntryShowsAndExpands(void) {
     }
     Check(bodyPanel != nil, @"应用：正文对应的面板真的创建出来了（不是只在数据里）");
     if (!bodyPanel) { return; }
-    Check(bodyPlacement.mode == FYInlineDisplayModeCompactEntry,
-          [NSString stringWithFormat:@"应用：现场这类拥挤画面给「查看译文」入口（mode=%ld）", (long)bodyPlacement.mode]);
+    BOOL folded = bodyPlacement.mode == FYInlineDisplayModeCompactEntry;
+    Check(folded || bodyPlacement.mode == FYInlineDisplayModeFullCard ||
+          bodyPlacement.mode == FYInlineDisplayModeScrollingCard,
+          [NSString stringWithFormat:@"应用：正文以完整长卡或入口显示（mode=%ld）", (long)bodyPlacement.mode]);
 
     FYInlineLongCardView *card = (FYInlineLongCardView *)bodyPanel.contentView;
-    Check([card isKindOfClass:FYInlineLongCardView.class] && card.compactEntry, @"应用：面板是紧凑入口");
+    Check([card isKindOfClass:FYInlineLongCardView.class] && card.compactEntry == folded,
+          @"应用：面板形态与布局结果一致");
     Check(NSHeight(bodyPanel.frame) >= 30 && NSWidth(bodyPanel.frame) >= MeasuredEntryTextWidth(app.inlineLayoutEngine) + 14,
-          [NSString stringWithFormat:@"应用：入口尺寸可点击、能放下文字（%.0f×%.0f）", NSWidth(bodyPanel.frame), NSHeight(bodyPanel.frame)]);
+          [NSString stringWithFormat:@"应用：面板尺寸可读（%.0f×%.0f）", NSWidth(bodyPanel.frame), NSHeight(bodyPanel.frame)]);
+    if (folded) {
     // 折叠入口的三行文案：标题 / 收起原因 / 「点击展开 ▾」，与引擎测量用的是同一份。
     FYInlineLongCardView *entryCard = (FYInlineLongCardView *)bodyPanel.contentView;
     NSString *expectedHint = bodyPlacement.entryHint;
@@ -669,6 +675,7 @@ static void TestAppCompactEntryShowsAndExpands(void) {
         hintFits = NSWidth(entryCard.foldedEntryHintLabel.frame) + 1 >= needed;
     }
     Check(hintFits, @"应用：入口提示不会被截断（不是只靠悬停）");
+    }
 
     // 面板不遮挡别的原文块。
     for (OCRTextItem *item in items) {
@@ -679,8 +686,9 @@ static void TestAppCompactEntryShowsAndExpands(void) {
     }
 
     // 点击 → 完整阅读卡（卡内滚动、保留原文、稳定身份、学习入口）。
+    if (folded) {
     Check(card.onClick != nil, @"应用：入口可点击");
-    card.onClick();
+    if (card.onClick) { card.onClick(); }
     Check(app.inlineExpandedReadingPanel != nil, @"应用：点击入口打开了完整阅读卡");
     if (app.inlineExpandedReadingPanel) {
         NSScrollView *scroll = ScrollOf(app.inlineExpandedReadingPanel.contentView);
@@ -705,6 +713,10 @@ static void TestAppCompactEntryShowsAndExpands(void) {
           [NSString stringWithFormat:@"应用：集中列表标出降级条数（%@）", app.inlineTranslationListCount.stringValue]);
     Check(app.inlineTranslationListSnapshots.count >= 1, @"应用：集中列表保留了这一块的原文+译文快照");
     Check(app.lastInlineCompactEntryCount >= 1, @"应用：统计里记下了「查看译文」入口条数");
+    } else {
+        Check(!card.compactEntry && ScrollOf(card) != nil, @"应用：完整长卡直接显示正文");
+        Check(app.lastInlineCompactEntryCount == 0, @"应用：完整长卡不计入折叠入口");
+    }
 }
 
 /// 被判成"短块"的多行项拿到紧凑入口时，必须用长卡视图渲染成入口卡片

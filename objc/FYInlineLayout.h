@@ -286,7 +286,7 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 @property (nonatomic) CGFloat longBodyFontSize;     // 19
 @property (nonatomic) CGFloat longTitleFontSize;    // 14
 @property (nonatomic) CGFloat longLineSpacing;      // 8
-@property (nonatomic) NSInteger minimumBodyLines;   // 3
+@property (nonatomic) NSInteger minimumBodyLines;   // 长文滚动时的最少可见行数，默认 3；短译文按内容收紧
 @property (nonatomic) CGFloat cardMaxWidth;         // 560
 @property (nonatomic) CGFloat cardWidthFraction;    // 0.52
 @property (nonatomic) CGFloat cardWideFraction;     // 0.62（需要更宽才能减少滚动时）
@@ -354,7 +354,7 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 - (CGFloat)measuredBodyHeight:(NSString *)translation
                      placement:(FYInlinePlacement *)placement
                          width:(CGFloat)width;
-/// 长卡最小可读高度（内边距 + 标题 + N 行正文）。
+/// 长文滚动卡的最小可读高度（内边距 + 标题 + N 行正文）；短译文不强制此高度。
 - (CGFloat)minimumCardHeight;
 @end
 

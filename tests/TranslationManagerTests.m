@@ -7,6 +7,10 @@ int main(void) { @autoreleasepool {
     Check(!FYChatCompletionsURLWithError(@"https:///",&urlError) && urlError.code==FYTranslationURLMissingHost,@"missing endpoint host diagnosed");
     Check(!FYChatCompletionsURLWithError(@"https://user:secret@example.invalid/v1",&urlError) && urlError.code==FYTranslationURLUnsupportedComponents && ![urlError.description containsString:@"secret"],@"credential-bearing endpoint rejected without leaking secrets");
     Check(FYChatCompletionsURLWithError(@"https://example.invalid/v1",&urlError)!=nil && !urlError,@"successful endpoint clears previous diagnostic");
+    Check(!FYChatCompletionsURLWithError(@"http://example.invalid/v1",&urlError) && urlError.code==FYTranslationURLInsecureRemoteHTTP && ![urlError.localizedDescription containsString:@"example.invalid"],@"remote plaintext endpoint rejected without echoing host");
+    Check(!FYChatCompletionsURLWithError(@"http://localhost.example.invalid/v1",&urlError) && urlError.code==FYTranslationURLInsecureRemoteHTTP,@"localhost lookalike is not loopback");
+    Check(FYChatCompletionsURLWithError(@"http://127.0.0.1:11434/v1",&urlError)!=nil && !urlError,@"IPv4 loopback HTTP remains available");
+    Check(FYChatCompletionsURLWithError(@"http://[::1]:11434/v1",&urlError)!=nil && !urlError,@"IPv6 loopback HTTP remains available");
     FYInlineTranslationCache *inlineOwner=[FYInlineTranslationCache new];
     NSMutableDictionary *aliased=[NSMutableDictionary dictionaryWithObject:@"old" forKey:@"key"];
     inlineOwner.entries=aliased;[inlineOwner storeValue:@"new" forKey:@"key"];
@@ -16,6 +20,8 @@ int main(void) { @autoreleasepool {
     Check(!inlineOwner.entries,@"nil cache storage preserves no-op behavior rather than allocating");
     NSError *error=nil;
     NSURLRequest *request=[FYTranslationManager requestWithURL:[NSURL URLWithString:@"https://example.invalid/chat/completions"] apiKey:@"fixture" model:@"test" sourceText:@" 日文 " systemPrompt:@"translate" maxTokens:20 disableReasoning:YES error:&error];
+    NSError *requestError=nil;
+    Check(![FYTranslationManager requestWithURL:[NSURL URLWithString:@"http://example.invalid/chat/completions"] apiKey:@"fixture" model:@"test" sourceText:@"日文" systemPrompt:@"translate" maxTokens:20 disableReasoning:NO error:&requestError] && requestError.code==FYTranslationURLInsecureRemoteHTTP,@"request builder cannot bypass remote HTTP credential guard");
     NSDictionary *payload=[NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:nil];
     Check([request.HTTPMethod isEqualToString:@"POST"] && request.timeoutInterval==15,@"wire settings");
     Check([payload[@"max_tokens"] integerValue]==120 && [payload[@"reasoning_effort"] isEqual:@"none"],@"minimum token budget and reasoning disabled");
