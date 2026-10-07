@@ -21,6 +21,20 @@ def main(directory):
     if info["CFBundleIdentifier"] != "com.nanami.fuyi" or info["CFBundleShortVersionString"] != version:
         raise ValueError("App 身份或版本与源码不匹配")
     binary = contents / "MacOS/LiveCaptionTranslator"
+    import json
+    updates = json.loads((ROOT / "resources/updates/sparkle-config.json").read_text())
+    if info.get("SUFeedURL") != updates["feed_url"] or info.get("SUPublicEDKey") != updates["public_key"]:
+        raise ValueError("更新地址或公钥与源码不匹配")
+    if not info.get("SUVerifyUpdateBeforeExtraction") or not info.get("SURequireSignedFeed"):
+        raise ValueError("更新包或清单签名检查未启用")
+    framework = contents / "Frameworks/Sparkle.framework"
+    framework_info = plistlib.loads((framework / "Resources/Info.plist").read_bytes())
+    if framework_info["CFBundleShortVersionString"] != updates["sparkle_version"]:
+        raise ValueError("Sparkle 版本与锁定配置不一致")
+    if not (contents / "Resources/updates/Sparkle-LICENSE.txt").is_file():
+        raise ValueError("缺少 Sparkle 许可说明")
+    if any(contents.rglob("api-key.json")) or any(contents.rglob("ed25519.key")):
+        raise ValueError("应用包含有禁止分发的凭据文件")
     unsigned = ROOT / ".build/release/LiveCaptionTranslator"
     # 签名会改变二进制字节，比较 Mach-O UUID 验证来自同一次链接。
     def uuids(path):

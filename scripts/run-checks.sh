@@ -6,6 +6,8 @@ source "$ROOT_DIR/scripts/lib-test.sh"
 fy_test_ui_gate
 python3 scripts/reference-data.py check
 python3 tests/DistributionTests.py
+python3 tests/UpdateDistributionTests.py
+python3 scripts/run-update-tests.py
 bash scripts/run-diagnostics-tests.sh
 bash scripts/run-module-tests.sh
 bash scripts/run-dialogue-grammar-tests.sh

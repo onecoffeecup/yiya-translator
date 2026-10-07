@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 python3 "$ROOT_DIR/scripts/reference-data.py" check
+SPARKLE_DIR="$(python3 "$ROOT_DIR/scripts/sparkle.py" fetch)"
 
 # 默认构建 Intel + Apple Silicon 双架构，保证 Intel Mac 用户也能打开。
 # 本地快速迭代可用 ARCHS=arm64 scripts/build-app.sh 只编一个架构。
@@ -17,6 +18,7 @@ mkdir -p "$BUILD_DIR" "$MODULE_CACHE"
 
 SOURCES=(
   "$ROOT_DIR/objc/LiveCaptionTranslator.m"
+  "$ROOT_DIR/objc/FYAppUpdater.m"
   "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
   "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m"
   "$ROOT_DIR/objc/FYInlineLayout.m"
@@ -37,6 +39,8 @@ SOURCES=(
 )
 
 FRAMEWORKS=(
+  -F "$SPARKLE_DIR" -framework Sparkle
+  -Wl,-rpath,@executable_path/../Frameworks
   -framework Cocoa -framework Security -framework UniformTypeIdentifiers
   -framework CoreGraphics
   -framework QuartzCore
@@ -54,6 +58,7 @@ for arch in $ARCHS; do
   slice="$BUILD_DIR/LiveCaptionTranslator.$arch"
   clang \
     -fobjc-arc \
+    -DFY_ENABLE_UPDATES=1 \
     -fmodules \
     -fmodules-cache-path="$MODULE_CACHE" \
     -arch "$arch" \

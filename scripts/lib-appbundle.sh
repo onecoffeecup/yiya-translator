@@ -31,6 +31,14 @@ fy_read_version() {
 }
 
 fy_read_build_number() {
+  if [ -n "${FY_BUILD_NUMBER:-}" ]; then
+    if [[ ! "$FY_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+      echo "FY_BUILD_NUMBER 必须是正整数" >&2
+      return 1
+    fi
+    echo "$FY_BUILD_NUMBER"
+    return
+  fi
   local count
   count="$(git -C "$FY_ROOT_DIR" rev-list --count HEAD 2>/dev/null || true)"
   if [ -z "$count" ]; then
@@ -116,6 +124,7 @@ fy_stage_app() {
 PLIST
 
   printf 'APPL????' > "$contents_dir/PkgInfo"
+  python3 "$FY_ROOT_DIR/scripts/sparkle.py" stage "$app_dir"
 
   echo "$app_dir"
 }

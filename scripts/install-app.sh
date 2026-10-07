@@ -49,14 +49,14 @@ fi
 if [ "$SIGN_IDENTITY" = "-" ]; then
   codesign \
     --force \
-    --deep \
     --sign - \
     --identifier com.nanami.fuyi \
     --requirements '=designated => identifier "com.nanami.fuyi"' \
     "$TARGET_APP"
 else
-  codesign --force --deep --sign "$SIGN_IDENTITY" --identifier com.nanami.fuyi "$TARGET_APP"
+  codesign --force --sign "$SIGN_IDENTITY" --identifier com.nanami.fuyi "$TARGET_APP"
 fi
-codesign --verify --strict "$TARGET_APP"
+# Preserve the upstream signatures and identifiers of Sparkle's nested helpers.
+codesign --verify --deep --strict "$TARGET_APP"
 
 echo "Installed $TARGET_APP"

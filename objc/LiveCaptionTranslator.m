@@ -3,6 +3,9 @@
 #import <QuartzCore/QuartzCore.h>
 #import <Vision/Vision.h>
 #import "FYLocalAPIKeyStore.h"
+#ifdef FY_ENABLE_UPDATES
+#import "FYAppUpdater.h"
+#endif
 #import "learning/FYLearningModels.h"
 #import "learning/FYLearningStore.h"
 #import "learning/FYLearningAnalyzer.h"
@@ -491,6 +494,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @end
 
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, NSSharingServiceDelegate>
+#ifdef FY_ENABLE_UPDATES
+@property(nonatomic, strong) FYAppUpdater *appUpdater;
+#endif
 @property(nonatomic, strong) NSWindow *mainWindow;
 @property(nonatomic, strong) FYReferenceDictionary *referenceDictionary;
 @property(nonatomic) NSUInteger sourceHoverGeneration;
@@ -939,6 +945,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSMenu *mainMenu = [[NSMenu alloc] initWithTitle:@""];
     NSMenuItem *applicationItem = [[NSMenuItem alloc] initWithTitle:@"译芽" action:nil keyEquivalent:@""];
     NSMenu *applicationMenu = [[NSMenu alloc] initWithTitle:@"译芽"];
+#ifdef FY_ENABLE_UPDATES
+    self.appUpdater = [FYAppUpdater new];
+    [self.appUpdater addItemsToApplicationMenu:applicationMenu];
+#endif
     NSMenuItem *quit = [[NSMenuItem alloc] initWithTitle:@"退出译芽" action:@selector(terminate:) keyEquivalent:@"q"];
     quit.keyEquivalentModifierMask = NSEventModifierFlagCommand;
     quit.target = NSApp;
@@ -998,6 +1008,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.overlayVisibilityTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(refreshOverlayVisibility:) userInfo:nil repeats:YES];
     [self refreshOverlayVisibility:nil];
     [NSApp activateIgnoringOtherApps:YES];
+#ifdef FY_ENABLE_UPDATES
+    [self.appUpdater start];
+#endif
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {

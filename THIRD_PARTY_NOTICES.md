@@ -1,5 +1,11 @@
 # 第三方资料与署名
 
+## Sparkle 自动更新框架
+
+应用内自动更新使用 [Sparkle 2.10.0](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0)，主体采用 BSD 2-Clause，所包含组件各自许可见上游完整 [LICENSE](https://github.com/sparkle-project/Sparkle/blob/2.10.0/LICENSE)。完整许可随应用放在 `Contents/Resources/updates/Sparkle-LICENSE.txt`；framework 及辅助程序保留上游签名和标识，未修改其实现。锁定版本与下载校验值见 [更新配置](resources/updates/sparkle-config.json)。
+
+## 学习资料
+
 项目源码的 MIT 许可不覆盖下列第三方资料。现有 JMdict 只读词典与 OpenJLPT 衍生等级数据按 CC BY-SA 4.0 提供；例句保留各自作者、句子 ID、原始地址和许可。已内置资料的完整许可随资料附件及 App 一并提供。独立 N1/N2 文字资料包使用下文单独标注的 CC BY-NC 4.0。
 
 | 资料 | 使用内容 | 来源与署名 | 许可 |

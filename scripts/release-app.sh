@@ -77,7 +77,7 @@ codesign \
   --requirements "=designated => identifier \"$FY_BUNDLE_ID\"" \
   "$STAGE_APP"
 
-codesign --verify --strict "$STAGE_APP"
+codesign --verify --deep --strict "$STAGE_APP"
 
 echo "==> 校验"
 echo "    架构：$(lipo -archs "$STAGE_APP/Contents/MacOS/$FY_EXECUTABLE_NAME")"
@@ -112,15 +112,23 @@ ditto -c -k --keepParent "$STAGE_DIR" "$TEMP_ZIP"
 echo "==> 回验 zip 内容"
 VERIFY_DIR="$(mktemp -d)"
 ditto -x -k "$TEMP_ZIP" "$VERIFY_DIR"
-codesign --verify --strict "$VERIFY_DIR/译芽-$VERSION/译芽.app"
+codesign --verify --deep --strict "$VERIFY_DIR/译芽-$VERSION/译芽.app"
 python3 "$ROOT_DIR/scripts/verify-release.py" "$VERIFY_DIR/译芽-$VERSION"
 echo "    解压后签名校验通过"
 mv "$TEMP_ZIP" "$ZIP_PATH"
+
+# Sparkle receives an app-only archive; the first-install archive retains its guides.
+UPDATE_ZIP="$RELEASE_DIR/yiya-$VERSION-build-$BUILD_NUMBER-update.zip"
+ditto -c -k --sequesterRsrc --keepParent "$STAGE_APP" "$UPDATE_ZIP.tmp"
+mv "$UPDATE_ZIP.tmp" "$UPDATE_ZIP"
+( cd "$RELEASE_DIR" && shasum -a 256 "$(basename "$UPDATE_ZIP")" > "$(basename "$UPDATE_ZIP").sha256" )
 
 ( cd "$RELEASE_DIR" && shasum -a 256 "$(basename "$ZIP_PATH")" > "$(basename "$ZIP_PATH").sha256" )
 
 echo
 echo "发布包：$ZIP_PATH"
+echo "应用内更新包：$UPDATE_ZIP"
+echo "准备签名更新清单：python3 scripts/prepare-update.py --archive \"$UPDATE_ZIP\" --tag \"v$VERSION\" --notes docs/发布说明.md"
 echo "大小：$(du -h "$ZIP_PATH" | cut -f1)"
 cat "$ZIP_PATH.sha256"
 echo

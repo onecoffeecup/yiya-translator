@@ -85,6 +85,8 @@ def main():
                  ("ReferenceData", [sys.executable, "scripts/reference-data.py", "check"], False),
                  ("RuntimeDiagnosticsTests", ["bash", "scripts/run-diagnostics-tests.sh"], False),
                  ("DistributionTests", [sys.executable, "tests/DistributionTests.py"], False),
+                 ("UpdateDistributionTests", [sys.executable, "tests/UpdateDistributionTests.py"], False),
+                 ("UpdateInstallerTests", [sys.executable, "scripts/run-update-tests.py"], True),
                  ("ModuleTests", ["bash", "scripts/run-module-tests.sh"], False),
                  ("LearningTests", ["bash", "scripts/run-learning-tests.sh"], False),
                  ("DialogueGrammarTests", ["bash", "scripts/run-dialogue-grammar-tests.sh"], False),
@@ -110,6 +112,7 @@ def main():
                 failed = True
                 break
             env = os.environ.copy()
+            env["FY_TEST_PARENT_RUNNER_PID"] = str(os.getpid())
             env.pop("FY_TEST_ALLOW_UI", None)
             env.pop("FY_TEST_COMPILE_ONLY", None)
             if record["ui"]:
