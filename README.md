@@ -15,7 +15,15 @@
 - 收藏词语、语法和句子，保留语境并进行遮义复习。
 - 在收藏词详情里离线查看词典读音、英文释义、日文例句及社区 JLPT 参考等级。
 
-![单词学习界面（示例数据）]<img width="3420" height="1926" alt="译芽开发过程 1" src="https://github.com/user-attachments/assets/c838fe13-9846-4e04-a862-ede2153b9977" />
+## 项目截图
+
+以下为译芽界面展示，游戏画面与示例文字不属于译芽自带内容。
+
+![译芽界面截图 1](docs/images/screenshots/yiya-01.png)
+
+![译芽界面截图 2](docs/images/screenshots/yiya-02.png)
+
+![译芽界面截图 3](docs/images/screenshots/yiya-03.png)
 
 
 ## 下载后怎么用
