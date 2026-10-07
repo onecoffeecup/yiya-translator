@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>译芽更新</title>
+    <link>https://onecoffeecup.github.io/yiya-translator/appcast.xml</link>
+    <description>译芽应用内更新清单</description>
+    <language>zh-CN</language>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: g3jJrBf+s7byGg43Pw4ir30RFf94ptXr3UL4vTYJPIXrgnYZWsf7zFFW171MSu4+uQ5j1GtfO72etXHczRqYBw==
+length: 608
+-->
