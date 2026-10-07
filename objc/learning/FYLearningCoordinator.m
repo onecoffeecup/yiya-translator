@@ -18,6 +18,7 @@ static NSString *FYTextHash(NSString *text) {
 @interface FYLearningCoordinator ()
 @property(nonatomic, strong) FYLearningStore *store;
 @property(nonatomic, strong) FYLearningAnalyzer *analyzer;
+@property(nonatomic, strong) FYLearningAnalyzer *reviewAnalyzer;
 @property(nonatomic, strong) FYJapaneseTokenizer *tokenizer;
 @property(nonatomic, strong) FYGrammarCatalog *catalog;
 @property(nonatomic, copy) NSString *sessionID;
@@ -317,6 +318,7 @@ static NSString *FYTextHash(NSString *text) {
 - (void)invalidateAnalysis {
     self.analysisGeneration += 1;
     [self.analyzer cancelAll];
+    [self.reviewAnalyzer cancelAll];
 }
 
 - (BOOL)currentMatches:(NSString *)sentenceID version:(NSInteger)version {
@@ -440,7 +442,7 @@ static NSString *FYTextHash(NSString *text) {
     }
     NSInteger generation = ++self.analysisGeneration;
     NSString *hash = FYTextHash(text);
-    NSInteger promptVersion = 3; // Invalidate caches without verified whole-sentence structure.
+    NSInteger promptVersion = 8; // Non-thinking compact analysis; only invalid anchors trigger one repair.
     NSInteger catalogVersion = self.catalog.catalogVersion;
     NSString *modelConfig = [NSString stringWithFormat:@"%@|%@|%ld|%ld",
                              self.analyzer.baseURL ?: @"", self.analyzer.model ?: @"",
@@ -480,6 +482,37 @@ static NSString *FYTextHash(NSString *text) {
                              promptVersion:promptVersion catalogVersion:catalogVersion modelConfig:modelConfig completion:^(NSError *e) { if (e && self.persistenceErrorHandler) { self.persistenceErrorHandler(e); } }];
             completion(result, nil);
         }];
+    }];
+}
+
+- (void)reviewCurrentAnalysis:(FYAnalysisResult *)existing
+                  completion:(void (^)(FYAnalysisResult *, NSError *))completion {
+    NSString *sentenceID = self.currentSentenceID, *text = self.currentSourceText;
+    NSString *translation = self.currentTranslation;
+    NSInteger version = self.currentVersion;
+    if (!sentenceID.length || ![FYLearningCoordinator analysisMatchesSentenceID:existing.sentenceID version:existing.version
+        currentSentenceID:sentenceID currentVersion:version]) {
+        completion(nil, [NSError errorWithDomain:@"FYLearningCoordinator" code:2 userInfo:@{NSLocalizedDescriptionKey:@"请先分析当前句子。"}]); return;
+    }
+    [self.reviewAnalyzer cancelAll];
+    FYLearningAnalyzer *reviewer = [FYLearningAnalyzer new];
+    reviewer.baseURL = self.analyzer.baseURL; reviewer.model = self.analyzer.model; reviewer.apiKey = self.analyzer.apiKey;
+    reviewer.catalog = self.catalog; reviewer.transport = self.analyzer.transport;
+    self.reviewAnalyzer = reviewer;
+    NSInteger generation = self.analysisGeneration;
+    NSInteger catalogVersion = self.catalog.catalogVersion;
+    NSString *modelConfig = [NSString stringWithFormat:@"%@|%@|8|%ld", reviewer.baseURL ?: @"", reviewer.model ?: @"", (long)catalogVersion];
+    [reviewer reviewSentence:text translation:translation existingResult:existing completion:^(FYAnalysisResult *result, NSError *error) {
+        if (self.reviewAnalyzer != reviewer || generation != self.analysisGeneration || ![self currentMatches:sentenceID version:version]) {
+            completion(nil, [NSError errorWithDomain:@"FYLearningCoordinator" code:2 userInfo:@{NSLocalizedDescriptionKey:@"复核已取消或句子已切换。"}]); return;
+        }
+        if (error) { completion(nil, error); return; }
+        result.sentenceID = sentenceID; result.version = version;
+        [self.store saveAnalysisResult:result sentenceID:sentenceID version:version textHash:FYTextHash(text)
+            promptVersion:8 catalogVersion:catalogVersion modelConfig:modelConfig completion:^(NSError *saveError) {
+                if (saveError && self.persistenceErrorHandler) { self.persistenceErrorHandler(saveError); }
+            }];
+        completion(result, nil);
     }];
 }
 

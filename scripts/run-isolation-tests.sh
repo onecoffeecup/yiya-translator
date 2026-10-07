@@ -11,6 +11,6 @@ clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   objc/learning/FYLearningStore.m objc/learning/FYLearningModels.m \
   objc/learning/FYLearningAnalyzer.m objc/learning/FYGrammarCatalog.m \
   objc/FYTranslationManager.m \
-  -framework Foundation -framework CoreGraphics -lsqlite3 \
+  -framework Foundation -framework CoreGraphics -framework NaturalLanguage -lsqlite3 \
   -o .build/release/TestIsolationTests
 fy_test_run "$ROOT_DIR/.build/release/TestIsolationTests"

@@ -87,6 +87,7 @@ def main():
                  ("DistributionTests", [sys.executable, "tests/DistributionTests.py"], False),
                  ("ModuleTests", ["bash", "scripts/run-module-tests.sh"], False),
                  ("LearningTests", ["bash", "scripts/run-learning-tests.sh"], False),
+                 ("DialogueGrammarTests", ["bash", "scripts/run-dialogue-grammar-tests.sh"], False),
                  ("InlineTranslationTests", ["bash", "scripts/run-tests.sh"], True)]
         steps.extend((s, ["bash", "scripts/run-learning-app-tests.sh", s, str(output / s)], True) for s in suites)
         before = source_hashes()

@@ -79,6 +79,10 @@ NS_ASSUME_NONNULL_BEGIN
 // 分析当前句（带缓存与版本核对）。onRequestStarted 在主线程调用，供 UI 置忙。
 - (void)analyzeCurrent:(void (^)(FYAnalysisResult *_Nullable result, NSError *_Nullable error))completion;
 
+// User-requested review bypasses the first-pass cache and preserves it on failure.
+- (void)reviewCurrentAnalysis:(FYAnalysisResult *)existing
+                  completion:(void (^)(FYAnalysisResult *_Nullable result, NSError *_Nullable error))completion;
+
 // 词条补全与收藏。
 - (void)completeVocabulary:(NSString *)surface
                    context:(NSString *)context

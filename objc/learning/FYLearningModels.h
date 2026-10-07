@@ -141,6 +141,7 @@ typedef NS_ENUM(NSInteger, FYAnalysisStatus) {
 @property(nonatomic, copy) NSString *catalogID;
 @property(nonatomic, copy) NSString *name;
 @property(nonatomic, copy) NSArray<NSString *> *aliases;
+@property(nonatomic, copy) NSArray<NSString *> *signatureForms; // Source spellings/conjugations, not grammar-name aliases.
 @property(nonatomic, copy, nullable) NSString *referenceLevel;
 @property(nonatomic, copy, nullable) NSString *connection;
 @property(nonatomic, copy, nullable) NSString *meaning;

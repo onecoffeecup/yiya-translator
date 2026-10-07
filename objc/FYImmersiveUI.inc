@@ -235,6 +235,7 @@
 }
 // Dedicated request ownership keeps quick reading independent of main analysis and AI chat.
 - (void)cancelQuickSentenceAnalysis {
+    [self.quickGrammarActions reset];
     self.quickAnalysisGeneration++;
     self.quickSentenceAnalyzing=NO;
     [self.quickSentenceAnalyzer cancelAll];
@@ -434,7 +435,18 @@
                 [point addArrangedSubview:[self quickReadingLabel:[notes componentsJoinedByString:@"\n"] size:11 weight:NSFontWeightRegular color:self.uiMuted]];
             }
     self.quickGrammarBookmarkButton=[self workspaceButton:@"＋ 收藏语法" action:@selector(bookmarkQuickGrammar:) primary:NO];
-    [point addArrangedSubview:self.quickGrammarBookmarkButton];
+    NSStackView *actions = [self horizontalStack]; actions.spacing = 8;
+    self.quickGrammarExpandButton = [self workspaceButton:@"展开解释" action:@selector(toggleGrammarExplanation:) primary:YES];
+    self.quickGrammarExpandButton.tag = 1;
+    [actions addArrangedSubview:self.quickGrammarExpandButton];
+    [actions addArrangedSubview:self.quickGrammarBookmarkButton];
+    [point addArrangedSubview:actions];
+    FYGrammarActionState *state = [self grammarActionsForQuick:YES];
+    if (state.expandedItem == item) {
+        NSString *explanation = [state.explanations objectForKey:item] ?: [state.errors objectForKey:item] ?: @"正在补充接续、用法与例句…";
+        [point addArrangedSubview:[self quickReadingLabel:explanation size:13 weight:NSFontWeightRegular color:self.uiInk]];
+    }
+    [self updateGrammarActionControlsForQuick:YES];
     self.quickGrammarBookmarkStatus=[self mutedLabel:@""];[point addArrangedSubview:self.quickGrammarBookmarkStatus];
     [self updateQuickGrammarBookmark];
     return [self quickReadingCard:point tinted:NO];
@@ -444,6 +456,7 @@
     NSScrollView *scroll=self.quickGrammarStack.enclosingScrollView;
     NSPoint position=scroll.contentView.bounds.origin;
     self.quickSelectedGrammarIndex=sender.tag;
+    self.quickGrammarActions.expandedItem=nil;
     for(NSButton *button in self.quickStructureButtons){button.layer.backgroundColor=(button.tag==sender.tag?self.uiSelected:FYAdventureColor(@"paper")).CGColor;}
     for(NSButton *button in self.quickGrammarChoices){button.state=button.tag==sender.tag?NSControlStateValueOn:NSControlStateValueOff;}
     self.quickSelectedGrammarButton=sender;
@@ -531,7 +544,16 @@
     [content addArrangedSubview:[self quickReadingCard:translation tinted:YES]];
     FYAnalysisResult *analysis=[self.quickSentenceSource isEqualToString:self.quickSentenceAnalysisSource]?self.quickSentenceAnalysis:nil;
     NSStackView *grammar=[self verticalStack];grammar.spacing=12;
-    [grammar addArrangedSubview:[self quickReadingLabel:@"这一句的语法" size:15 weight:NSFontWeightSemibold color:self.uiInk]];
+    NSStackView *grammarHeader=[self horizontalStack]; grammarHeader.spacing=8;
+    [grammarHeader addArrangedSubview:[self quickReadingLabel:@"这一句的语法" size:15 weight:NSFontWeightSemibold color:self.uiInk]];
+    [grammarHeader addArrangedSubview:[self spacer]];
+    self.quickGrammarReviewButton=[self workspaceButton:@"深度复核" action:@selector(reviewGrammarSentence:) primary:NO];
+    self.quickGrammarReviewButton.tag=1;
+    self.quickGrammarReviewButton.toolTip=@"补查这一句的遗漏与疑点；已有结果保持可读";
+    [grammarHeader addArrangedSubview:self.quickGrammarReviewButton];
+    [grammar addArrangedSubview:grammarHeader];
+    self.quickGrammarReviewStatus=[self quickReadingLabel:@"" size:12 weight:NSFontWeightRegular color:self.uiMuted];
+    [grammar addArrangedSubview:self.quickGrammarReviewStatus];
     if(self.quickSentenceAnalyzing){
         NSStackView *loading=[self verticalStack];loading.spacing=6;
         [loading addArrangedSubview:[self quickReadingLabel:@"正在分析这句对白…" size:14 weight:NSFontWeightMedium color:self.uiAccent]];
@@ -575,6 +597,7 @@
         }
         if(!analysis.grammar.count){[grammar addArrangedSubview:[self quickReadingLabel:@"这句没有识别到可核实的语法条目，可以继续向 AI 提问。" size:12 weight:NSFontWeightRegular color:self.uiMuted]];}
     }else{[grammar addArrangedSubview:[self quickReadingLabel:@"识别到对白后，打开这里会自动分析。" size:12 weight:NSFontWeightRegular color:self.uiMuted]];}
+    [self updateGrammarActionControlsForQuick:YES];
     [content addArrangedSubview:grammar];
     NSScrollView *scroll=[NSScrollView new];scroll.translatesAutoresizingMaskIntoConstraints=NO;
     scroll.hasVerticalScroller=YES;scroll.scrollerStyle=NSScrollerStyleOverlay;scroll.drawsBackground=NO;

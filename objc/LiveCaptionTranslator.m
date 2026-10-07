@@ -6,6 +6,7 @@
 #import "learning/FYLearningModels.h"
 #import "learning/FYLearningStore.h"
 #import "learning/FYLearningAnalyzer.h"
+#import "FYGrammarActionState.h"
 #import "learning/FYJapaneseTokenizer.h"
 #import "learning/FYGrammarCatalog.h"
 #import "learning/FYLearningCoordinator.h"
@@ -880,6 +881,15 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) NSTextField *grammarDetailLevelLabel;
 @property(nonatomic, strong) NSTextField *grammarDetailBodyLabel;
 @property(nonatomic, strong) NSButton *grammarDetailBookmarkButton;
+@property(nonatomic, strong) FYGrammarActionState *grammarActions;
+@property(nonatomic, strong) FYGrammarActionState *quickGrammarActions;
+@property(nonatomic, strong) NSButton *grammarExpandButton;
+@property(nonatomic, strong) NSButton *grammarReviewButton;
+@property(nonatomic, strong) NSTextField *grammarExpandedLabel;
+@property(nonatomic, strong) NSButton *quickGrammarExpandButton;
+@property(nonatomic, strong) NSButton *quickGrammarReviewButton;
+@property(nonatomic, strong) NSTextField *quickGrammarReviewStatus;
+
 @property(nonatomic, strong) NSStackView *grammarOtherStack;
 @property(nonatomic, strong) NSTextField *grammarOtherEmptyLabel;
 @property(nonatomic) NSInteger selectedGrammarIndex;
@@ -1676,6 +1686,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 #include "FYReferenceUI.inc"
 #include "FYSourceHoverUI.inc"
 #include "FYImmersiveUI.inc"
+#include "FYGrammarActionsUI.inc"
 
 - (NSView *)makeVocabularyPage {
     NSStackView *page = [self verticalStack];
@@ -1928,6 +1939,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 - (void)refreshGrammarResults {
     FYAnalysisResult *result = self.currentAnalysis;
     self.grammarAnalysisError = nil;
+    [self updateGrammarActionControlsForQuick:NO];
     self.grammarStructureCard.hidden = result == nil;
     self.grammarDetailFields.hidden = result == nil;
     self.grammarStatusLabel.textColor = self.uiMuted;
@@ -2040,6 +2052,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.grammarDetailBookmarkButton.enabled = YES;
     self.grammarDetailBookmarkButton.tag = index;
     self.grammarDetailBookmarkButton.title = [self bookmarkForCurrentGrammar] ? @"已收藏 · 取消收藏" : @"收藏此语法";
+    [self updateGrammarActionControlsForQuick:NO];
 }
 
 - (void)openGrammarSource:(id)sender {
@@ -2087,6 +2100,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 // 切句时清理旧分析、旧高亮、旧语法列表与旧追问内容。
 - (void)clearAnalysisDisplay {
+    [self.grammarActions reset];
+    self.grammarExpandButton.hidden = YES; self.grammarExpandedLabel.hidden = YES;
+    self.grammarReviewButton.hidden = YES;
     self.analysisRequestGeneration += 1;
     self.followupRequestGeneration += 1;
     self.currentAnalysis = nil;
@@ -2146,6 +2162,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSInteger index = sender.tag;
     if (index < 0 || index >= (NSInteger)self.currentAnalysis.grammar.count) { return; }
     self.selectedGrammarIndex = index;
+    self.grammarActions.expandedItem = nil;
     // 只更新高亮与详情：重建结构图会连带新建 NSScrollView，横向滚动位置会丢。
     [self applyGrammarSelectionLocally];
 }

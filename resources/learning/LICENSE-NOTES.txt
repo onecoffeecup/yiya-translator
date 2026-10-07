@@ -1,5 +1,5 @@
 译芽 · 日语学习资料说明与许可
-更新日期：2026-10-05
+更新日期：2026-10-07
 
 一、内置语法登记（grammar-catalog.json）
 - 内容来源：项目原创（project_original）。
@@ -11,6 +11,12 @@
 二、仅作核对参考（reference_only，未导入其正文或例句）
 - JLPT Sensei：https://jlptsensei.com/learn-japanese-grammar/
   其网站条款禁止复制、转载与再分发，本项目仅用于核对接续/含义/等级，未收录其讲解、例句或整套等级表。
+- 日本語NET：https://nihongokyoshi-net.com/
+  用于核对「やすい」「によっては」的用法与参考等级，未导入其讲解或例句。
+- ヤトモンキー先生の日本語：https://yatomonkey-nihongo.com/
+  用于核对「によっては」的用法与参考等级，未导入其讲解或例句。
+- Bunpro：https://bunpro.jp/ja/grammar_points/105
+  用于核对様態「そう」的接续与参考等级，未导入其讲解或例句。
 - JLPT 官方 FAQ：https://www.jlpt.jp/e/faq/
   用于确认 JLPT 官方不再公布完整分级词汇/语法清单。
 

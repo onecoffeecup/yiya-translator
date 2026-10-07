@@ -88,6 +88,7 @@
         underline.layer.backgroundColor = (active ? FYAdventureColor(@"leaf") : NSColor.clearColor).CGColor;
     }
     BOOL hasResult = self.currentAnalysis != nil;
+    [self updateGrammarActionControlsForQuick:NO];
     BOOL emptyGrammar = hasResult && self.selectedGrammarTab == 1 && self.currentAnalysis.grammar.count == 0;
     BOOL showEmpty = !hasResult || emptyGrammar;
     self.grammarTabRow.hidden = !hasResult;
@@ -140,7 +141,7 @@
     NSStackView *content = [self verticalStack]; content.spacing = 16;
 
     // 标题栏
-    // 标题与页签合为一行：左「这一句的语法」+ 页签，右侧只保留固定/跟随与状态。
+    // 标题与整句动作同一行；页签、固定状态与结果状态另起一行以适应窄窗口。
     NSStackView *header = [self horizontalStack];
     header.spacing = 14;
     [header addArrangedSubview:[self cardTitle:@"这一句的语法"]];
@@ -170,13 +171,20 @@
     self.grammarTabButtons = tabButtons;
     self.grammarTabUnderlines = tabUnderlines;
     self.grammarTabRow = tabRow;
-    [header addArrangedSubview:tabRow];
-    [header addArrangedSubview:[self spacer]];
+    NSStackView *metaHeader = [self horizontalStack]; metaHeader.spacing = 12;
+    [metaHeader addArrangedSubview:tabRow];
+    [metaHeader addArrangedSubview:[self spacer]];
     self.grammarPinnedLabel = [self mutedLabel:@""];
-    [header addArrangedSubview:self.grammarPinnedLabel];
+    [metaHeader addArrangedSubview:self.grammarPinnedLabel];
     self.grammarStatusLabel = [self mutedLabel:@"尚未分析"];
-    [header addArrangedSubview:self.grammarStatusLabel];
+    [metaHeader addArrangedSubview:self.grammarStatusLabel];
+    [header addArrangedSubview:[self spacer]];
+    self.grammarReviewButton = [self workspaceButton:@"深度复核" action:@selector(reviewGrammarSentence:) primary:NO];
+    self.grammarReviewButton.hidden = YES;
+    self.grammarReviewButton.toolTip = @"补查这一句的遗漏与疑点；已有结果保持可读";
+    [header addArrangedSubview:self.grammarReviewButton];
     [content addArrangedSubview:header];
+    [content addArrangedSubview:metaHeader];
 
     // 分析前只呈现一份提示和一个动作，不提前展开空列表、详情与追问。
     NSView *empty = [NSView new];
@@ -281,17 +289,26 @@
     NSStackView *detailActions = [self horizontalStack];
     self.grammarDetailBookmarkButton = [self workspaceButton:@"收藏此语法" action:@selector(bookmarkSelectedGrammar:) primary:NO];
     self.grammarDetailBookmarkButton.hidden = YES;
+    self.grammarExpandButton = [self workspaceButton:@"展开解释" action:@selector(toggleGrammarExplanation:) primary:YES];
+    self.grammarExpandButton.hidden = YES;
+    [detailActions addArrangedSubview:self.grammarExpandButton];
     [detailActions addArrangedSubview:self.grammarDetailBookmarkButton];
     self.grammarSourceLinkButton = [NSButton buttonWithTitle:@"查看等级参考来源 ↗" target:self action:@selector(openGrammarSource:)];
     self.grammarSourceLinkButton.bordered = NO; self.grammarSourceLinkButton.contentTintColor = self.uiAccent; self.grammarSourceLinkButton.hidden = YES;
-    [detailActions addArrangedSubview:self.grammarSourceLinkButton];
-    [detailActions addArrangedSubview:[self spacer]];
+    NSStackView *secondaryActions = [self horizontalStack];
+    [secondaryActions addArrangedSubview:self.grammarSourceLinkButton];
+    [secondaryActions addArrangedSubview:[self spacer]];
     self.grammarPageAnalyzeButton = [self workspaceButton:@"查看分析" action:@selector(analyzeCurrentSentence:) primary:NO];
     ((FYWorkspaceButton *)self.grammarPageAnalyzeButton).accent = YES;
     self.grammarPageAnalyzeButton.enabled = NO;
     self.analyzeButton = self.grammarPageAnalyzeButton;
-    [detailActions addArrangedSubview:self.grammarPageAnalyzeButton];
+    [secondaryActions addArrangedSubview:self.grammarPageAnalyzeButton];
     [detail addArrangedSubview:detailActions];
+    self.grammarExpandedLabel = [self label:@"" font:FYUIFont(13, NSFontWeightRegular) color:self.uiInk];
+    self.grammarExpandedLabel.maximumNumberOfLines = 0;
+    self.grammarExpandedLabel.selectable = YES; self.grammarExpandedLabel.hidden = YES;
+    [detail addArrangedSubview:self.grammarExpandedLabel];
+    [detail addArrangedSubview:secondaryActions];
 
     // 主界面不再有「继续追问」入口：追问统一用右侧 AI 伙伴。
     // 这里的控件与逻辑保留（浮动学习卡的「问 AI」共享同一套聊天/隔离逻辑），只是不排进主界面布局。

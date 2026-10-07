@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-10-04",
+  "generated_at": "2026-10-07",
   "note": "按实际使用登记的内置资料清单；自动元数据检查不等于真人内容审校。离线参考包的源文件版本和 SHA-256 见 reference/reference-manifest.json。",
   "datasets": [
     {
-      "id": "grammar-catalog-v1",
-      "name": "浮译内置语法登记（第一版）",
+      "id": "grammar-catalog-v3",
+      "name": "译芽内置语法登记（第三版）",
       "rights_holder": "项目原创（project_original）",
       "usage": "语法名称、接续形式、中文含义与原创简述",
       "fields_used": [
@@ -14,16 +14,17 @@
         "aliases",
         "reference_level",
         "connection",
-        "meaning"
+        "meaning",
+        "signature_forms"
       ],
       "source_url": null,
-      "version": "1",
+      "version": "3",
       "license_or_origin": "project_original",
       "license_evidence_url": null,
       "adapted": true,
       "adaptation_note": "讲解为独立编写，经 AI 辅助并按公开参考交叉核对；非复制任何单一来源。",
       "attribution_text": null,
-      "reviewed_at": "2026-10-03",
+      "reviewed_at": "2026-10-07",
       "review_method": "AI 辅助、对照多个公开语法参考页交叉核对，非真人专家审校"
     },
     {
@@ -85,6 +86,30 @@
       "usage": "确认 JLPT 官方不再公布完整分级词汇/语法清单",
       "source_url": "https://www.jlpt.jp/e/faq/",
       "note": "因此 App 内等级一律标「参考 Nx」，不宣称官方指定或某年真题。"
+    },
+    {
+      "id": "nihongo-net-reference",
+      "name": "日本語NET",
+      "status": "reference_only",
+      "usage": "核对新增句型的用法与参考等级",
+      "source_url": "https://nihongokyoshi-net.com/",
+      "note": "仅登记名称、链接与参考等级，未导入其讲解或例句；具体核对页见语法条目。"
+    },
+    {
+      "id": "yatomonkey-reference",
+      "name": "ヤトモンキー先生の日本語",
+      "status": "reference_only",
+      "usage": "核对新增句型的用法与参考等级",
+      "source_url": "https://yatomonkey-nihongo.com/",
+      "note": "仅登记名称、链接与参考等级，未导入其讲解或例句；具体核对页见语法条目。"
+    },
+    {
+      "id": "bunpro-reference",
+      "name": "Bunpro",
+      "status": "reference_only",
+      "usage": "核对様態そう的接续与参考等级",
+      "source_url": "https://bunpro.jp/ja/grammar_points/105",
+      "note": "仅登记名称、链接和参考等级，不导入讲解或例句。"
     }
   ],
   "not_integrated": []

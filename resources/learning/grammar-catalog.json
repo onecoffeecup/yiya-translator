@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "catalog_version": 1,
-  "generated_at": "2026-10-03",
+  "catalog_version": 3,
+  "generated_at": "2026-10-07",
   "note": "语法讲解为项目原创编写（project_original），参考等级来自公开资料交叉核对，仅作「参考」而非官方 JLPT 分级。reference_sources 仅作核对参考（reference_only），不导入其正文或例句。",
   "entries": [
     {
@@ -186,6 +186,7 @@
     },
     {
       "catalog_id": "mitai_da",
+      "signature_forms": ["みたい", "みたいです", "みたいだった"],
       "name": "〜みたいだ",
       "aliases": ["みたいだ", "みたいに"],
       "reference_level": "N3",
@@ -528,6 +529,137 @@
       "reviewed_at": "2026-10-03",
       "source_url": "https://jlptsensei.com/learn-japanese-grammar/",
       "source_title": "JLPT Sensei 语法索引（reference_only）"
+    },
+    {
+      "catalog_id": "ni_yotte_wa",
+      "name": "〜によっては",
+      "aliases": [
+        "によっては",
+        "～によっては"
+      ],
+      "reference_level": "N3",
+      "connection": "名词＋によっては",
+      "meaning": "某些情况下；在部分条件下会出现不同情况",
+      "content_origin": "project_original",
+      "content_source_ids": [],
+      "reference_sources": [
+        "https://yatomonkey-nihongo.com/entry/jlpt-n3-42",
+        "https://nihongokyoshi-net.com/2019/05/27/jlptn3-grammar-niyottewa/"
+      ],
+      "level_review_status": "verified",
+      "reviewed_at": "2026-10-07",
+      "source_url": "https://yatomonkey-nihongo.com/entry/jlpt-n3-42",
+      "source_title": "ヤトモンキー先生：によっては（N3 参考）"
+    },
+    {
+      "catalog_id": "yasui",
+      "name": "〜やすい",
+      "aliases": [
+        "やすい",
+        "～やすい",
+        "やすく",
+        "やすかった",
+        "やすければ"
+      ],
+      "reference_level": "N4",
+      "connection": "动词ます形去ます＋やすい；按い形容词活用",
+      "meaning": "容易做；容易发生某种状态",
+      "content_origin": "project_original",
+      "content_source_ids": [],
+      "reference_sources": [
+        "https://nihongokyoshi-net.com/2019/05/02/jlptn4-grammar-yasui/"
+      ],
+      "level_review_status": "verified",
+      "reviewed_at": "2026-10-07",
+      "source_url": "https://nihongokyoshi-net.com/2019/05/02/jlptn4-grammar-yasui/",
+      "source_title": "日本語NET：やすい（N4 参考）"
+    },
+    {
+      "catalog_id": "gatai",
+      "name": "〜がたい",
+      "aliases": [
+        "がたい",
+        "～がたい",
+        "〜難い",
+        "難い"
+      ],
+      "signature_forms": [
+        "がたい",
+        "難い",
+        "がたく",
+        "難く",
+        "がたかった",
+        "難かった"
+      ],
+      "reference_level": "N2",
+      "connection": "动词ます形去ます＋がたい；可写作「難い」",
+      "meaning": "心理上或情理上难以做，并非单纯缺乏能力",
+      "content_origin": "project_original",
+      "content_source_ids": [],
+      "reference_sources": [
+        "https://nihongokyoshi-net.com/2018/06/27/jlptn2-grammar-gatai/"
+      ],
+      "level_review_status": "verified",
+      "reviewed_at": "2026-10-07",
+      "source_url": "https://nihongokyoshi-net.com/2018/06/27/jlptn2-grammar-gatai/",
+      "source_title": "日本語NET：がたい（N2 参考）"
+    },
+    {
+      "catalog_id": "nara",
+      "name": "〜なら",
+      "aliases": [
+        "なら",
+        "～なら",
+        "〜ならば",
+        "ならば"
+      ],
+      "signature_forms": [
+        "なら",
+        "ならば"
+      ],
+      "reference_level": "N4",
+      "connection": "动词／い形容词普通形＋なら；名词／な形容词词干＋なら",
+      "meaning": "以某个情况为前提提出判断、建议或回应",
+      "content_origin": "project_original",
+      "content_source_ids": [],
+      "reference_sources": [
+        "https://nihongokyoshi-net.com/2020/01/04/jlptn4-grammar-nara/"
+      ],
+      "level_review_status": "verified",
+      "reviewed_at": "2026-10-07",
+      "source_url": "https://nihongokyoshi-net.com/2020/01/04/jlptn4-grammar-nara/",
+      "source_title": "日本語NET：なら（N4 参考）"
+    },
+    {
+      "catalog_id": "sou_da_appearance",
+      "name": "〜そうだ（様態）",
+      "aliases": [
+        "そうだ（様態）",
+        "～そうだ（様態）",
+        "〜そうだ（样态）",
+        "〜そう（様態）",
+        "そう（様態）"
+      ],
+      "signature_forms": [
+        "そう",
+        "そうな",
+        "そうに",
+        "そうです",
+        "よさそう",
+        "なさそう"
+      ],
+      "reference_level": "N4",
+      "connection": "动词ます形去ます／い形容词去い／な形容词词干＋そうだ；よい／いい→よさそう",
+      "meaning": "根据所见或情况推测样子、状态或可能性；区别于传闻的そうだ",
+      "content_origin": "project_original",
+      "content_source_ids": [],
+      "reference_sources": [
+        "https://bunpro.jp/ja/grammar_points/105"
+      ],
+      "level_review_status": "verified",
+      "reviewed_at": "2026-10-07",
+      "source_url": "https://bunpro.jp/ja/grammar_points/105",
+      "source_title": "Bunpro：そう（N4 参考）"
     }
   ]
 }

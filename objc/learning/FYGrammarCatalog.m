@@ -86,6 +86,13 @@ static NSString *FYTrim(NSString *value) {
             entry.aliases = aliasList;
         }
         NSArray *contentIDs = dict[@"content_source_ids"];
+        NSMutableArray *signatureForms = [NSMutableArray new];
+        if ([dict[@"signature_forms"] isKindOfClass:NSArray.class]) {
+            for (id form in dict[@"signature_forms"]) {
+                if ([form isKindOfClass:NSString.class] && FYTrim(form).length) { [signatureForms addObject:FYTrim(form)]; }
+            }
+        }
+        entry.signatureForms = signatureForms;
         if ([contentIDs isKindOfClass:NSArray.class]) { entry.contentSourceIDs = contentIDs; }
         NSArray *references = dict[@"reference_sources"];
         if ([references isKindOfClass:NSArray.class]) { entry.referenceSources = references; }

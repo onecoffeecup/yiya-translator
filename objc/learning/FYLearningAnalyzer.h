@@ -15,7 +15,7 @@ typedef void (^FYLearningTransport)(NSURLRequest *request,
 
 @property(nonatomic, copy) NSString *baseURL;
 @property(nonatomic, copy) NSString *apiKey;
-@property(nonatomic, copy) NSString *model;           // 高质量模型（默认 deepseek-v4-pro）
+@property(nonatomic, copy) NSString *model;           // 使用设置中的学习模型；DeepSeek 学习请求默认关闭推理
 @property(nonatomic, strong) FYGrammarCatalog *catalog;
 @property(nonatomic, copy, nullable) FYLearningTransport transport;
 @property(nonatomic, readonly) NSInteger generation;
@@ -28,6 +28,14 @@ typedef void (^FYLearningTransport)(NSURLRequest *request,
 - (void)analyzeSentence:(NSString *)text
             translation:(nullable NSString *)translation
              completion:(void (^)(FYAnalysisResult *result, NSError *_Nullable error))completion;
+
+// Explicit, single-request review. Verified existing findings survive an empty review.
+- (void)reviewSentence:(NSString *)text translation:(nullable NSString *)translation
+       existingResult:(FYAnalysisResult *)existing
+           completion:(void (^)(FYAnalysisResult *_Nullable result, NSError *_Nullable error))completion;
+- (void)expandedExplanationForGrammar:(FYGrammarItem *)item sentenceText:(NSString *)text
+                         translation:(nullable NSString *)translation
+                          completion:(void (^)(NSString *_Nullable explanation, NSError *_Nullable error))completion;
 
 // 词条补全（读音/原形/释义）。
 - (void)completeVocabulary:(NSString *)surface
