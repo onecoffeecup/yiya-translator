@@ -39,8 +39,11 @@
 - (void)rangesInText:(NSString *)text
           completion:(void (^)(NSArray<NSValue *> *))completion {
     if (!completion) { return; }
+    // NSTextView.string can be mutable. Freeze it on the caller's thread before
+    // enqueueing: the UI may replace its text while NLTokenizer reads it.
+    NSString *snapshot = [text copy];
     dispatch_async(self.queue, ^{
-        NSArray<NSValue *> *ranges = [self rangesInText:text];
+        NSArray<NSValue *> *ranges = [self rangesInText:snapshot];
         dispatch_async(self.completionQueue, ^{ completion(ranges); });
     });
 }
@@ -49,10 +52,11 @@
                   inText:(NSString *)text
               completion:(void (^)(NSRange))completion {
     if (!completion) { return; }
+    NSString *snapshot = [text copy];
     dispatch_async(self.queue, ^{
         NSRange found = NSMakeRange(NSNotFound, 0);
-        if (location < text.length) {
-            for (NSValue *value in [self rangesInText:text]) {
+        if (location < snapshot.length) {
+            for (NSValue *value in [self rangesInText:snapshot]) {
                 NSRange range = value.rangeValue;
                 if (location >= range.location && location < NSMaxRange(range)) {
                     found = range;

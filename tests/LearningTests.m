@@ -50,8 +50,65 @@ static FYGrammarCatalog *LoadCatalog(void) {
     return catalog;
 }
 
+static void TestTokenizerTextSnapshots(void) {
+    FYJapaneseTokenizer *tokenizer = [FYJapaneseTokenizer new];
+    [tokenizer setCompletionQueue:dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0)];
+    NSString *original = @"仲間😀を救うために、今日は一緒に遠くの町まで歩こう。";
+    NSUInteger location = [original rangeOfString:@"町"].location;
+    __block NSArray<NSValue *> *expected = nil;
+    dispatch_semaphore_t ready = dispatch_semaphore_create(0);
+    [tokenizer rangesInText:original completion:^(NSArray<NSValue *> *ranges) {
+        expected = ranges;
+        dispatch_semaphore_signal(ready);
+    }];
+    Check(dispatch_semaphore_wait(ready, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0,
+          @"snapshot baseline finishes");
+    NSRange expectedWord = NSMakeRange(NSNotFound, 0);
+    for (NSValue *value in expected) {
+        if (NSLocationInRange(location, value.rangeValue)) { expectedWord = value.rangeValue; break; }
+    }
+    Check(expected.count > 0 && expectedWord.location != NSNotFound, @"snapshot baseline contains requested word");
+
+    // Hold queued work so every edit happens after submission but before tokenization.
+    // This reproduces the ownership bug deterministically, without racing an unsafe string read.
+    dispatch_queue_t queue = [tokenizer valueForKey:@"queue"];
+    dispatch_suspend(queue);
+    dispatch_group_t finished = dispatch_group_create();
+    for (NSString *replacement in @[@"", @"短い句。", [@"別" stringByPaddingToLength:original.length withString:@"別" startingAtIndex:0],
+                                    [original stringByAppendingString:original]]) {
+        NSMutableString *text = [original mutableCopy];
+        dispatch_group_enter(finished);
+        [tokenizer rangesInText:text completion:^(NSArray<NSValue *> *ranges) {
+            Check([ranges isEqualToArray:expected], @"queued ranges use submitted text despite later edits");
+            dispatch_group_leave(finished);
+        }];
+        dispatch_group_enter(finished);
+        [tokenizer rangeForLocation:location inText:text completion:^(NSRange range) {
+            Check(NSEqualRanges(range, expectedWord), @"queued word selection uses submitted text despite later edits");
+            dispatch_group_leave(finished);
+        }];
+        [text setString:replacement];
+    }
+    NSMutableString *empty = [NSMutableString new];
+    dispatch_group_enter(finished);
+    [tokenizer rangesInText:empty completion:^(NSArray<NSValue *> *ranges) {
+        Check(ranges.count == 0, @"an initially empty snapshot stays empty");
+        dispatch_group_leave(finished);
+    }];
+    dispatch_group_enter(finished);
+    [tokenizer rangeForLocation:0 inText:empty completion:^(NSRange range) {
+        Check(NSEqualRanges(range, NSMakeRange(NSNotFound, 0)), @"empty snapshot has no selected word");
+        dispatch_group_leave(finished);
+    }];
+    [empty setString:original];
+    dispatch_resume(queue);
+    Check(dispatch_group_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0,
+          @"all snapshot requests complete");
+}
+
 int main(void) {
     @autoreleasepool {
+        TestTokenizerTextSnapshots();
         FYVocabularyEntry *first=[FYVocabularyEntry new], *second=[FYVocabularyEntry new];
         first.vocabularyID=@"first"; second.vocabularyID=@"second";
         Check([FYLearningCoordinator vocabularyInList:@[first,second] identifier:@"second" fallbackIndex:0]==second, @"词条稳定身份优先于旧位置");

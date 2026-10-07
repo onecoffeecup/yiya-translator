@@ -1,5 +1,48 @@
 #import "LearningAppTestSupport.h"
+
+@interface FYDeferredSourceTokenizer : FYJapaneseTokenizer
+@property(nonatomic, strong) NSString *submittedText;
+@property(nonatomic, copy) void (^rangesCompletion)(NSArray<NSValue *> *);
+@property(nonatomic, copy) void (^selectionCompletion)(NSRange);
+@end
+@implementation FYDeferredSourceTokenizer
+- (void)rangesInText:(NSString *)text completion:(void (^)(NSArray<NSValue *> *))completion {
+    self.submittedText=text; self.rangesCompletion=completion;
+}
+- (void)rangeForLocation:(NSUInteger)location inText:(NSString *)text completion:(void (^)(NSRange))completion {
+    self.submittedText=text; self.selectionCompletion=completion;
+}
+@end
+
 static NSString *Tip(AppDelegate *app,NSUInteger location){return [app.learningSourceTextView.textStorage attribute:FYSourceHoverAttributeName atIndex:location effectiveRange:NULL];}
+static void CheckSourceCallbackSnapshots(AppDelegate *app) {
+    FYJapaneseTokenizer *realTokenizer=app.japaneseTokenizer;
+    dispatch_sync([realTokenizer valueForKey:@"queue"], ^{}); Tick();
+    FYDeferredSourceTokenizer *delayed=[FYDeferredSourceTokenizer new];
+    app.japaneseTokenizer=delayed; app.currentAnalysis=nil;
+    app.learningSourceTextView.editable=NO;
+    NSString *original=@"仲間を救う。", *replacement=@"明日は休む。";
+    Require(original.length==replacement.length,@"same-length edit fixture");
+    app.learningSourceTextView.string=original;
+    [app refreshSourceHoverTips];
+    [app.learningSourceTextView.textStorage replaceCharactersInRange:NSMakeRange(0,original.length) withString:replacement];
+    Require([delayed.submittedText isEqualToString:original],@"hover request keeps its original text after in-place storage edits");
+    delayed.rangesCompletion(@[[NSValue valueWithRange:NSMakeRange(0,2)]]);
+    delayed.rangesCompletion=nil;
+    Require(Tip(app,0)==nil,@"stale hover callback cannot annotate a same-length replacement sentence");
+
+    app.learningSourceTextView.string=original;
+    [app selectWordAtCharacterIndex:0];
+    [app.learningSourceTextView.textStorage replaceCharactersInRange:NSMakeRange(0,original.length) withString:replacement];
+    app.learningSourceTextView.selectedRange=NSMakeRange(0,0);
+    Require([delayed.submittedText isEqualToString:original],@"word request keeps its original text after in-place storage edits");
+    delayed.selectionCompletion(NSMakeRange(0,2)); delayed.selectionCompletion=nil;
+    Require(app.learningSourceTextView.selectedRange.length==0,@"stale word callback cannot select text from the replacement sentence");
+    [app selectWordAtCharacterIndex:0];
+    delayed.selectionCompletion(NSMakeRange(0,2)); delayed.selectionCompletion=nil;
+    Require(NSEqualRanges(app.learningSourceTextView.selectedRange,NSMakeRange(0,2)),@"unchanged text still accepts word selection");
+    app.japaneseTokenizer=realTokenizer;
+}
 int main(int argc,const char *argv[]){@autoreleasepool{
     [NSApplication sharedApplication];FYLearningStore *store=Store([NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString]);FYGrammarCatalog *catalog=[FYGrammarCatalog new];AppDelegate *app=App(store,Analyzer(catalog),catalog);app.japaneseTokenizer=[FYJapaneseTokenizer new];
     app.referenceDictionary=[[FYReferenceDictionary alloc] initWithURL:[NSURL fileURLWithPath:[NSFileManager.defaultManager.currentDirectoryPath stringByAppendingPathComponent:@"resources/learning/reference/reference.sqlite"]]];
@@ -32,5 +75,6 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     [app clearAnalysisDisplay];NSLog(@"stage: clear analysis");Pump(^BOOL{return [Tip(app,word) containsString:@"JMdict"];});Require(![Tip(app,word) containsString:@"〜ても"],@"clearing analysis removes old grammar tooltip");
     [app.learningCoordinator recordText:@"新しい台詞。" kind:FYSentenceKindDialogue];[app.learningCoordinator followLatest];Drain(store);[app refreshLearningSource];Tick();
     Require(![[app.learningSourceTextView.textStorage description] containsString:@"即使"] && ![[app.learningSourceTextView.textStorage description] containsString:@"とくい"],@"new sentence cannot inherit previous word or grammar tooltip");
-    [app.mainWindow orderOut:nil];NSLog(@"PASS: native source hover, dictionary readings, verified grammar, stable refresh, selection/edit and sentence isolation");
+    CheckSourceCallbackSnapshots(app);
+    [app.mainWindow orderOut:nil];NSLog(@"PASS: native source hover, dictionary readings, verified grammar, stable refresh, selection/edit and sentence isolation, immutable callback snapshots");
 }return 0;}

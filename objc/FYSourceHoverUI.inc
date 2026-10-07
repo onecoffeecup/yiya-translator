@@ -33,7 +33,8 @@
     for(NSTextView *view in @[self.learningSourceTextView ?: (id)NSNull.null,self.grammarSourceTextView ?: (id)NSNull.null]){
         if([view isKindOfClass:NSTextView.class]){if([view isKindOfClass:FYSelectableSourceTextView.class]){[(FYSelectableSourceTextView *)view dismissSourceHover];}[view.textStorage removeAttribute:FYSourceHoverAttributeName range:NSMakeRange(0,view.string.length)];}
     }
-    NSString *source=self.learningSourceTextView.string ?: @"";
+    // Keep callback comparisons tied to this request, not the live text storage.
+    NSString *source=[self.learningSourceTextView.string copy] ?: @"";
     if(!source.length || self.learningSourceTextView.editable){return;}
     [self applyAnalysisHoverTipsToSource:source];
     if(!self.sourceHoverCache){self.sourceHoverCache=[NSCache new];self.sourceHoverCache.countLimit=300;}

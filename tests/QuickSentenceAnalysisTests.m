@@ -22,7 +22,8 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     FYLearningStore *store=Store(db);FYGrammarCatalog *catalog=[FYGrammarCatalog new];
     FYQuickAnalysisTestApp *app=[FYQuickAnalysisTestApp new];app.targetForeground=YES;
     app.learningStore=store;app.grammarCatalog=catalog;
-    app.learningCoordinator=[[FYLearningCoordinator alloc] initWithStore:store analyzer:Analyzer(catalog) tokenizer:[FYJapaneseTokenizer new] catalog:catalog];
+    app.japaneseTokenizer=[FYJapaneseTokenizer new];
+    app.learningCoordinator=[[FYLearningCoordinator alloc] initWithStore:store analyzer:Analyzer(catalog) tokenizer:app.japaneseTokenizer catalog:catalog];
     [app createMainWindow];[app createCaptionWindow];
     app.baseURLField.stringValue=@"https://example.invalid/v1";app.apiKeyField.stringValue=@"mock-key";app.modelField.stringValue=@"mock-model";
     app.quickSentenceAnalyzer=Analyzer(catalog);
@@ -82,7 +83,20 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     sentenceSaves=nil;[store fetchSentenceBookmarks:^(NSArray *values,NSError *error){sentenceSaves=values;}];Pump(^BOOL{return sentenceSaves!=nil;});Require(sentenceSaves.count==0,@"quick sentence bookmark cancel");
     app.learningSourceTextView.editable=NO;
     [GrammarChoice(app.quickSentencePanel.contentView,1) performClick:nil];
+    // A pending hover task must survive replacement of the actual NSTextView storage
+    // by the quick-sentence -> full workspace action (the reported crash path).
+    dispatch_queue_t tokenizerQueue=[app.japaneseTokenizer valueForKey:@"queue"];
+    dispatch_suspend(tokenizerQueue);
+    app.learningSourceTextView.string=@"以前の長い原句です。仲間と一緒に遠くの町まで歩いて帰ろう。";
+    [app refreshSourceHoverTips];
     [app openStudyWorkspace:nil];
+    dispatch_resume(tokenizerQueue);
+    __block BOOL tokenizationFinished=NO;
+    [app.japaneseTokenizer rangesInText:[app.learningSourceTextView.string copy] completion:^(NSArray<NSValue *> *ranges){
+        Require(ranges.count>0,@"workspace sentence remains tokenizable after the jump");
+        tokenizationFinished=YES;
+    }];
+    Pump(^BOOL{return tokenizationFinished;});
     Require(app.currentAnalysis.structureParts.count==3,@"structure transfers to main workspace");
     Require(app.selectedGrammarIndex==1,@"workspace keeps grammar selected in quick panel");
     Require([app.learningCoordinator.currentSentenceID isEqualToString:latest.sentenceID] && app.learningCoordinator.currentVersion==latest.version && app.learningCoordinator.isPinned,@"workspace jump pins exact overlay identity after newer OCR");
