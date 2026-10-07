@@ -63,6 +63,15 @@ static void Check(BOOL condition, NSString *message) {
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
+        Check([FYDiagTextLength(@"私人台词") isEqualToString:@"len:4"],
+              @"diagnostic summaries must contain only text length");
+        NSString *diagnosticPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"private-diag-test.log"];
+        FYWritePrivateDiagnosticData([@"synthetic" dataUsingEncoding:NSUTF8StringEncoding],
+                                     @"private-diag-test.log", NO);
+        struct stat diagnosticInfo;
+        Check(lstat(diagnosticPath.fileSystemRepresentation, &diagnosticInfo) == 0 &&
+              S_ISREG(diagnosticInfo.st_mode) && (diagnosticInfo.st_mode & 0077) == 0,
+              @"diagnostic files must be readable only by the current user");
         AppDelegate *app = [[AppDelegate alloc] init];
         app.captionFontSizeSlider = [NSSlider sliderWithValue:30 minValue:12 maxValue:48 target:nil action:nil];
         app.captionOpacitySlider = [NSSlider sliderWithValue:0.7 minValue:0 maxValue:1 target:nil action:nil];
@@ -458,6 +467,8 @@ int main(void) {
         {
             NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
             NSDictionary *backup = [[defaults objectForKey:SettingsKey] copy];
+            [defaults setObject:@{@"apiKey": @"synthetic-legacy-key"} forKey:SettingsKey];
+            FYTestKeychainValue = nil;
             AppDelegate *settingsApp = [[AppDelegate alloc] init];
             [settingsApp createMainWindow];
             [settingsApp.mainWindow setContentSize:NSMakeSize(980, 660)];
@@ -470,15 +481,31 @@ int main(void) {
             Check(fabs(NSWidth(liveScroll.documentView.frame) - NSWidth(liveScroll.contentView.bounds)) < 2,
                   @"the 980-point workbench must fit the clip width without horizontal scrolling");
             [settingsApp createCaptionWindow];
+            FYTestKeychainFailWrites = YES;
             [settingsApp loadSettings];
+            Check([[[defaults objectForKey:SettingsKey] objectForKey:@"apiKey"] isEqual:@"synthetic-legacy-key"] &&
+                  settingsApp.credentialLoadFailed,
+                  @"a failed Keychain migration must preserve the old credential");
+            [settingsApp saveSettings:nil];
+            Check([[[defaults objectForKey:SettingsKey] objectForKey:@"apiKey"] isEqual:@"synthetic-legacy-key"],
+                  @"other settings saves must not erase a failed migration");
+            FYTestKeychainFailWrites = NO;
+            [settingsApp loadSettings];
+            Check([settingsApp.apiKeyField.stringValue isEqual:@"synthetic-legacy-key"] &&
+                  [FYTestKeychainValue isEqual:@"synthetic-legacy-key"] &&
+                  [[defaults objectForKey:SettingsKey] objectForKey:@"apiKey"] == nil,
+                  @"successful migration must move the credential into Keychain and purge defaults");
             [settingsApp saveSettings:nil];
             NSDictionary *written = [defaults objectForKey:SettingsKey];
+            Check(written[@"apiKey"] == nil, @"settings must never persist an API Key");
             Check(written[@"autoModeEnabled"] == nil && written[@"manualMode"] == nil && written[@"mode"] == nil,
                   @"saved settings must no longer persist any manual mode fields");
             AppDelegate *reloaded = [[AppDelegate alloc] init];
             [reloaded createMainWindow];
             [reloaded createCaptionWindow];
             [reloaded loadSettings];
+            Check([reloaded.apiKeyField.stringValue isEqual:@"synthetic-legacy-key"],
+                  @"reloading must read the credential from Keychain");
             Check([reloaded autoContentModeEnabled] && [reloaded effectiveModeSegment] == ContentModeDialogue,
                   @"reload must always start in auto-detection dialogue mode");
 
@@ -525,10 +552,13 @@ int main(void) {
                   settingsApp.serviceErrorLabel.stringValue.length > 0,
                   @"a failed service test must be visible near service settings");
             [settingsApp serviceSettingsChanged];
+            Check(FYTestKeychainValue == nil && [defaults objectForKey:SettingsKey][@"apiKey"] == nil,
+                  @"clearing a credential must remove it from Keychain without recreating plaintext defaults");
             Check([settingsApp.serviceStatusLabel.stringValue isEqualToString:@"服务未测试"],
                   @"changing service settings must invalidate an old test result");
             if (backup) { [defaults setObject:backup forKey:SettingsKey]; }
             else { [defaults removeObjectForKey:SettingsKey]; }
+            FYTestKeychainValue = nil;
             [settingsApp.captionPanel orderOut:nil];
             [reloaded.captionPanel orderOut:nil];
         }

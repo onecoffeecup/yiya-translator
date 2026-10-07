@@ -42,7 +42,7 @@ clang \
   "$ROOT_DIR/objc/learning/FYReferenceDictionary.m" \
   "$ROOT_DIR/objc/learning/FYSavedWordReferenceView.m" \
   -o "$BIN" \
-  -framework Cocoa -framework UniformTypeIdentifiers \
+  -framework Cocoa -framework Security -framework UniformTypeIdentifiers \
   -framework CoreGraphics \
   -framework QuartzCore \
   -framework Vision \

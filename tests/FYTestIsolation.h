@@ -1,5 +1,6 @@
 #pragma once
 #define FY_TEST_DISABLE_LEGACY_DIAGNOSTICS 1
+#define FY_TEST_ISOLATED_CREDENTIAL_STORE 1
 // Force-included in TEST builds only. Production scripts never include this file.
 #import <Foundation/Foundation.h>
 #import <CoreGraphics/CoreGraphics.h>

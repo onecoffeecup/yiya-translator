@@ -25,7 +25,7 @@ LINK_SOURCES=(
   "$ROOT_DIR"/objc/learning/*.m
 )
 FRAMEWORKS=(
-  -framework Cocoa -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision
+  -framework Cocoa -framework Security -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision
   -framework Carbon -framework NaturalLanguage
   -framework AVFoundation -framework CoreImage -framework CoreMedia -framework CoreVideo
   -framework ImageIO -lsqlite3

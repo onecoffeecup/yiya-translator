@@ -37,7 +37,7 @@ SOURCES=(
 )
 
 FRAMEWORKS=(
-  -framework Cocoa -framework UniformTypeIdentifiers
+  -framework Cocoa -framework Security -framework UniformTypeIdentifiers
   -framework CoreGraphics
   -framework QuartzCore
   -framework Vision

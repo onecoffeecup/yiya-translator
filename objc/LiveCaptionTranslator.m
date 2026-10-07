@@ -2,6 +2,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
 #import <Vision/Vision.h>
+#import <Security/Security.h>
 #import "learning/FYLearningModels.h"
 #import "learning/FYLearningStore.h"
 #import "learning/FYLearningAnalyzer.h"
@@ -16,6 +17,9 @@
 #import "FYRuntimeDiagnostics.h"
 #import <sys/utsname.h>
 #import <sys/sysctl.h>
+#import <sys/stat.h>
+#import <fcntl.h>
+#import <unistd.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "FYCaptureCardInput.h"
 #import "FYInlineLayout.h"
@@ -29,6 +33,59 @@
 #import "learning/FYGlobalShortcuts.h"
 
 static NSString *const SettingsKey = @"LiveCaptionTranslator.settings.v1";
+static NSString *const FYAPIKeyService = @"com.nanami.yiya.translation";
+static NSString *const FYAPIKeyAccount = @"api-key";
+
+#ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
+static NSString *FYTestKeychainValue;
+static BOOL FYTestKeychainFailWrites;
+static OSStatus FYReadAPIKey(NSString **value) {
+    if (value) { *value = FYTestKeychainValue; }
+    return FYTestKeychainValue ? errSecSuccess : errSecItemNotFound;
+}
+static OSStatus FYWriteAPIKey(NSString *value) {
+    if (FYTestKeychainFailWrites) { return errSecAuthFailed; }
+    FYTestKeychainValue = value.length ? [value copy] : nil;
+    return errSecSuccess;
+}
+#else
+static NSDictionary *FYAPIKeyQuery(void) {
+    return @{(__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+             (__bridge id)kSecAttrService: FYAPIKeyService,
+             (__bridge id)kSecAttrAccount: FYAPIKeyAccount};
+}
+static OSStatus FYReadAPIKey(NSString **value) {
+    if (value) { *value = nil; }
+    NSMutableDictionary *query = [FYAPIKeyQuery() mutableCopy];
+    query[(__bridge id)kSecReturnData] = @YES;
+    query[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitOne;
+    CFTypeRef result = NULL;
+    OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+    if (status != errSecSuccess) { return status; }
+    NSData *data = CFBridgingRelease(result);
+    NSString *decoded = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!decoded) { return errSecDecode; }
+    if (value) { *value = decoded; }
+    return errSecSuccess;
+}
+static OSStatus FYWriteAPIKey(NSString *value) {
+    NSDictionary *query = FYAPIKeyQuery();
+    if (!value.length) {
+        OSStatus status = SecItemDelete((__bridge CFDictionaryRef)query);
+        return status == errSecItemNotFound ? errSecSuccess : status;
+    }
+    NSData *data = [value dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) { return errSecParam; }
+    NSMutableDictionary *item = [query mutableCopy];
+    item[(__bridge id)kSecValueData] = data;
+    OSStatus status = SecItemAdd((__bridge CFDictionaryRef)item, NULL);
+    if (status == errSecDuplicateItem) {
+        status = SecItemUpdate((__bridge CFDictionaryRef)query,
+                               (__bridge CFDictionaryRef)@{(__bridge id)kSecValueData: data});
+    }
+    return status;
+}
+#endif
 
 static NSString *FYAppearanceColorHex(NSColor *color) {
     NSColor *rgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
@@ -57,37 +114,57 @@ static NSColor *FYAppearanceBackdropForText(NSColor *textColor) {
 
 // ==== 临时诊断（设 FUYI_DIAG=1 或创建 /tmp/fuyi-diag-armed 时启用）====
 // 统一的诊断开关。任何会落盘的诊断行为（写日志、保存屏幕截图）都必须经过它；
-// 否则正式分发版会在用户不知情的情况下，把屏幕内容写到 /tmp 里。
+// 否则正式分发版会在用户不知情的情况下，把屏幕内容写入诊断文件。
 static BOOL FuyiDiagEnabled(void) {
 #ifdef FY_TEST_DISABLE_LEGACY_DIAGNOSTICS
     return NO; // Isolated tests must not consume another running app's global switch.
 #else
     static BOOL enabled = NO;
+    static NSTimeInterval expiresAt = 0;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        BOOL armed = [[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/fuyi-diag-armed"];
+        struct stat armedInfo;
+        BOOL armed = lstat("/tmp/fuyi-diag-armed", &armedInfo) == 0 &&
+            S_ISREG(armedInfo.st_mode) && armedInfo.st_uid == getuid();
         BOOL byEnv = [NSProcessInfo.processInfo.environment[@"FUYI_DIAG"] isEqualToString:@"1"];
         enabled = (armed || byEnv);
+        if (enabled) { expiresAt = NSProcessInfo.processInfo.systemUptime + 60.0; }
     });
-    return enabled;
+    return enabled && NSProcessInfo.processInfo.systemUptime < expiresAt;
 #endif
 }
 
+static void FYWritePrivateDiagnosticData(NSData *data, NSString *filename, BOOL append) {
+    if (!data.length) { return; }
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:filename];
+    int fd = open(path.fileSystemRepresentation,
+                  O_WRONLY | O_CREAT | O_NOFOLLOW | (append ? O_APPEND : 0), 0600);
+    if (fd < 0) { return; }
+    struct stat info;
+    if (fstat(fd, &info) == 0 && S_ISREG(info.st_mode) && info.st_uid == getuid()) {
+        if (fchmod(fd, 0600) == 0) {
+            if (!append) { ftruncate(fd, 0); }
+            const uint8_t *bytes = data.bytes;
+            NSUInteger remaining = data.length;
+            while (remaining > 0) {
+                ssize_t count = write(fd, bytes, remaining);
+                if (count <= 0) { break; }
+                bytes += count;
+                remaining -= (NSUInteger)count;
+            }
+        }
+    }
+    close(fd);
+}
+
 static void FuyiDiagLog(NSString *format, ...) {
-    // 自动记录：只要 /tmp/fuyi-diag-armed 存在就写日志，写满 400 行自动停止并删除该文件。
-    // 这样不需要用户设置任何环境变量。
+    // 仅在显式启用时记录有限的数值诊断，文件仅对当前用户可读。
     static NSInteger budget = -1;
-    static NSString *path = @"/tmp/fuyi-diag.log";
     if (budget < 0) {
-        // 预算原来只有 400 行；现在每轮要写 6~8 行，约 40 秒就写满停止 ——
-        // 用户走到新界面时早就没记录了，多次排查都因此拿不到数据。放到 40000 行。
-        budget = FuyiDiagEnabled() ? 40000 : 0;
+        budget = FuyiDiagEnabled() ? 2000 : 0;
     }
     if (budget <= 0) { return; }
     budget -= 1;
-    if (budget == 0) {
-        [[NSFileManager defaultManager] removeItemAtPath:@"/tmp/fuyi-diag-armed" error:NULL];
-    }
 
     va_list args;
     va_start(args, format);
@@ -100,14 +177,23 @@ static void FuyiDiagLog(NSString *format, ...) {
         formatter.dateFormat = @"HH:mm:ss.SSS";
     }
     NSString *line = [NSString stringWithFormat:@"%@ %@\n", [formatter stringFromDate:[NSDate date]], message];
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
-    if (!handle) {
-        [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-        return;
+    FYWritePrivateDiagnosticData([line dataUsingEncoding:NSUTF8StringEncoding], @"yiya-diag.log", YES);
+}
+static NSString *FYDiagTextLength(NSString *value) {
+    return [NSString stringWithFormat:@"len:%lu", (unsigned long)value.length];
+}
+
+static void FYRemoveOwnedLegacyDiagnosticFiles(void) {
+#ifndef FY_TEST_DISABLE_LEGACY_DIAGNOSTICS
+    const char *paths[] = {"/tmp/fuyi-diag.log", "/tmp/fuyi-last-frame.png"};
+    for (NSUInteger index = 0; index < 2; index++) {
+        const char *path = paths[index];
+        struct stat info;
+        if (lstat(path, &info) == 0 && S_ISREG(info.st_mode) && info.st_uid == getuid()) {
+            unlink(path);
+        }
     }
-    [handle seekToEndOfFile];
-    [handle writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
-    [handle closeFile];
+#endif
 }
 // ==== 诊断结束 ====
 
@@ -686,6 +772,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) NSTextField *modelField;
 @property(nonatomic, strong) NSTextField *realtimeModelField;
 @property(nonatomic, strong) NSSecureTextField *apiKeyField;
+@property(nonatomic, copy) NSString *persistedAPIKey;
+@property(nonatomic) BOOL credentialLoadFailed;
 @property(nonatomic, strong) NSTextField *statusLabel;
 @property(nonatomic, strong) NSTextField *currentWindowLabel;
 @property(nonatomic, strong) NSTextField *translationCountLabel;
@@ -898,6 +986,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    FYRemoveOwnedLegacyDiagnosticFiles();
     self.globalShortcuts=[FYGlobalShortcuts new];
     __weak typeof(self) shortcutOwner=self;
     self.globalShortcuts.onAction=^(NSInteger action){
@@ -1015,7 +1104,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     if (!url) {
         return @"未找到随包的资料说明文件（App 未正确打包 resources/learning）。";
     }
-    NSString *text = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:NULL];
+    NSError *readError = nil;
+    NSString *text = [NSString stringWithContentsOfURL:url encoding:NSUTF8StringEncoding error:&readError];
+    if (!text) { return @"无法读取资料说明文件，请重新安装译芽。"; }
     return text.length > 0 ? text : @"资料说明文件为空。";
 }
 
@@ -2930,7 +3021,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSStackView *row = [self horizontalStack];
     [row addArrangedSubview:[NSButton buttonWithTitle:@"测试翻译" target:self action:@selector(testTranslation:)]];
     [stack addArrangedSubview:row];
-    [stack addArrangedSubview:[self label:@"实时翻译使用实时模型；翻译当前界面使用模型名；语法分析使用学习模型，留空则复用模型名。API Key 保存在本机 UserDefaults。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
+    [stack addArrangedSubview:[self label:@"实时翻译使用实时模型；翻译当前界面使用模型名；语法分析使用学习模型，留空则复用模型名。API Key 保存在 macOS 钥匙串。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
     [stack addArrangedSubview:[self label:@"服务状态以测试翻译的结果为准。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
     self.serviceErrorLabel = [self label:@"" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor systemRedColor]];
     self.serviceErrorLabel.maximumNumberOfLines = 3;
@@ -3709,12 +3800,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         NSArray<OCRTextItem *> *ocrBlocks = @[];
         // 诊断：把实际送去 OCR 的整窗图存一份（覆盖式，只留最新一帧），
         // 用来看运行时画面和离线截图是否一致。
-        // 注意：这会把用户屏幕内容落盘，只能在实际排查时开启（FUYI_DIAG=1），
+        // 注意：这会把用户屏幕内容写入当前用户的私有临时目录，只能在实际排查时开启（FUYI_DIAG=1），
         // 不能在正式分发版里无条件执行。
         if (FuyiDiagEnabled()) {
             NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:fullImage];
             NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-            [png writeToFile:@"/tmp/fuyi-last-frame.png" atomically:YES];
+            FYWritePrivateDiagnosticData(png, @"yiya-last-frame.png", NO);
         }
         NSString *ocrText;
         if (CGRectEqualToRect(ocrScope,CGRectMake(0,0,1,1))) {
@@ -3895,7 +3986,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                             YES,
                             (unsigned long)ocrBlocks.count, (unsigned long)tokens, (unsigned long)substantial,
                             LooksLikeUIFrame(ocrBlocks), (unsigned long)dbgBand.count,
-                            (long)self.detectedModeSegment, Shorten(ocrText, 60));
+                            (long)self.detectedModeSegment, FYDiagTextLength(ocrText));
             }
 
             NSInteger frameMode = [self effectiveModeSegment];
@@ -3945,7 +4036,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                     FuyiDiagLog(@"  TRANSLATE(items=%lu) took %.2fs err=<%@>",
                                 (unsigned long)uiItemsForRender.count,
                                 [[NSDate date] timeIntervalSinceDate:uiTranslateStart],
-                                translationError.localizedDescription ?: @"");
+                                [NSString stringWithFormat:@"code:%ld", (long)translationError.code]);
                     [self bindTranslations:translations toIdentities:uiIdentities];
                     [self refreshLearningSource];
                     [self refreshLearningStatus];
@@ -4378,7 +4469,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         BOOL hasTargetBounds = resolved != 0 && [self liveBoundsForWindowID:resolved outBounds:&targetBounds];
         FuyiDiagLog(@"  TARGET id=%u ambiguous=%d bounds=%@ note=<%@>",
                     resolved, ambiguous ? 1 : 0,
-                    hasTargetBounds ? NSStringFromRect(targetBounds) : @"(未知)", note ?: @"");
+                    hasTargetBounds ? NSStringFromRect(targetBounds) : @"(未知)", FYDiagTextLength(note));
     }
     if (ambiguous) {
         // 多个投影、无法确定画面在哪一块：先隐藏旧贴译并提示选择，绝不猜一个窗口。
@@ -5247,12 +5338,14 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     }
 
     self.apiKeyField.stringValue = clipboardText;
+    self.credentialLoadFailed = NO;
     [self setStatus:@"API Key 已从剪贴板填入"];
     [self serviceSettingsChanged];
 }
 
 - (void)clearAPIKey:(id)sender {
     self.apiKeyField.stringValue = @"";
+    self.credentialLoadFailed = NO;
     [self setStatus:@"API Key 已清空"];
     [self serviceSettingsChanged];
 }
@@ -5261,6 +5354,19 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [self.saveTimer invalidate];
     self.saveTimer = nil;
     if (self.loadingSettings) { return; }
+    if (self.credentialLoadFailed) {
+        self.serviceErrorLabel.stringValue = @"无法读取钥匙串，设置未保存。请检查钥匙串访问权限。";
+        return;
+    }
+    NSString *apiKey = self.apiKeyField.stringValue ?: @"";
+    if (![apiKey isEqualToString:self.persistedAPIKey ?: @""]) {
+        OSStatus keyStatus = FYWriteAPIKey(apiKey);
+        if (keyStatus != errSecSuccess) {
+            self.serviceErrorLabel.stringValue = @"API Key 无法保存到钥匙串，设置未保存。请检查钥匙串访问权限。";
+            return;
+        }
+        self.persistedAPIKey = apiKey;
+    }
     NSDictionary *settings = @{
         @"language": @(self.languageControl.selectedSegment),
         @"regionX": @(self.regionXSlider.doubleValue),
@@ -5287,7 +5393,6 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         @"model": self.modelField.stringValue ?: @"",
         @"realtimeModel": self.realtimeModelField.stringValue ?: @"",
         @"learningModel": self.learningModelField.stringValue ?: @"",
-        @"apiKey": self.apiKeyField.stringValue ?: @"",
         // 识别输入源（0 = 窗口截图，1 = 采集卡）与上次选择的采集卡设备。
         // 只记硬件标识用于恢复选择，不写入日志；启动时不会因此自动开始采集。
         @"inputSource": @(self.inputSourceSegment == 1 ? 1 : 0),
@@ -5313,6 +5418,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     if (field == self.lemmaField || field == self.readingField || field == self.meaningField) {
         [self vocabularyFormChanged:field]; return;
     }
+    if (field == self.apiKeyField) { self.credentialLoadFailed = NO; }
     [self scheduleSettingsSave];
     if (field == self.baseURLField || field == self.modelField || field == self.realtimeModelField || field == self.apiKeyField) {
         self.serviceTestGeneration += 1;
@@ -5386,7 +5492,28 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 老存档没有这个键 —— 默认给 Flash：实时翻译用推理模型会卡到没法用
     self.realtimeModelField.stringValue = settings[@"realtimeModel"] ?: @"deepseek-flash";
     self.learningModelField.stringValue = settings[@"learningModel"] ?: @"";
-    self.apiKeyField.stringValue = settings[@"apiKey"] ?: @"";
+    NSString *legacyKey = [settings[@"apiKey"] isKindOfClass:NSString.class] ? settings[@"apiKey"] : @"";
+    NSString *storedKey = nil;
+    OSStatus keyStatus = FYReadAPIKey(&storedKey);
+    if (keyStatus == errSecItemNotFound && legacyKey.length) {
+        keyStatus = FYWriteAPIKey(legacyKey);
+        if (keyStatus == errSecSuccess) { storedKey = legacyKey; }
+    }
+    if (keyStatus == errSecSuccess || (keyStatus == errSecItemNotFound && !legacyKey.length)) {
+        self.apiKeyField.stringValue = storedKey ?: @"";
+        self.persistedAPIKey = self.apiKeyField.stringValue;
+        self.credentialLoadFailed = NO;
+        if (settings[@"apiKey"]) {
+            NSMutableDictionary *sanitized = [settings mutableCopy];
+            [sanitized removeObjectForKey:@"apiKey"];
+            [[NSUserDefaults standardUserDefaults] setObject:sanitized forKey:SettingsKey];
+        }
+    } else {
+        self.apiKeyField.stringValue = legacyKey;
+        self.persistedAPIKey = nil;
+        self.credentialLoadFailed = YES;
+        self.serviceErrorLabel.stringValue = @"无法读取或迁移 API Key；原设置已保留。请检查钥匙串访问权限。";
+    }
     // 识别输入源与采集卡设备：只恢复选择，不自动启动采集（权限也不会在这里申请）。
     self.inputSourceSegment = [settings[@"inputSource"] integerValue] == 1 ? 1 : 0;
     if (self.inputSourceControl) { self.inputSourceControl.selectedSegment = self.inputSourceSegment; }
@@ -5593,7 +5720,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         }
         if (dotCount > 0 && !hasJapanese) {
             // 保留诊断：现场“少半句”时先看有没有这行，能直接区分“被过滤”和“OCR 漏读”。
-            FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f dots=%lu/%lu", text, box.size.width,
+            FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f dots=%lu/%lu", FYDiagTextLength(text), box.size.width,
                         (unsigned long)dotCount, (unsigned long)text.length);
             return YES;
         }
@@ -5611,7 +5738,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 break;
             }
             if (onlyPunctuation) {
-                FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f", text, box.size.width);
+                FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f", FYDiagTextLength(text), box.size.width);
                 return YES;
             }
         }
@@ -5961,14 +6088,14 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             // 诊断要能看出"到底是什么放不下"：原文框、长卡尺寸、紧凑入口尺寸、逐候选被拒原因
             // （含冲突的是哪一块、交叠多厚），而不是一句"所有候选冲突"。
             FuyiDiagLog(@"    UNPLACEABLE <%@> srcFrame=(%.0f,%.0f,%.0f,%.0f) longCard=(%.0fx%.0f) compactEntry=(%.0fx%.0f) viewport=(%.0f,%.0f,%.0f,%.0f) reason=<%@> rejected=[%@]",
-                        Shorten(item.text, 24),
+                        FYDiagTextLength(item.text),
                         placement.sourceFrame.origin.x, placement.sourceFrame.origin.y,
                         placement.sourceFrame.size.width, placement.sourceFrame.size.height,
                         placement.longCardSize.width, placement.longCardSize.height,
                         placement.compactEntrySize.width, placement.compactEntrySize.height,
                         windowFrame.origin.x, windowFrame.origin.y, NSWidth(windowFrame), NSHeight(windowFrame),
-                        placement.reason,
-                        [placement.rejectedCandidates componentsJoinedByString:@" | "] ?: @"");
+                        FYDiagTextLength(placement.reason),
+                        [NSString stringWithFormat:@"count:%lu", (unsigned long)placement.rejectedCandidates.count]);
             continue;
         }
         // 紧凑入口一律用长卡视图渲染：它可能是"多行但被判成短块"的段落降级出来的，
@@ -6025,22 +6152,22 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         // 紧凑入口额外打出长卡尺寸与入口尺寸，方便判断"是尺寸问题还是真的没地方"。
         if (placement.mode == FYInlineDisplayModeCompactEntry) {
             FuyiDiagLog(@"    COMPACT-ENTRY src=<%@> longCard=(%.0fx%.0f) entry=(%.0fx%.0f) anchor=%ld panel=(%.0f,%.0f,%.0f,%.0f) reason=%@",
-                        Shorten(item.text, 24),
+                        FYDiagTextLength(item.text),
                         placement.longCardSize.width, placement.longCardSize.height,
                         placement.compactEntrySize.width, placement.compactEntrySize.height,
                         (long)placement.anchor,
                         panel.frame.origin.x, panel.frame.origin.y, NSWidth(panel.frame), NSHeight(panel.frame),
-                        placement.reason);
+                        FYDiagTextLength(placement.reason));
         }
         FuyiDiagLog(@"    PANEL src=<%@> box=(%.3f,%.3f,%.3f,%.3f) srcFrame=(%.0f,%.0f,%.0f,%.0f) mode=%ld anchor=%ld panel=(%.0f,%.0f,%.0f,%.0f) reason=%@",
-                    Shorten(item.text, 24),
+                    FYDiagTextLength(item.text),
                     item.boundingBox.origin.x, item.boundingBox.origin.y,
                     item.boundingBox.size.width, item.boundingBox.size.height,
                     placement.sourceFrame.origin.x, placement.sourceFrame.origin.y,
                     placement.sourceFrame.size.width, placement.sourceFrame.size.height,
                     (long)placement.mode, (long)placement.anchor,
                     panel.frame.origin.x, panel.frame.origin.y, NSWidth(panel.frame), NSHeight(panel.frame),
-                    placement.reason);
+                    FYDiagTextLength(placement.reason));
     }
 
     // 这一帧多出来的旧面板关掉。
@@ -6098,8 +6225,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     for (FYInlinePlacement *placement in result.placements) {
         if (placement.variantDiagnostics.count == 0) { continue; }
         FuyiDiagLog(@"    CARD-VARIANTS <%@> 块=%@",
-                    Shorten([placement.block.text stringByReplacingOccurrencesOfString:@"\n" withString:@" "], 20),
-                    [placement.variantDiagnostics componentsJoinedByString:@" | "]);
+                    FYDiagTextLength(placement.block.text),
+                    [NSString stringWithFormat:@"count:%lu", (unsigned long)placement.variantDiagnostics.count]);
     }
 [self advanceExpandedReadingState];
     [self refreshOverlayVisibility:nil];
@@ -6430,7 +6557,7 @@ static const CGFloat kInlineManualOffsetBucket = 0.01;
     NSString *key = [self inlineManualOffsetKeyForText:text normalizedBox:placement.block.boundingBox];
     self.inlineManualOffsets[key] = [NSValue valueWithSize:offset];
     self.inlineManualOffsetAge[key] = @0;
-    FuyiDiagLog(@"    INLINE-MANUAL <%@> offset=(%.0f,%.0f)", Shorten(text, 20), offset.width, offset.height);
+    FuyiDiagLog(@"    INLINE-MANUAL <%@> offset=(%.0f,%.0f)", FYDiagTextLength(text), offset.width, offset.height);
 }
 
 // 把拖动行为绑到面板上：长卡走标题栏，短贴片按住 Option 才可拖。
@@ -7833,7 +7960,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         [self resetInlineLayoutCacheAfterMappingChange];
         self.lastAutoLocateAttempt = nil;   // 允许上层立刻重新定位
         if (outReason) { *outReason = @"旧版自动定位结果已作废，正在重新定位游戏画面"; }
-        FuyiDiagLog(@"CAPTURE-MAPPING stale-version dropped key=%@", mappingKey);
+        FuyiDiagLog(@"CAPTURE-MAPPING stale-version dropped key=%@", FYDiagTextLength(mappingKey));
         return NO;
     }
     NSRect windowFrame = [self appKitFrameForWindowItem:window];
@@ -7862,7 +7989,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
                 [self resetInlineLayoutCacheAfterMappingChange];
                 self.lastAutoLocateAttempt = nil;   // 允许上层立刻重新定位
                 if (outReason) { *outReason = @"游戏画面位置变了，正在重新定位"; }
-                FuyiDiagLog(@"CAPTURE-MAPPING stale-picture dropped key=%@ score=%.3f", mappingKey, score);
+                FuyiDiagLog(@"CAPTURE-MAPPING stale-picture dropped key=%@ score=%.3f", FYDiagTextLength(mappingKey), score);
                 return NO;
             }
         }
@@ -8025,7 +8152,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         if (outRect) { *outRect = mapped; }
         return YES;
     }
-    FuyiDiagLog(@"CAPTURE-MAPPING unusable reason=<%@>", mappedReason ?: @"未知");
+    FuyiDiagLog(@"CAPTURE-MAPPING unusable reason=<%@>", FYDiagTextLength(mappedReason));
     // 没有可用的映射（首次使用 / 变了窗口或输入源）：自动定位一次，用户不需要先手动校准。
     if ([self autoDetectCaptureCardVideoRectForWindow:window reason:NULL] &&
         [self captureCardDisplayRectForWindow:window outRect:&mapped reason:NULL]) {
@@ -8040,7 +8167,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 // 不写字幕框（字幕框只放对白译文，不能被提示覆盖），也不解释实现细节。
 - (void)showInlineMappingUnavailableNotice:(NSString *)reason {
     [self setStatus:reason.length ? reason : @"暂时无法定位游戏画面，可调整贴译位置"];
-    FuyiDiagLog(@"INLINE-MAPPING-UNAVAILABLE %@", reason ?: @"");
+    FuyiDiagLog(@"INLINE-MAPPING-UNAVAILABLE %@", FYDiagTextLength(reason));
 }
 
 - (CGRect)quartzRectFromSelectionRect:(CGRect)selectionRect panelFrame:(NSRect)panelFrame {
@@ -8294,7 +8421,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     NSDate *httpStart = [NSDate date];
     NSURLSessionDataTask *task = [FYTranslationManager taskWithRequest:request session:NSURLSession.sharedSession observer:^(NSURLResponse *response, NSError *error) {
         FuyiDiagLog(@"    HTTP %ld in %.2fs err=<%@>", (long)[(NSHTTPURLResponse *)response statusCode],
-                    [[NSDate date] timeIntervalSinceDate:httpStart], error.localizedDescription ?: @"");
+                    [[NSDate date] timeIntervalSinceDate:httpStart], [NSString stringWithFormat:@"code:%ld", (long)error.code]);
         [[FYRuntimeDiagnostics shared] recordEvent:@"http" fields:@{@"window_id": @(diagnosticWindowID), @"generation": @(generation), @"http_status": @([(NSHTTPURLResponse *)response statusCode]), @"error_code": @(error.code), @"elapsed_ms": @([[NSDate date] timeIntervalSinceDate:httpStart] * 1000)}];
         FYTrace(trace, @"http_complete", @{@"http_status": @([(NSHTTPURLResponse *)response statusCode]), @"elapsed_ms": @([[NSDate date] timeIntervalSinceDate:httpStart] * 1000), @"error_code": @(error.code)});
     } completion:deliver];
