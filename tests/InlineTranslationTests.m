@@ -782,10 +782,18 @@ int main(void) {
         [recoveryApp stop];
 
         recoveryApp.testWindows = @[TestWindow(404, @"QuickTime Player - 打开"), TestWindow(505, @"QuickTime Player - 录影")];
+        // 用户还没选过（首次刷新）时才自动挑一个推荐窗口。
+        recoveryApp.windows = [NSMutableArray array];
+        [recoveryApp.windowPopup removeAllItems];
         [recoveryApp refreshWindows:nil];
         Check([recoveryApp selectedWindowID] == 505,
-              @"default QuickTime selection must prefer recording content over its open dialog");
-        [recoveryApp.windowPopup selectItemWithTitle:@"QuickTime Player - 打开"];
+              @"first refresh must default to QuickTime recording content over its open dialog");
+        // 已经有选择时，刷新只按窗口 ID 保留选择，绝不自动跳到第一项。
+        Check([recoveryApp selectWindowWithID:404 notifyChange:NO] && [recoveryApp selectedWindowID] == 404,
+              @"selection by window id must work for the new 应用名 · 标题 list");
+        [recoveryApp refreshWindows:nil];
+        Check([recoveryApp selectedWindowID] == 404,
+              @"refresh must keep the selected window id instead of jumping to the first item");
         recoveryApp.testWindows = @[TestWindow(505, @"QuickTime Player - 录影"), TestWindow(606, @"Safari - 其他窗口")];
         recoveryApp.lastWindowRecoveryAttemptDate = nil;
         Check([recoveryApp recoverWindowSelectionIfRecreated] && [recoveryApp selectedWindowID] == 505,
@@ -798,6 +806,15 @@ int main(void) {
         recoveryApp.lastWindowRecoveryAttemptDate = nil;
         Check(![recoveryApp recoverWindowSelectionIfRecreated] && [recoveryApp selectedWindowID] == 707,
               @"automatic recovery must not guess between multiple recording windows");
+        // 当前窗口关闭：刷新后必须明确提示重新选择，绝不静默绑到别的窗口上。
+        recoveryApp.testWindows = @[TestWindow(808, @"QuickTime Player - 录影")];
+        recoveryApp.lastWindowRecoveryAttemptDate = nil;
+        recoveryApp.displayTargetResolved = NO;
+        [recoveryApp refreshWindows:nil];
+        Check([recoveryApp selectedWindowID] == 0,
+              @"a closed selected window must not silently rebind to another window on refresh");
+        Check([recoveryApp.windowPopup.menu.itemArray.firstObject.title containsString:@"重新选择"],
+              @"a closed selected window must show an explicit reselect prompt");
 
         AppDelegate *serviceApp = [[AppDelegate alloc] init];
         [serviceApp createMainWindow];

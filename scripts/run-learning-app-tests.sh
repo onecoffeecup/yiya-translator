@@ -16,8 +16,8 @@ clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-nullability-comp
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
   "$ROOT_DIR/tests/$TEST_SOURCE.m" "$ROOT_DIR/tests/FYTestIsolation.m" \
   "$ROOT_DIR/tests/FYTestCaptureCardInput.m" \
-  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYCaptureCardInput.m" "$ROOT_DIR"/objc/learning/*.m \
-  -framework Cocoa -framework CoreGraphics -framework QuartzCore -framework Vision \
+  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m" "$ROOT_DIR/objc/FYCaptureCardInput.m" "$ROOT_DIR"/objc/learning/*.m \
+  -framework Cocoa -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision \
   -framework Carbon -framework NaturalLanguage \
   -framework AVFoundation -framework CoreImage -framework CoreMedia -framework CoreVideo \
   -lsqlite3 -o "$ROOT_DIR/.build/release/$TEST_SOURCE"

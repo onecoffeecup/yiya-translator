@@ -18,7 +18,12 @@ TOKEN = re.compile(rb"\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|gith
 def excluded(path):
     parts = path.parts
     return (any(part in {"__pycache__", "AppIcon.iconset", ".DS_Store", "_private", "handoff", "design"} for part in parts)
+            or "refactoring" in parts
+            or path.as_posix().startswith("docs/images/promo/")
+            or path.as_posix() == "docs/重复修复候选验收清单-20261005.md"
+            or path.as_posix() == "tests/MappingDebug.m"
             or path.name.startswith((".env", "reference.sqlite"))
+            or path.suffix.lower() in {".sqlite", ".sqlite3", ".db", ".log"}
             or path.suffix in {".pyc", ".pyo", ".pem", ".p12", ".pfx"})
 
 

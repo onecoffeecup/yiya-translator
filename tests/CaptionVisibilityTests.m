@@ -53,7 +53,14 @@ int main(void) { @autoreleasepool {
     [target makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES]; Tick();
     [realPolicy.windowPopup addItemWithTitle:@"Test target"];
     realPolicy.windowPopup.selectedItem.representedObject=@(target.windowNumber);
-    Require([realPolicy translationTargetIsForeground], @"real foreground PID and on-screen window must match");
+    BOOL realForeground=[realPolicy translationTargetIsForeground];
+    if (!realForeground) {
+        NSArray *visible=CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly|kCGWindowListExcludeDesktopElements,kCGNullWindowID));
+        NSMutableArray *owned=[NSMutableArray array];
+        for (NSDictionary *entry in visible) if ([entry[(id)kCGWindowOwnerPID] intValue]==getpid()) [owned addObject:entry];
+        NSLog(@"FOREGROUND DIAGNOSTIC pid=%d frontPID=%d target=%ld selected=%u owner=%d appActive=%d visible=%d keyTarget=%d resolved=%d ambiguous=%d resolvedID=%u owned=%@",getpid(),NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier,(long)target.windowNumber,[realPolicy selectedWindowID],[realPolicy selectedWindowOwnerPID],NSApp.isActive,target.isVisible,NSApp.keyWindow==target,realPolicy.displayTargetResolved,realPolicy.displayTargetAmbiguous,realPolicy.resolvedDisplayTargetID,owned);
+    }
+    Require(realForeground, @"real foreground PID and on-screen window must match");
     [target miniaturize:nil]; Tick();
     Require(![realPolicy translationTargetIsForeground], @"minimized target must not qualify even when its app remains frontmost");
     [target orderOut:nil];

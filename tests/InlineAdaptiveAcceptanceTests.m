@@ -230,7 +230,9 @@ static void IACheckLegality(FYInlineLayoutResult *result,
             if (other == index) { continue; }
             CGRect source = requests[other].sourceFrame;
             if (NSWidth(source) < 2 || NSHeight(source) < 2) { continue; }
-            if (CGRectIntersectsRect(frame, source)) {
+            CGRect hit = CGRectIntersection(frame, source);
+            CGFloat depth = CGRectIsNull(hit) || CGRectIsEmpty(hit) ? 0 : MIN(hit.size.width, hit.size.height);
+            if (depth > 10.0 + 0.001) {
                 noCover = NO;
                 if (coverDetail.length == 0) {
                     coverDetail = [NSString stringWithFormat:@"译文<%@> frame=%@ 压到第 %lu 个原文 %@",
@@ -251,7 +253,7 @@ static void IACheckLegality(FYInlineLayoutResult *result,
     }
     IACheck(inside, scenario, [NSString stringWithFormat:@"所有译文框都在可见区域内 %@", insideDetail]);
     IACheck(noPair, scenario, [NSString stringWithFormat:@"所有译文框互不重叠 %@", pairDetail]);
-    IACheck(noCover, scenario, [NSString stringWithFormat:@"译文框不遮挡任何别的原文块 %@", coverDetail]);
+    IACheck(noCover, scenario, [NSString stringWithFormat:@"译文框对其他原文的轻微遮挡不超过 10pt %@", coverDetail]);
     IACheck(cleanUnplaceable, scenario, [NSString stringWithFormat:@"不可放置项 frame 为空且 reason 非空 %@", unplaceableDetail]);
     IACheck(noStrip, scenario, [NSString stringWithFormat:@"没有空细条（可见框高度 ≥ 20） %@", stripDetail]);
 }
@@ -1005,7 +1007,9 @@ static void IACheckPanelsDoNotCoverOtherSources(IAAcceptanceApp *app,
             NSString *identity = [app inlineBlockIdentityForItem:item];
             if ([panel.identifier isEqualToString:identity]) { continue; }
             NSRect source = [app appKitFrameForOCRItem:item inWindowFrame:windowFrame];
-            if (CGRectIntersectsRect(panel.frame, source)) {
+            CGRect hit = CGRectIntersection(panel.frame, source);
+            CGFloat depth = CGRectIsNull(hit) || CGRectIsEmpty(hit) ? 0 : MIN(hit.size.width, hit.size.height);
+            if (depth > 10.0 + 0.001) {
                 IACheck(NO, scenario,
                         [NSString stringWithFormat:@"面板 <%@> frame=%@ 遮挡了原文 <%@> %@",
                          IAClip(panel.identifier, 20), IARect(panel.frame), IAClip(item.text, 16), IARect(source)]);
@@ -1013,7 +1017,7 @@ static void IACheckPanelsDoNotCoverOtherSources(IAAcceptanceApp *app,
             }
         }
     }
-    IACheck(YES, scenario, [NSString stringWithFormat:@"%lu 个面板都没有遮挡任何别的原文块（真实坐标换算）",
+    IACheck(YES, scenario, [NSString stringWithFormat:@"%lu 个面板对其他原文的遮挡均不超过 10pt（真实坐标换算）",
                             (unsigned long)panels.count]);
 }
 

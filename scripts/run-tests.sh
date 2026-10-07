@@ -25,8 +25,8 @@ clang \
   "$ROOT_DIR/tests/InlineTranslationTests.m" \
   "$ROOT_DIR/tests/FYTestIsolation.m" \
   "$ROOT_DIR/tests/FYTestCaptureCardInput.m" \
-  "$ROOT_DIR/objc/FYTranslationTrace.m" \
-  "$ROOT_DIR/objc/FYInlineLayout.m" \
+  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m" \
+  "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   "$ROOT_DIR/objc/FYCaptureCardInput.m" \
   "$ROOT_DIR/objc/learning/FYLearningModels.m" \
   "$ROOT_DIR/objc/learning/FYLearningStore.m" \
@@ -42,7 +42,7 @@ clang \
   "$ROOT_DIR/objc/learning/FYReferenceDictionary.m" \
   "$ROOT_DIR/objc/learning/FYSavedWordReferenceView.m" \
   -o "$BIN" \
-  -framework Cocoa \
+  -framework Cocoa -framework UniformTypeIdentifiers \
   -framework CoreGraphics \
   -framework QuartzCore \
   -framework Vision \

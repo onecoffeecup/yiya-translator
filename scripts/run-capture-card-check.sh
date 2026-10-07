@@ -19,13 +19,13 @@ mkdir -p "$OUT" "$MODULE_CACHE"
 # 工具源码自己 #import 了 LiveCaptionTranslator.m，这里只补链接其余实现文件，
 # 否则会出现重复符号。
 LINK_SOURCES=(
-  "$ROOT_DIR/objc/FYTranslationTrace.m"
-  "$ROOT_DIR/objc/FYInlineLayout.m"
+  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m"
+  "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
   "$ROOT_DIR/objc/FYCaptureCardInput.m"
   "$ROOT_DIR"/objc/learning/*.m
 )
 FRAMEWORKS=(
-  -framework Cocoa -framework CoreGraphics -framework QuartzCore -framework Vision
+  -framework Cocoa -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision
   -framework Carbon -framework NaturalLanguage
   -framework AVFoundation -framework CoreImage -framework CoreMedia -framework CoreVideo
   -framework ImageIO -lsqlite3

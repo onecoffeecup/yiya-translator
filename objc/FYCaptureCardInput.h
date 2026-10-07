@@ -3,6 +3,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+FOUNDATION_EXPORT BOOL FYCaptureFrameNeedsRecognition(uint64_t latestIndex, uint64_t lastRecognizedIndex);
+
 /// 相机（视频采集）授权状态。译芽只读取授权，不在这里申请；申请必须由用户显式操作触发。
 typedef NS_ENUM(NSInteger, FYCaptureCardAvailability) {
     FYCaptureCardAvailabilityNotDetermined = 0,
@@ -10,6 +12,13 @@ typedef NS_ENUM(NSInteger, FYCaptureCardAvailability) {
     FYCaptureCardAvailabilityDenied,
     FYCaptureCardAvailabilityRestricted,
 };
+
+typedef NS_ENUM(NSInteger, FYCapturePermissionAction) {
+    FYCapturePermissionActionContinue,
+    FYCapturePermissionActionRequest,
+    FYCapturePermissionActionReject,
+};
+FOUNDATION_EXPORT FYCapturePermissionAction FYCapturePermissionActionForAvailability(FYCaptureCardAvailability availability);
 
 /// 采集会话状态。任何非 Running 的状态都表示"没有可用新帧"。
 typedef NS_ENUM(NSInteger, FYCaptureCardSessionState) {
@@ -24,6 +33,8 @@ typedef NS_ENUM(NSInteger, FYCaptureCardSessionState) {
     FYCaptureCardSessionStateFailed,
 };
 
+FOUNDATION_EXPORT NSString *FYCaptureCardStatusText(FYCaptureCardSessionState state, FYCaptureCardAvailability availability,
+    NSString *deviceName, uint64_t receivedFrames, uint64_t skippedFrames, NSString *detail);
 FOUNDATION_EXPORT NSString *FYCaptureCardAvailabilityLabel(FYCaptureCardAvailability value);
 FOUNDATION_EXPORT NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionState state);
 

@@ -230,6 +230,9 @@ static void CardCycle(CaptureCardApp *app, NSArray *fixture) {
     app.fixture = fixture;
     [app timerFired:nil];
     Pump(^BOOL { return !app.inFlight; });
+    // handleInlineTranslationResult 还会往主队列派一次状态/落位块：
+    // 等它跑完再断言状态区，否则断言会依赖调度时序（偶发失败）。
+    [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
 }
 static void SwitchInputSource(CaptureCardApp *app, NSInteger segment) {
     CardControl *control = (CardControl *)app.inputSourceControl;
@@ -263,6 +266,16 @@ static void ArmCardTrace(NSString *root) {
 }
 
 int main(void) { @autoreleasepool {
+    Require(FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityAuthorized)==FYCapturePermissionActionContinue,@"authorized capture continues without request");
+    Require(FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityNotDetermined)==FYCapturePermissionActionRequest,@"only undetermined capture requests permission");
+    Require(FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityDenied)==FYCapturePermissionActionReject && FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityRestricted)==FYCapturePermissionActionReject && FYCapturePermissionActionForAvailability((FYCaptureCardAvailability)99)==FYCapturePermissionActionReject,@"denied restricted and unknown capture state reject safely");
+    Require(!FYCaptureFrameNeedsRecognition(0,9),@"no frame index never enters OCR");
+    Require(!FYCaptureFrameNeedsRecognition(9,9),@"repeated frame never enters OCR");
+    Require(FYCaptureFrameNeedsRecognition(10,9) && FYCaptureFrameNeedsRecognition(1,9),@"any different nonzero index preserves legacy acceptance, not monotonic-only");
+    NSString *runningStatus=FYCaptureCardStatusText(FYCaptureCardSessionStateRunning,FYCaptureCardAvailabilityAuthorized,@"HDMI",12,3,@"detail");
+    Require([runningStatus containsString:@" · 设备：HDMI · 已收帧 12（丢弃旧帧 3）\ndetail"],@"running status preserves device counters and detail text");
+    NSString *idleStatus=FYCaptureCardStatusText(FYCaptureCardSessionStateIdle,FYCaptureCardAvailabilityDenied,@"",12,3,@"");
+    Require(![idleStatus containsString:@"已收帧"] && ![idleStatus containsString:@"设备："] && ![idleStatus containsString:@"\n"],@"nonrunning status omits counters and empty optional fields");
     unsetenv("FUYI_DIAG");
     NSString *root = [FYTestTemporaryDirectory() stringByAppendingPathComponent:@"capture-card"];
     [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:NULL];
@@ -546,9 +559,12 @@ int main(void) { @autoreleasepool {
     uiAuto.fixtureWindowItem = CardWindow(100, 100, 800, 600);
     SwitchInputSource(uiAuto, 1);
     [uiAuto start];
-    // QuickTime 式窗口：1000×700 的窗口截图，顶部 62px 标题栏，画面贴在 (140,150,740,420)
+    // QuickTime 式窗口：1000×700 的窗口截图，顶部 62px 标题栏，画面贴在 (140,200,740,420)。
+    // ⚠️ 纵坐标刻意**不居中**（画面中心 290/700 明显高于窗口中线 350）：居中的夹具会让
+    // 「漏翻转」的正反两种换算得到几乎相同的结果，从而掩盖纵坐标错误。
     const size_t sceneW = 1000, sceneH = 700;
-    const CGRect videoInScene = {{140, 150}, {740, 420}};
+    // 画面按采集帧的真实比例 16:9 画进去（拉伸的内容会让定点匹配退化）。
+    const CGRect videoInScene = {{140, 200}, {740, 740 * 9.0 / 16.0}};
     CGImageRef autoFrame = CardPatternImage(320, 180, 4242);
     CGImageRef autoScene = CardWindowScene(autoFrame, sceneW, sceneH, videoInScene, 62);
     Require(autoFrame != NULL && autoScene != NULL, @"auto-locate fixture images");
@@ -566,10 +582,13 @@ int main(void) { @autoreleasepool {
     CGFloat expectY = NSMinY(autoWindowFrame) + videoInScene.origin.y / sceneH * NSHeight(autoWindowFrame);
     CGFloat expectW = videoInScene.size.width / sceneW * NSWidth(autoWindowFrame);
     CGFloat expectH = videoInScene.size.height / sceneH * NSHeight(autoWindowFrame);
-    Require(fabs(NSMinX(autoRect) - expectX) < NSWidth(autoWindowFrame) * 0.04 &&
-            fabs(NSMinY(autoRect) - expectY) < NSHeight(autoWindowFrame) * 0.04 &&
-            fabs(NSWidth(autoRect) - expectW) < NSWidth(autoWindowFrame) * 0.06 &&
-            fabs(NSHeight(autoRect) - expectH) < NSHeight(autoWindowFrame) * 0.06,
+    // 收紧**位置**容差（原来是宽高的 4%，约 24pt）：这个夹具正好把「纵坐标漏翻转」的
+    // 偏差（约 20pt）藏进了容差里，所以位置必须收到 8pt；尺寸容差保持 4%
+    //（夹具里的画面不是严格 16:9，尺寸本来就有十几个点的偏差）。
+    Require(fabs(NSMinX(autoRect) - expectX) < 8 &&
+            fabs(NSMinY(autoRect) - expectY) < 8 &&
+            fabs(NSWidth(autoRect) - expectW) < NSWidth(autoWindowFrame) * 0.04 &&
+            fabs(NSHeight(autoRect) - expectH) < NSHeight(autoWindowFrame) * 0.04,
             ([NSString stringWithFormat:@"auto-located %@ must match the pasted picture %@ (title bar excluded)",
               NSStringFromRect(autoRect), NSStringFromRect(NSMakeRect(expectX, expectY, expectW, expectH))]));
     // 标题栏区域绝不能被当成画面

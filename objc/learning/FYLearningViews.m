@@ -1,5 +1,27 @@
 #import "FYLearningViews.h"
 
+void FYMountLearningPage(NSArray<NSView *> *pages, NSView *host, NSInteger index) {
+    if (index < 0 || index >= (NSInteger)pages.count) return;
+    if (pages[index].superview != host) {
+        for (NSView *page in pages) [page removeFromSuperview];
+        NSView *page=pages[index]; page.translatesAutoresizingMaskIntoConstraints=NO;
+        [host addSubview:page];
+        [NSLayoutConstraint activateConstraints:@[
+            [page.leadingAnchor constraintEqualToAnchor:host.leadingAnchor],
+            [page.trailingAnchor constraintEqualToAnchor:host.trailingAnchor],
+            [page.topAnchor constraintEqualToAnchor:host.topAnchor],
+            [page.bottomAnchor constraintEqualToAnchor:host.bottomAnchor]
+        ]];
+    }
+}
+void FYUpdateLearningPageSelection(NSArray<NSView *> *pages, NSArray<NSButton *> *buttons, NSInteger index) {
+    for (NSInteger i=0; i<(NSInteger)pages.count; i++) {
+        pages[i].hidden=i!=index;
+        buttons[i].state=i==index ? NSControlStateValueOn : NSControlStateValueOff;
+        buttons[i].needsDisplay=YES;
+    }
+}
+
 @interface FYCapturePreviewView ()
 @property(nonatomic, strong) NSLayoutConstraint *aspectConstraint;
 @end

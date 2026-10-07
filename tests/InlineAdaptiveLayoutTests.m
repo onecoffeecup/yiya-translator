@@ -167,8 +167,11 @@ static void CheckLayoutLegality(FYInlineLayoutResult *result,
         for (NSUInteger other = 0; other < requests.count; other++) {
             if (other == index) { continue; }
             NSRect source = requests[other].sourceFrame;
-            Check(!CGRectIntersectsRect(frame, source),
-                  [NSString stringWithFormat:@"%@：%@ 的译文框没有遮挡第 %lu 个原文块", label, placement.blockID, (unsigned long)(other + 1)]);
+            CGRect overlap = CGRectIntersection(frame, source);
+            CGFloat depth = (CGRectIsNull(overlap) || CGRectIsEmpty(overlap)) ? 0 : MIN(overlap.size.width, overlap.size.height);
+            // 用户批准轻微遮挡 ≤10pt；译文之间仍按下面的零重叠断言验证。
+            Check(depth <= 10.0 + 0.001,
+                  [NSString stringWithFormat:@"%@：%@ 对第 %lu 个原文块的遮挡 %.3fpt 不超过 10pt", label, placement.blockID, (unsigned long)(other + 1), depth]);
         }
         for (NSValue *value in shown) {
             Check(!CGRectIntersectsRect(frame, value.rectValue),
@@ -832,8 +835,27 @@ static void TestAppCompactEntryOpensFullCard(void) {
               @"展开的完整阅读卡可点击进入学习");
         Check([[app inlineSnapshotForItem:item translation:@"x"].blockID isEqualToString:[app inlineBlockIdentityForItem:item]],
               @"展开卡的块身份与原始块一致");
+        // 收起入口：卡片上要有看得见的「收起」按钮（只有 Esc 的话用户会以为收不回去）。
+        Check(expanded.showsCollapseControl && expanded.collapseButton != nil, @"展开卡带可见的收起按钮");
+        Check([expanded.collapseButton.title isEqualToString:@"收起"], @"收起按钮文案是「收起」");
+        Check(expanded.collapseButton.superview == expanded, @"收起按钮挂在卡片上（可点）");
+        [expanded.collapseButton performClick:nil];
+        Check(app.inlineExpandedReadingPanel == nil && app.inlineExpandedReadingBlockID == nil,
+              @"点「收起」按钮后展开卡关闭");
+        // 再点一次同一个紧凑入口 = 收起（不需要去找 Esc）
+        card.onClick();
+        Check(app.inlineExpandedReadingPanel != nil, @"紧凑入口可以再次展开");
+        card.onClick();
+        Check(app.inlineExpandedReadingPanel == nil, @"再点一次同一个贴片就收起");
+        // Esc 入口仍然有效
+        card.onClick();
         [app closeExpandedInlineReadingCard];
-        Check(app.inlineExpandedReadingPanel == nil, @"展开卡可以关闭");
+        Check(app.inlineExpandedReadingPanel == nil, @"Esc 入口仍能关闭展开卡");
+        // 换页面/清理时展开卡不能留着
+        card.onClick();
+        Check(app.inlineExpandedReadingPanel != nil, @"清理前展开卡是打开的");
+        [app clearInlineTranslationPanels];
+        Check(app.inlineExpandedReadingPanel == nil, @"清理贴译时展开卡一并收起");
     }
     [app clearInlineTranslationPanels];
 }

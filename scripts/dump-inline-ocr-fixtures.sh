@@ -2,7 +2,7 @@
 # 把真实截图跑一遍**生产同配置**的 Vision OCR，导出贴译布局验证用的夹具 JSON。
 # 只读图片、不启动应用、不访问网络、不读写用户设置与学习库。
 #
-#   bash scripts/dump-inline-ocr-fixtures.sh
+#   bash scripts/dump-inline-ocr-fixtures.sh /path/to/frame-01.png [/path/to/frame-02.png ...]
 #
 # 产物：
 #   .build/inline-layout/InlineOcrDump                    编译出的工具
@@ -20,6 +20,10 @@
 # 把偏好目录指到 .build 内的可写目录即可；工具源码与生产 OCR 配置都不改。
 set -euo pipefail
 
+if [ "$#" -eq 0 ]; then
+  echo "用法: bash scripts/dump-inline-ocr-fixtures.sh <图片路径> [更多图片...]" >&2
+  exit 2
+fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="$ROOT_DIR/.build/inline-layout"
 FIXTURE_DIR="$OUT_DIR/fixtures"
@@ -40,16 +44,9 @@ clang -fobjc-arc -fmodules -fmodules-cache-path="$MODULE_CACHE" \
   "$ROOT_DIR/tools/InlineOcrDump.m" -o "$TOOL" \
   -framework Foundation -framework CoreGraphics -framework ImageIO -framework Vision
 
-# 必填输入：真实采集卡帧（1920×1080 真实游戏画面）。
-REQUIRED_IMAGES=(
-  "$ROOT_DIR/.build/capture-card-check/hardware-capture-20261005/frame-01.png"
-  "$ROOT_DIR/.build/capture-card-check/hardware-capture-20261005/frame-02.png"
-  "$ROOT_DIR/.build/capture-card-check/hardware-capture-20261005/frame-03.png"
-)
-# 可选输入：界面参考图（存在才导出）。
-OPTIONAL_IMAGES=(
-  "$ROOT_DIR/docs/design/yiya-reference-preview/production/yiya-inline-news.png"
-)
+# 用户显式提供图片，不依赖维护者本机采集日期或内部设计截图。
+REQUIRED_IMAGES=("$@")
+OPTIONAL_IMAGES=()
 
 SCALED_NOTES=()
 DUMPED_FILES=()

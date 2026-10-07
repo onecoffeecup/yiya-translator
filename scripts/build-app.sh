@@ -17,7 +17,8 @@ mkdir -p "$BUILD_DIR" "$MODULE_CACHE"
 
 SOURCES=(
   "$ROOT_DIR/objc/LiveCaptionTranslator.m"
-  "$ROOT_DIR/objc/FYTranslationTrace.m"
+  "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
+  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m"
   "$ROOT_DIR/objc/FYInlineLayout.m"
   "$ROOT_DIR/objc/FYCaptureCardInput.m"
   "$ROOT_DIR/objc/learning/FYLearningModels.m"
@@ -36,7 +37,7 @@ SOURCES=(
 )
 
 FRAMEWORKS=(
-  -framework Cocoa
+  -framework Cocoa -framework UniformTypeIdentifiers
   -framework CoreGraphics
   -framework QuartzCore
   -framework Vision

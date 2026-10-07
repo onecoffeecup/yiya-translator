@@ -1,8 +1,8 @@
 # 像素冒险手账 UI 资产
 
-最新造型校准为 [V2 校准板](../../../docs/design/figma/calibration-v2/README.md)，对应 `icons-v2/` 的 14 个新 SVG。下文 `icons/` 的 24 个单色线图属于第一版历史资产，不能再作为饱满彩色导航图标的默认造型。
+最新造型校准为 本机内部 V2 校准板（不随公开源码分发），对应 `icons-v2/` 的 14 个新 SVG。下文 `icons/` 的 24 个单色线图属于第一版历史资产，不能再作为饱满彩色导航图标的默认造型。
 
-第一版原创 UI 图标共 24 个，清单见 [icons/manifest.json](icons/manifest.json)，历史设计稿见 [Figma 交付说明](../../../docs/design/figma/README.md)。这些是界面操作图标；已确认的「译芽 / Yiya！」macOS 应用图标仍使用 `resources/AppIcon.png` 与 ICNS。
+第一版原创 UI 图标共 24 个，清单见 [icons/manifest.json](icons/manifest.json)，历史设计稿和 Figma 交付说明仅在维护者本机保留。这些是界面操作图标；已确认的「译芽 / Yiya！」macOS 应用图标仍使用 `resources/AppIcon.png` 与 ICNS。
 
 图标在 16 × 16 像素格内绘制，再居中放入 24 × 24 的透明 SVG 画布；viewBox 为 `0 0 24 24`，单个像素单元为 1，外围留白 4。路径采用 currentColor 和 crispEdges，填充轮廓代替有抗锯齿漂移的圆滑描边。`manifest.json` 的 sourceGrid=24 表示导出画布尺寸，内部造型格为 16。
 

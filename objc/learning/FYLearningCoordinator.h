@@ -9,6 +9,31 @@ NS_ASSUME_NONNULL_BEGIN
 
 // 学习模块的编排层：固定/跟随状态、来源 ID 绑定、连续画面去重、异步结果归属。
 @interface FYLearningCoordinator : NSObject
++ (NSArray<FYSentenceRecord *> *)displayHistoryRecords:(NSArray<FYSentenceRecord *> *)records;
++ (NSString *)vocabularyExampleText:(NSArray<FYVocabularyExample *> *)examples requestedIndex:(NSUInteger)index;
++ (nullable FYSentenceRecord *)historyRecordInList:(NSArray<FYSentenceRecord *> *)records index:(NSInteger)index identifier:(nullable NSString *)identifier;
++ (nullable FYGrammarBookmark *)bookmarkInList:(NSArray<FYGrammarBookmark *> *)bookmarks
+    grammarName:(nullable NSString *)name sentenceID:(nullable NSString *)sentenceID version:(NSInteger)version;
++ (nullable FYGrammarItem *)grammarItemInList:(nullable NSArray<FYGrammarItem *> *)items index:(NSInteger)index fallbackToFirst:(BOOL)fallback;
++ (BOOL)analysisMatchesSentenceID:(nullable NSString *)analysisSentenceID version:(NSInteger)analysisVersion
+    currentSentenceID:(nullable NSString *)currentSentenceID currentVersion:(NSInteger)currentVersion;
++ (NSArray<FYGrammarItem *> *)applicableGrammarItems:(NSArray<FYGrammarItem *> *)items text:(NSString *)text;
++ (BOOL)vocabularyCompletionBelongsToSelection:(NSRange)requestedRange currentRange:(NSRange)currentRange
+    requestGeneration:(NSInteger)requestGeneration currentGeneration:(NSInteger)currentGeneration
+    sentenceID:(nullable NSString *)sentenceID version:(NSInteger)version currentSentenceID:(nullable NSString *)currentSentenceID currentVersion:(NSInteger)currentVersion;
++ (BOOL)followupBelongsToItem:(id)item requestedItem:(id)requestedItem requestGeneration:(NSInteger)requestGeneration currentGeneration:(NSInteger)currentGeneration
+        sentenceID:(nullable NSString *)sentenceID version:(NSInteger)version currentSentenceID:(nullable NSString *)currentSentenceID currentVersion:(NSInteger)currentVersion;
++ (BOOL)requestSentenceID:(nullable NSString *)sentenceID version:(NSInteger)version generation:(NSInteger)generation
+        matchesSentenceID:(nullable NSString *)currentSentenceID version:(NSInteger)currentVersion generation:(NSInteger)currentGeneration;
++ (BOOL)selectionRange:(NSRange)range appliesToText:(NSString *)text
+           sentenceID:(nullable NSString *)sentenceID version:(NSInteger)version generation:(NSInteger)generation
+          currentText:(NSString *)currentText currentSentenceID:(nullable NSString *)currentSentenceID
+       currentVersion:(NSInteger)currentVersion currentGeneration:(NSInteger)currentGeneration;
++ (nullable FYVocabularyEntry *)nextReviewVocabularyInList:(NSArray<FYVocabularyEntry *> *)list
+                                                  index:(NSInteger)index nextIndex:(NSInteger *)nextIndex;
+// Stable ID takes precedence; a stale ID must not fall back to a different index.
++ (nullable FYVocabularyEntry *)vocabularyInList:(NSArray<FYVocabularyEntry *> *)list
+                                    identifier:(nullable NSString *)identifier fallbackIndex:(NSInteger)index;
 
 - (instancetype)initWithStore:(FYLearningStore *)store
                      analyzer:(FYLearningAnalyzer *)analyzer

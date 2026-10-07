@@ -1,10 +1,286 @@
 #import "FYInlineLayout.h"
 
+NSRect FYInlineLongCardBodyFrame(CGFloat width, CGFloat height, CGFloat padding, CGFloat titleBandHeight) {
+    CGFloat titleBand = 24;
+    BOOL showsTitleBand = titleBandHeight > 0.5;
+    CGFloat top = titleBandHeight > 0 ? padding + titleBandHeight : (showsTitleBand ? padding + titleBand + 13 : padding);
+    return NSMakeRect(padding, top, MAX((CGFloat)80, width - padding * 2), MAX((CGFloat)24, height - top - padding));
+}
+void FYInstallInlineLongCardFooter(FYInlineLongCardView *card, NSTextField *footer, CGFloat padding, CGFloat height, CGFloat textWidth) {
+    footer.frame = NSMakeRect(padding, height - padding - 14, textWidth, 14);
+    footer.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+    footer.hidden = YES;
+    [card addSubview:footer];
+    card.expandedFooterLabel = footer;
+}
+
+void FYInstallInlineLongCardHeader(FYInlineLongCardView *card, CGFloat cardWidth, CGFloat padding,
+    CGFloat titleBand, BOOL selected, NSTextField *title, NSTextField *badge, NSColor *badgeColor, NSColor *ruleColor) {
+    title.lineBreakMode = NSLineBreakByTruncatingTail;
+    title.frame = NSMakeRect(padding, padding + 2, cardWidth - padding * 2 - 70, titleBand);
+    [card addSubview:title];
+    if (selected) {
+        NSView *badgeBox = [[NSView alloc] initWithFrame:NSMakeRect(cardWidth - padding - 72, padding, 72, titleBand + 2)];
+        card.selectedBadgeBox = badgeBox;
+        badgeBox.wantsLayer = YES;
+        badgeBox.layer.backgroundColor = badgeColor.CGColor;
+        badgeBox.layer.cornerRadius = (titleBand + 2) / 2.0;
+        badge.alignment = NSTextAlignmentCenter;
+        badge.frame = NSMakeRect(0, 4, 72, titleBand - 6);
+        [badgeBox addSubview:badge];
+        [card addSubview:badgeBox];
+    }
+    NSView *rule = [[NSView alloc] initWithFrame:NSMakeRect(padding, padding + titleBand + 2, cardWidth - padding * 2, 1)];
+    rule.wantsLayer = YES;
+    rule.layer.backgroundColor = ruleColor.CGColor;
+    [card addSubview:rule];
+}
+
+void FYInstallInlineFoldedEntry(FYInlineLongCardView *card, CGFloat cardWidth, CGFloat padding,
+    NSString *title, NSString *hint, NSString *action, NSFont *titleFont, NSFont *hintFont,
+    NSColor *titleColor, NSColor *hintColor, NSColor *actionColor,
+    NSTextField *(^labelFactory)(NSString *, NSFont *, NSColor *)) {
+        CGFloat innerWidth = MAX((CGFloat)60, cardWidth - padding * 2);
+        CGFloat titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading);
+        CGFloat hintHeight = ceil(hintFont.ascender - hintFont.descender + hintFont.leading);
+        CGFloat actionHeight = titleHeight;
+        CGFloat y = padding;
+        NSTextField *titleLabel = labelFactory(title, titleFont, titleColor);
+        titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+        titleLabel.frame = NSMakeRect(padding, y, innerWidth, titleHeight);
+        [card addSubview:titleLabel];
+        y += titleHeight + 2;
+        // 提示行：不截断（宽度由引擎按这行字量出来），也不隐藏在 tooltip 里；空文案不占位。
+        NSTextField *hintLabel = nil;
+        if (hint.length > 0) {
+            hintLabel = labelFactory(hint, hintFont, hintColor);
+            hintLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+            hintLabel.frame = NSMakeRect(padding, y, innerWidth, hintHeight);
+            [card addSubview:hintLabel];
+            y += hintHeight + 3;
+        }
+        NSTextField *actionLabel = nil;
+        if (action.length > 0) {
+            actionLabel = labelFactory([action stringByAppendingString:@" ▾"], titleFont, actionColor);
+            actionLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+            actionLabel.frame = NSMakeRect(padding, y, innerWidth, actionHeight);
+            [card addSubview:actionLabel];
+        }
+        card.foldedEntryHintLabel = hintLabel;
+        card.foldedEntryActionLabel = actionLabel;
+}
+
+void FYApplyInlineLongCardBody(NSString *translation, NSTextField *label, CGFloat cardWidth, CGFloat padding,
+                               NSFont *font, NSParagraphStyle *style, NSColor *textColor) {
+    translation = FYInlineNormalizeTranslationParagraphs(translation);
+    CGFloat textWidth = MAX((CGFloat)80, cardWidth - padding * 2);
+    NSRect measured = [translation boundingRectWithSize:NSMakeSize(textWidth, CGFLOAT_MAX)
+                                                options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                             attributes:@{NSFontAttributeName:font, NSParagraphStyleAttributeName:style}];
+    label.font = font;
+    label.attributedStringValue = [[NSAttributedString alloc] initWithString:translation ?: @""
+        attributes:@{NSFontAttributeName:font, NSForegroundColorAttributeName:textColor, NSParagraphStyleAttributeName:style}];
+    label.frame = NSMakeRect(0, 0, textWidth, MAX((CGFloat)22, ceil(NSHeight(measured)) + 4));
+}
+
+NSScrollView *FYCreateInlineLongCardBodyScroll(NSString *translation, NSRect viewport, CGFloat cardWidth,
+                                             CGFloat padding, NSFont *font, NSParagraphStyle *style, NSColor *textColor) {
+    NSTextField *label = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, NSWidth(viewport), 22)];
+    FYApplyInlineLongCardBody(translation, label, cardWidth, padding, font, style, textColor);
+    label.selectable = NO;
+    label.editable = NO;
+    label.bezeled = NO;
+    label.drawsBackground = NO;
+    label.maximumNumberOfLines = 0;
+    label.usesSingleLineMode = NO;
+    label.lineBreakMode = NSLineBreakByWordWrapping;
+    label.cell.wraps = YES;
+    label.cell.scrollable = NO;
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:viewport];
+    scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    scroll.drawsBackground = NO;
+    scroll.hasVerticalScroller = YES;
+    scroll.hasHorizontalScroller = NO;
+    scroll.scrollerStyle = NSScrollerStyleOverlay;
+    scroll.borderType = NSNoBorder;
+    scroll.documentView = label;
+    return scroll;
+}
+
+@implementation FYInlinePatchView
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self) { _windowDragEnabled = YES; }
+    return self;
+}
+- (void)setShowsDragHint:(BOOL)showsDragHint {
+    _showsDragHint = showsDragHint;
+    // 反馈：边框加粗 + 更深的描边色（不改背景不透明度，也不淡化文字）。
+    self.layer.borderWidth = showsDragHint ? 2.5 : 1.5;
+    self.layer.borderColor = (showsDragHint ? self.dragHintColor : self.normalBorderColor).CGColor;
+    self.toolTip = showsDragHint ? @"按住 Option 拖动可调整贴译位置" : nil;
+}
+- (void)mouseDown:(NSEvent *)event {
+    if (!self.dragEnabled) { return; }
+    if (self.onDragBegan) { self.onDragBegan(); }
+    if (self.windowDragEnabled && self.window) { [self.window performWindowDragWithEvent:event]; }
+    if (self.onDragEnded) { self.onDragEnded(); }
+}
+@end
+
+@implementation FYInlineLongCardView
+- (BOOL)isFlipped { return YES; }
+// 命中测试直接返回卡片本身：内部文本不会吞掉「打开学习」的点击。
+// 「收起」按钮不交给 NSButton 自己命中 —— 实测 NSButton.hitTest: 对"自建 frame 的按钮"
+// 会返回 nil（同一个卡片里 buttonWithTitle: 建的按钮却正常），于是按钮点不到、卡收不起来。
+// 改成卡片自己在 mouseDown/mouseUp 里判定按钮区域，行为完全可控（见 pointIsInCollapseControl:）。
+- (NSView *)hitTest:(NSPoint)point {
+    if (self.hidden) { return nil; }
+    NSPoint local = [self convertPoint:point fromView:self.superview];
+    if (!NSPointInRect(local, self.bounds)) { return nil; }
+    return self;
+}
+
+// 浮层窗口通常不是 key window：没有这个，第一次点击会被系统吃掉去激活窗口。
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
+
+// 点是否落在「收起」按钮上（按钮 frame 与卡片同一坐标系）。
+- (BOOL)pointIsInCollapseControl:(NSPoint)localPoint {
+    NSButton *button = self.collapseButton;
+    if (!button || button.hidden) { return NO; }
+    return NSPointInRect(localPoint, NSInsetRect(button.frame, -2, -2));
+}
+// 滚轮仍交给内部滚动视图，长译文可以滚动。
+- (void)scrollWheel:(NSEvent *)event {
+    for (NSView *child in self.subviews) {
+        if ([child isKindOfClass:NSScrollView.class]) { [child scrollWheel:event]; return; }
+    }
+    [super scrollWheel:event];
+}
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (self) { _titleBarHeight = 55; _windowDragEnabled = YES; }
+    return self;
+}
+// 标题栏：内边距 + 标题带（flipped 坐标下 y 小的一侧）。
+- (BOOL)pointIsInTitleBar:(NSPoint)localPoint {
+    return localPoint.y >= 0 && localPoint.y <= self.titleBarHeight;
+}
+- (void)mouseDown:(NSEvent *)event {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    self.pressPoint = point;
+    self.pressMovedBeyondThreshold = NO;
+    // 「收起」按钮区域：按下先高亮，松手（没拖走）才真的收起。
+    if ([self pointIsInCollapseControl:point]) {
+        self.collapsePressed = YES;
+        self.collapseButton.highlighted = YES;
+        return;
+    }
+    if ([self pointIsInTitleBar:point]) {
+        // 标题栏按下 = 拖动整卡（AppKit 原生拖动循环，松手才返回）。
+        if (self.onDragBegan) { self.onDragBegan(); }
+        if (self.windowDragEnabled && self.window) { [self.window performWindowDragWithEvent:event]; }
+        if (self.onDragEnded) { self.onDragEnded(); }
+        return;
+    }
+    // 正文：等 mouseUp 再决定是点击（打开学习）还是拖动。
+}
+- (void)mouseDragged:(NSEvent *)event {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    CGFloat distance = hypot(point.x - self.pressPoint.x, point.y - self.pressPoint.y);
+    if (distance > 4.0) {
+        self.pressMovedBeyondThreshold = YES;
+        if (self.collapsePressed) {
+            // 按下后又拖走：取消这次收起（按钮不误触）。
+            self.collapsePressed = NO;
+            self.collapseButton.highlighted = NO;
+        }
+    }
+}
+- (void)mouseUp:(NSEvent *)event {
+    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+    if (self.collapsePressed) {
+        self.collapsePressed = NO;
+        self.collapseButton.highlighted = NO;
+        if (!self.pressMovedBeyondThreshold && [self pointIsInCollapseControl:point]) {
+            [self handleCollapseControl:self.collapseButton];
+        }
+        return;
+    }
+    if (self.pressMovedBeyondThreshold) { return; }   // 拖动结束不触发学习
+    if ([self pointIsInTitleBar:point]) { return; }
+    if (self.onClick) { self.onClick(); }
+}
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    for (NSTrackingArea *area in self.trackingAreas.copy) { [self removeTrackingArea:area]; }
+    NSTrackingArea *tracking = [[NSTrackingArea alloc] initWithRect:self.bounds options:(NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect) owner:self userInfo:nil];
+    [self addTrackingArea:tracking];
+}
+- (void)mouseEntered:(NSEvent *)event { if (self.onHover) { self.onHover(YES); } }
+- (void)mouseExited:(NSEvent *)event { if (self.onHover) { self.onHover(NO); } }
+
+// 在标题栏右侧装上「收起」按钮。展开卡没有别的收起入口（只有 Esc）时用户会以为收不回去，
+// 所以这里给一个看得见、点得到的按钮；展开后再点同一个贴片也能收起。
+- (void)installCollapseControl {
+    if (_collapseButton) { return; }
+    CGFloat padding = 14;
+    CGFloat width = 62, height = 24;
+    NSButton *button = [[NSButton alloc] initWithFrame:NSMakeRect(NSWidth(self.bounds) - padding - width, padding, width, height)];
+    button.title = @"收起";
+    button.bezelStyle = NSBezelStyleRounded;
+    button.controlSize = NSControlSizeSmall;
+    button.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    button.target = self;
+    button.action = @selector(handleCollapseControl:);
+    button.autoresizingMask = NSViewMinXMargin;
+    button.toolTip = @"收起这张展开的译文卡（也可再点一次贴片或按 Esc）";
+    [self addSubview:button];
+    _showsCollapseControl = YES;
+    _collapseButton = button;
+    // 「已选中」标识往左让位，避免和收起按钮叠在一起。
+    if (self.selectedBadgeBox) {
+        self.selectedBadgeBox.frame = NSOffsetRect(self.selectedBadgeBox.frame, -(width + 6), 0);
+    }
+}
+- (void)handleCollapseControl:(id)sender {
+    if (self.onCollapse) { self.onCollapse(); }
+}
+@end
+
+
+
+CGFloat FYInlineLongCardLineHeight(CGFloat ascender, CGFloat descender, CGFloat leading) { return ceil(ascender - descender + leading) + 8; }
+CGFloat FYInlineLongCardMinimumHeight(CGFloat lineHeight) { return 18 * 2 + (24 + 13) + lineHeight * 3.0; }
+CGFloat FYInlineLongCardBodyViewport(CGFloat cardHeight) { return MAX(0, cardHeight - 18 * 2 - (24 + 13)); }
+
+NSSize FYInlineLongCardSize(NSSize proposed, BOOL compact) {
+    return NSMakeSize(compact ? MAX((CGFloat)60, proposed.width) : MAX((CGFloat)160, proposed.width),
+                      MAX(compact ? (CGFloat)28 : (CGFloat)34, proposed.height));
+}
+
 #pragma mark - 通用小工具
 
 static NSString *FYInlineTrim(NSString *value) {
     if (!value) { return @""; }
     return [value stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+}
+
+NSString *FYInlineNormalizeTranslationParagraphs(NSString *text) {
+    if (text.length == 0) { return @""; }
+    NSArray<NSString *> *lines = [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+    NSMutableArray<NSString *> *paragraphs = [NSMutableArray array];
+    NSMutableString *current = [NSMutableString string];
+    for (NSString *raw in lines) {
+        NSString *line = FYInlineTrim(raw);
+        if (line.length == 0) {
+            if (current.length > 0) { [paragraphs addObject:[current copy]]; [current setString:@""]; }
+            continue;
+        }
+        [current appendString:line];
+    }
+    if (current.length > 0) { [paragraphs addObject:[current copy]]; }
+    return [paragraphs componentsJoinedByString:@"\n\n"];
 }
 
 /// 比较用归一化：只去空白，**保留标点**（标点是证据，不能被抹掉）。
@@ -361,8 +637,35 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
 #pragma mark 分组
 
-- (FYInlineBlockKind)kindForLines:(NSArray<FYInlineTextLine *> *)lines normalized:(NSString *)normalizedText {
-    NSUInteger lineCount = lines.count;
+/// 行距是否接近"实排"：正文按列宽折行时，行与行之间只有很小的空隙；
+/// 菜单/按钮列表的行距通常接近甚至超过行高。用两者的比值判定，不写死像素或字号。
+- (BOOL)linesLookTightlyStacked:(NSArray<FYInlineTextLine *> *)lines {
+    if (lines.count < 3) { return NO; }
+    NSArray<FYInlineTextLine *> *sorted = [lines sortedArrayUsingComparator:^NSComparisonResult(FYInlineTextLine *left, FYInlineTextLine *right) {
+        CGFloat leftTop = CGRectGetMaxY(left.rect);
+        CGFloat rightTop = CGRectGetMaxY(right.rect);
+        if (fabs(leftTop - rightTop) > 1e-6) { return leftTop > rightTop ? NSOrderedAscending : NSOrderedDescending; }
+        return left.rect.origin.x < right.rect.origin.x ? NSOrderedAscending : NSOrderedDescending;
+    }];
+    CGFloat gapSum = 0, heightSum = 0;
+    NSUInteger pairs = 0;
+    for (NSUInteger index = 0; index + 1 < sorted.count; index++) {
+        CGRect upper = sorted[index].rect;
+        CGRect lower = sorted[index + 1].rect;
+        CGFloat gap = NSMinY(upper) - CGRectGetMaxY(lower);
+        if (gap < 0) { gap = 0; }
+        gapSum += gap;
+        heightSum += MIN(NSHeight(upper), NSHeight(lower));
+        pairs += 1;
+    }
+    if (pairs == 0) { return NO; }
+    CGFloat averageGap = gapSum / (CGFloat)pairs;
+    CGFloat averageHeight = heightSum / (CGFloat)pairs;
+    if (averageHeight <= 0.0001) { return NO; }
+    return averageGap <= averageHeight * 0.55;
+}
+
+- (FYInlineBlockKind)kindForLines:(NSArray<FYInlineTextLine *> *)lines normalized:(NSString *)normalizedText {    NSUInteger lineCount = lines.count;
     if (lineCount == 0) { return FYInlineBlockKindShort; }
     NSString *normalized = normalizedText ?: @"";
     CGFloat width = 0, height = 0;
@@ -379,12 +682,24 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         if (normalized.length >= 16) { return FYInlineBlockKindLong; }
         return FYInlineBlockKindShort;
     }
-    // 规则排列的短条目列表保持短贴片。
+    // 规则排列的短条目列表保持短贴片。但「每行 ≤14 字」**不等于**按钮列表：
+    // OCR 会按列宽把一段正文切成若干短行（现场：五行喜好正文每行 8~12 字、左对齐、
+    // 行距只有 0.45 倍行高、最大行宽 0.239 刚好低于 0.24），旧判据把它当按钮列表，
+    // 于是既没有长卡、也没有紧凑入口，整段正文从画面消失。
+    // 段落证据：行数够多 + 每行都是较长的片段 + 行距接近"实排"。
     BOOL buttonList = YES;
     for (FYInlineTextLine *line in lines) {
         if (FYInlineNormalize(line.text).length > 14) { buttonList = NO; break; }
     }
-    if (buttonList && !wide && !tall) { return FYInlineBlockKindShort; }
+    if (buttonList && !wide && !tall) {
+        NSUInteger totalLength = normalized.length;
+        CGFloat averageLength = lineCount > 0 ? (CGFloat)totalLength / (CGFloat)lineCount : 0;
+        if (lineCount >= 4 && totalLength >= 24 && averageLength >= 9 &&
+            [self linesLookTightlyStacked:lines]) {
+            return FYInlineBlockKindLong;
+        }
+        return FYInlineBlockKindShort;
+    }
 
     BOOL continuity = NO;
     for (NSUInteger index = 0; index + 1 < lines.count; index++) {
@@ -587,9 +902,17 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     engine.cardWideFraction = 0.62;
     engine.cardMaxHeight = 330;
     engine.cardHeightFraction = 0.55;
+    engine.minimumLongBodyFontSize = 15;
+    engine.minimumCardWidth = 160;
     engine.viewportMargin = 8;
     engine.panelGap = 4;
     engine.compactEntryHeight = 34;
+    engine.compactEntryTitle = @"点击展开";
+    engine.compactEntryFontSize = 13;
+    engine.compactEntryHorizontalPadding = 10;
+    engine.foldedEntryFallbackTitle = @"这段译文";
+    engine.foldedEntryHintTooLong = @"文本过长，已收起";
+    engine.foldedEntryHintCrowded = @"空间不足，已收起";
     engine.stabilityTolerance = 3;
     engine.shortWidthFraction = 0.42;
     engine.shortMaxWidth = 360;
@@ -650,6 +973,94 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 - (NSFont *)longTitleFont {
     return [self fontOfSize:self.longTitleFontSize weight:NSFontWeightSemibold];
 }
+- (NSFont *)compactEntryFont {
+    return [self fontOfSize:self.compactEntryFontSize weight:NSFontWeightSemibold];
+}
+- (NSFont *)foldedEntryHintFont {
+    return [self fontOfSize:MAX((CGFloat)11, self.compactEntryFontSize - 1) weight:NSFontWeightRegular];
+}
+
+/// 从块文本里取"短标题"：只有首行确实像标题（短、且不含句读、不是整段的第一句）才用。
+/// 取不到就返回 nil，让调用方用占位标题 —— 这里绝不调用 AI 生成标题。
++ (NSString *)shortTitleForBlockText:(NSString *)text {
+    NSString *trimmed = FYInlineTrim(text);
+    if (trimmed.length == 0) { return nil; }
+    NSArray<NSString *> *lines = [trimmed componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+    NSString *first = FYInlineTrim(lines.firstObject);
+    if (first.length == 0) { return nil; }
+    // 单行块：本身就是一句短标题/短标签。
+    if (lines.count == 1) {
+        return first.length <= 14 ? first : nil;
+    }
+    if (first.length > 12) { return nil; }
+    // 以句读/省略号结尾的首行是正文的第一句，不是标题。
+    NSCharacterSet *sentenceEnds = [NSCharacterSet characterSetWithCharactersInString:@"。、，．，,！？!?…‥・"];
+    unichar last = [first characterAtIndex:first.length - 1];
+    if ([sentenceEnds characterIsMember:last]) { return nil; }
+    return first;
+}
+
+/// 折叠入口的尺寸：标题 / 提示 / 动作三行按各自字体测量，取最宽的一行 + 内边距；
+/// 高度 = 三行文字高 + 行距 + 上下内边距。**与长卡宽度无关**。
+- (CGSize)foldedEntrySizeForViewport:(CGRect)viewport title:(NSString *)title hint:(NSString *)hint {
+    return [self foldedEntrySizeForViewport:viewport title:title hint:hint action:nil];
+}
+
+- (CGSize)foldedEntrySizeForViewport:(CGRect)viewport title:(NSString *)title hint:(NSString *)hint
+                              action:(NSString *)actionOverride {
+    NSString *entryTitle = (title != nil && title.length > 0) ? title : (self.foldedEntryFallbackTitle ?: @"这段译文");
+    // nil = 没指定（用默认文案）；空字符串 = 明确不要这一行（例如单行总入口）。
+    NSString *entryHint = (hint != nil) ? hint : (self.foldedEntryHintTooLong ?: @"文本过长，已收起");
+    // nil = 用默认动作文案；空串 = 明确没有动作行（单行总入口）。
+    NSString *action = (actionOverride != nil) ? actionOverride
+        : (self.compactEntryTitle.length > 0 ? self.compactEntryTitle : @"点击展开");
+    NSFont *titleFont = [self compactEntryFont];
+    NSFont *hintFont = [self foldedEntryHintFont];
+    CGFloat titleWidth = ceil(NSWidth([entryTitle boundingRectWithSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)
+                                                               options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                                            attributes:@{NSFontAttributeName: titleFont}]));
+    CGFloat hintWidth = entryHint.length > 0
+        ? ceil(NSWidth([entryHint boundingRectWithSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)
+                                              options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                           attributes:@{NSFontAttributeName: hintFont}]))
+        : 0;
+    // 动作行额外留出「＋向下箭头」的宽度。
+    CGFloat actionWidth = action.length > 0
+        ? ceil(NSWidth([action boundingRectWithSize:NSMakeSize(CGFLOAT_MAX, CGFLOAT_MAX)
+                                            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+                                         attributes:@{NSFontAttributeName: titleFont}])) + 18
+        : 0;
+    CGFloat contentWidth = MAX(titleWidth, MAX(hintWidth, actionWidth));
+    CGFloat padding = MAX((CGFloat)6, self.compactEntryHorizontalPadding);
+    CGFloat maxWidth = MAX((CGFloat)110, NSWidth(viewport) - self.viewportMargin * 2);
+    CGFloat width = FYInlineClamp(contentWidth + padding * 2 + 4, MIN((CGFloat)110, maxWidth), maxWidth);
+    CGFloat titleHeight = ceil(titleFont.ascender - titleFont.descender + titleFont.leading);
+    CGFloat hintHeight = ceil(hintFont.ascender - hintFont.descender + hintFont.leading);
+    // 空行（例如"还有 N 条译文 · 查看"这种单行总入口）不占高度、不占宽度。
+    CGFloat rows = titleHeight;
+    if (entryHint.length > 0) { rows += hintHeight + 2; }
+    if (action.length > 0) { rows += titleHeight + 3; }
+    CGFloat height = MAX(MAX((CGFloat)44, self.compactEntryHeight), rows + 14);
+    return CGSizeMake(width, height);
+}
+
+// 紧凑入口按**内容**测量：标题文字宽度 + 左右内边距，高度不低于 compactEntryHeight。
+// 以前它沿用长卡宽度（几百点的一条），结果这个本可以塞进正文里的小入口到处放不下，
+// 长正文整块从画面上消失 —— 尺寸必须由"要看的那行字"决定，而不是卡片有多宽。
+- (CGSize)compactEntrySizeForViewport:(CGRect)viewport {
+    // 与折叠入口同一份测量（默认标题/提示），避免两套尺寸口径。
+    return [self foldedEntrySizeForViewport:viewport title:nil hint:nil];
+}
+
+/// 折叠入口要有具体文案才知道该量多宽：块标题 + 收起原因。
+- (void)applyFoldedEntryCopyToPlacement:(FYInlinePlacement *)placement crowded:(BOOL)crowded {
+    NSString *title = [FYInlineLayoutEngine shortTitleForBlockText:placement.block.text];
+    placement.entryTitle = title.length > 0 ? title : (self.foldedEntryFallbackTitle ?: @"这段译文");
+    placement.entryHint = crowded ? (self.foldedEntryHintCrowded ?: @"空间不足，已收起")
+                                  : (self.foldedEntryHintTooLong ?: @"文本过长，已收起");
+    placement.entryAction = self.compactEntryTitle.length > 0 ? self.compactEntryTitle : @"点击展开";
+    placement.entryReasonCrowded = crowded;
+}
 
 - (CGFloat)measuredBodyHeight:(NSString *)translation placement:(FYInlinePlacement *)placement width:(CGFloat)width {
     CGFloat textWidth = MAX((CGFloat)80, width - placement.panelPadding * 2);
@@ -707,7 +1118,9 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     CGFloat textWidth = MAX((CGFloat)20, width - paddingX * 2 - 4);
     CGFloat textHeight = [self measuredHeightForText:placement.translation width:textWidth font:font style:style];
     CGFloat maximumHeight = MAX((CGFloat)40, NSHeight(viewport) - 16);
-    CGFloat height = MIN(MAX(textHeight + paddingY * 2 + 4, 28), maximumHeight);
+    // 最小高度改为贴合单行文字：字号 + 行距 + 内边距 × 2，避免单行文本边框过高
+    CGFloat minimumHeight = ceil(font.ascender - font.descender + font.leading) + paddingY * 2 + 4;
+    CGFloat height = MIN(MAX(textHeight + paddingY * 2 + 4, minimumHeight), maximumHeight);
     placement.measuredContentHeight = textHeight;
     placement.bodyViewportHeight = MAX(0, height - paddingY * 2);
     placement.scrollable = NO;
@@ -727,11 +1140,11 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
                   windowInner:(CGFloat)windowInner
                          cap:(CGFloat)cap
                     minHeight:(CGFloat)minimumHeight {
-    CGFloat padding = 18;
-    CGFloat titleBand = 24 + 13;
-    placement.panelPadding = padding;
-    placement.titleBandHeight = titleBand;
-    placement.cornerRadius = 12;
+    // 修饰（内边距/标题带/圆角）必须沿用调用方已经按**候选组合**设定好的值：
+    // 这里过去硬编码 18 / 37，把"紧凑修饰"这一维候选悄悄覆盖掉，
+    // 于是「减少标题与留白」的候选等于没试，只剩缩字号一条路（明明有空间也会判放不下）。
+    CGFloat padding = placement.panelPadding > 0 ? placement.panelPadding : 18;
+    CGFloat titleBand = placement.titleBandHeight >= 0 ? placement.titleBandHeight : (24 + 13);
 
     // 卡高 = 正文文档高 + 内边距 + 标题带。以前漏加了 chrome，导致中等长度的译文
     // 明明能一屏放下却被迫滚动、卡片高度也没真正贴合内容。
@@ -757,6 +1170,9 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     placement.scrollable = chosenContent > viewportHeight + 0.5;
     placement.bodyViewportFrame = NSMakeRect(padding, padding + titleBand, MAX((CGFloat)80, chosenWidth - padding * 2),
                                              viewportHeight);
+    // 诊断用：长卡本身的尺寸（紧凑入口做不出来时，现场日志要能看出卡有多大）。
+    placement.longCardSize = NSMakeSize(chosenWidth, height);
+    placement.compactEntrySize = CGSizeZero;
 }
 
 #pragma mark 候选生成
@@ -772,7 +1188,7 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     CGFloat maxX = NSMaxX(viewport) - self.viewportMargin;
     CGFloat width = widths.firstObject.doubleValue;
     CGFloat height = NSHeight(placement.translationFrame) > 0 ? NSHeight(placement.translationFrame) : self.compactEntryHeight;
-    if (compact) { height = self.compactEntryHeight; }
+    if (compact) { height = MAX(self.compactEntryHeight, height); }
 
     void (^add)(FYInlineAnchor, CGFloat, CGFloat, NSInteger, NSString *) = ^(FYInlineAnchor anchor, CGFloat x, CGFloat y, NSInteger rank, NSString *name) {
         FYInlineCandidate *candidate = [FYInlineCandidate new];
@@ -790,20 +1206,86 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     };
 
     CGFloat anchorX = FYInlineClamp(NSMinX(source), minX, MAX(minX, maxX - width));
-    // ① 原文下方近邻
-    add(FYInlineAnchorBelow, anchorX, CGRectGetMinY(source) - height - gap, 0, @"原文下方");
-    // ② 原文上方近邻
-    add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, 1, @"原文上方");
-    // ③ 原文右侧 / 左侧近邻
-    add(FYInlineAnchorRight, CGRectGetMaxX(source) + gap, CGRectGetMidY(source) - height / 2.0, 2, @"原文右侧");
-    add(FYInlineAnchorLeft, CGRectGetMinX(source) - gap - width, CGRectGetMidY(source) - height / 2.0, 3, @"原文左侧");
-    // ④ 只覆盖自身正文区域
-    add(FYInlineAnchorOverlay, anchorX, CGRectGetMidY(source) - height / 2.0, 4, @"覆盖原文自身");
+    if (compact) {
+        // 紧凑入口优先放在**它所属正文自身**的范围里：
+        // 覆盖自己的一小部分正文是允许的（原文块之间仍然互不遮挡），
+        // 这样标题、菜单、其它贴片再挤，这块正文也不会连入口都放不下。
+        CGFloat inset = MIN((CGFloat)4, MAX(0, (NSHeight(source) - height) / 2.0));
+        add(FYInlineAnchorOverlay, anchorX, NSMinY(source) + inset, 0, @"正文内·底部");
+        add(FYInlineAnchorOverlay, anchorX, NSMaxY(source) - height - inset, 1, @"正文内·顶部");
+        add(FYInlineAnchorOverlay, anchorX, CGRectGetMidY(source) - height / 2.0, 2, @"正文内·居中");
+    }
+
+    // 近邻位置：根据原文在 viewport 中的位置动态调整优先级。
+    // 原文靠近底部时优先上方，靠近顶部时优先下方，避免"明明有空位却显示空间不足"。
+    NSInteger rank = compact ? 3 : 0;
+    CGFloat sourceBottom = CGRectGetMinY(source);
+    CGFloat sourceTop = CGRectGetMaxY(source);
+    CGFloat viewportBottom = CGRectGetMinY(viewport);
+    CGFloat viewportTop = CGRectGetMaxY(viewport);
+    CGFloat viewportHeight = NSHeight(viewport);
+
+    // 计算原文中心点在 viewport 中的相对位置（0.0 = 底部，1.0 = 顶部）
+    CGFloat sourceMidY = CGRectGetMidY(source);
+    CGFloat relativePosition = viewportHeight > 0 ? (sourceMidY - viewportBottom) / viewportHeight : 0.5;
+
+    // 判定空间充足性：下方/上方是否有足够空间放置候选
+    CGFloat spaceBelow = sourceBottom - viewportBottom;
+    CGFloat spaceAbove = viewportTop - sourceTop;
+    CGFloat requiredSpace = height + gap + 8;  // 需要的最小空间（含间隙和余量）
+
+    BOOL hasSpaceBelow = spaceBelow >= requiredSpace;
+    BOOL hasSpaceAbove = spaceAbove >= requiredSpace;
+
+    // 动态排序：优先尝试空间充足的方向
+    if (!hasSpaceBelow && hasSpaceAbove) {
+        // 下方空间不足，上方空间充足 → 上方优先
+        add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, rank++, @"原文上方");
+        add(FYInlineAnchorBelow, anchorX, CGRectGetMinY(source) - height - gap, rank++, @"原文下方");
+    } else if (hasSpaceBelow && !hasSpaceAbove) {
+        // 上方空间不足，下方空间充足 → 下方优先
+        add(FYInlineAnchorBelow, anchorX, CGRectGetMinY(source) - height - gap, rank++, @"原文下方");
+        add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, rank++, @"原文上方");
+    } else if (relativePosition < 0.35) {
+        // 原文在底部 1/3 区域且两侧空间都不足 → 上方优先
+        add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, rank++, @"原文上方");
+        add(FYInlineAnchorBelow, anchorX, CGRectGetMinY(source) - height - gap, rank++, @"原文下方");
+    } else if (relativePosition > 0.65) {
+        // 原文在顶部 1/3 区域 → 下方优先
+        add(FYInlineAnchorBelow, anchorX, CGRectGetMinY(source) - height - gap, rank++, @"原文下方");
+        add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, rank++, @"原文上方");
+    } else {
+        // 原文在中间区域 → 保持原有下方优先策略
+        add(FYInlineAnchorBelow, anchorX, CGRectGetMinY(source) - height - gap, rank++, @"原文下方");
+        add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, rank++, @"原文上方");
+    }
+
+    add(FYInlineAnchorRight, CGRectGetMaxX(source) + gap, CGRectGetMidY(source) - height / 2.0, rank++, @"原文右侧");
+    add(FYInlineAnchorLeft, CGRectGetMinX(source) - gap - width, CGRectGetMidY(source) - height / 2.0, rank++, @"原文左侧");
+    add(FYInlineAnchorOverlay, anchorX, CGRectGetMidY(source) - height / 2.0, rank, @"覆盖原文自身");
 
     return candidates;
 }
 
 #pragma mark 候选合法性
+
+// 其它原文块与自己是**同一段文字**（归一化后完全相同）而且框高度重合时，
+// 它不该被当成"另一个文本块"来挡自己的候选 —— 那是同一处文字被识别两次造成的假冲突。
+// 刻意要求文字**完全相同**：像「一つ目の見出し」/「二つ目の見出し」这种只差一两个字的
+// 相邻条目是两块真文字，互相遮挡仍然非法（既有套件专门守这条）。
+static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherText,
+                                          CGRect selfRect, CGRect otherRect) {
+    NSString *left = FYInlineNormalize(selfText ?: @"");
+    NSString *right = FYInlineNormalize(otherText ?: @"");
+    if (left.length < 2 || ![left isEqualToString:right]) { return NO; }
+    CGFloat selfArea = NSWidth(selfRect) * NSHeight(selfRect);
+    CGFloat otherArea = NSWidth(otherRect) * NSHeight(otherRect);
+    CGFloat minArea = MIN(selfArea, otherArea);
+    if (minArea <= 1) { return NO; }
+    CGRect hit = CGRectIntersection(selfRect, otherRect);
+    if (CGRectIsNull(hit) || CGRectIsEmpty(hit)) { return NO; }
+    return (hit.size.width * hit.size.height) / minArea >= 0.6;
+}
 
 - (void)filterCandidates:(NSArray<FYInlineCandidate *> *)candidates
                 placement:(FYInlinePlacement *)placement
@@ -811,7 +1293,21 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
             otherSources:(NSArray<NSValue *> *)otherSources
            sourceIndices:(NSArray<NSNumber *> *)sourceIndices
               selfIndex:(NSUInteger)selfIndex
-                  report:(NSMutableArray<NSString *> *)report {
+               report:(NSMutableArray<NSString *> *)report {
+    [self filterCandidates:candidates placement:placement viewport:viewport
+              otherSources:otherSources sourceIndices:sourceIndices sourceTexts:nil
+                 selfIndex:selfIndex report:report];
+}
+
+- (void)filterCandidates:(NSArray<FYInlineCandidate *> *)candidates
+                placement:(FYInlinePlacement *)placement
+                 viewport:(CGRect)viewport
+            otherSources:(NSArray<NSValue *> *)otherSources
+           sourceIndices:(NSArray<NSNumber *> *)sourceIndices
+             sourceTexts:(NSArray<NSString *> *)sourceTexts
+                selfIndex:(NSUInteger)selfIndex
+                   report:(NSMutableArray<NSString *> *)report {
+    NSString *selfText = FYInlineNormalize(placement.block.text ?: @"");
     for (FYInlineCandidate *candidate in candidates) {
         if (!FYInlineRectContainsRect(viewport, candidate.frame)) {
             candidate.rejection = @"超出可见区域";
@@ -830,17 +1326,34 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         // 覆盖自身正文是允许的；压到**别的**块才不合法。这里只记下最大交叠厚度：
         // 是否真的非法由统一安排阶段结合「上一帧是否用同一个锚定方向」判定，
         // 这样 1~3px 的抖动不会让贴片在下方/上方之间来回跳。
+        // 放宽遮挡容忍度：≤10pt 的轻微交叠视为可接受（避免密集文本场景下"明明有空间却显示空间不足"）。
         for (NSUInteger index = 0; index < otherSources.count; index++) {
             if (index == selfIndex) { continue; }
             CGRect other = otherSources[index].rectValue;
             if (NSWidth(other) < 2 || NSHeight(other) < 2) { continue; }
             if (!CGRectIntersectsRect(candidate.frame, other)) { continue; }
+            NSString *otherText = index < sourceTexts.count ? sourceTexts[index] : nil;
+            if (FYInlineSourceLooksDuplicated(selfText, FYInlineNormalize(otherText ?: @""),
+                                              placement.sourceFrame, other)) {
+                // 记一条诊断，但不计为遮挡：重复框不该让这一块失去位置。
+                if (candidate.occlusionDepth <= 0) {
+                    candidate.rejection = [NSString stringWithFormat:@"与第 %@ 个原文块几乎重合（疑似重复识别，不计为遮挡）",
+                                           sourceIndices[index]];
+                }
+                continue;
+            }
             CGRect hit = CGRectIntersection(candidate.frame, other);
             CGFloat depth = (hit.size.width > 0 && hit.size.height > 0) ? MIN(hit.size.width, hit.size.height) : 0;
             if (depth > candidate.occlusionDepth) {
                 candidate.occlusionDepth = depth;
-                candidate.rejection = [NSString stringWithFormat:@"遮挡第 %@ 个原文块（%.0fpt）",
-                                       sourceIndices[index], depth];
+                // 轻微遮挡（≤10pt）标记为可接受，不影响候选的合法性判定
+                if (depth <= 10) {
+                    candidate.rejection = [NSString stringWithFormat:@"轻微遮挡第 %@ 个原文块（%ld×%ld，交叠 %.0fpt，可接受）",
+                                           sourceIndices[index], (long)lround(hit.size.width), (long)lround(hit.size.height), depth];
+                } else {
+                    candidate.rejection = [NSString stringWithFormat:@"遮挡第 %@ 个原文块（%ld×%ld，交叠 %.0fpt）",
+                                           sourceIndices[index], (long)lround(hit.size.width), (long)lround(hit.size.height), depth];
+                }
             }
         }
     }
@@ -925,9 +1438,53 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
 #pragma mark 主入口
 
+// 长卡候选组合要"先试正常排版、再逐档退让"：每一轮按当前候选算一遍完整布局，
+// 仍然是折叠/放不下的长块就把候选序号 +1 再算一遍（有限轮、只前进、不回退）。
+// 这样"固定规格卡片放不下"不会再被当成"译文放不下"，也不会无限缩字。
 - (FYInlineLayoutResult *)layoutRequests:(NSArray<FYInlineLayoutRequest *> *)requests
                                 viewport:(CGRect)viewport
                                 previous:(FYInlineLayoutResult *)previous {
+    NSMutableDictionary<NSString *, NSNumber *> *variantIndexes = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *attemptLog = [NSMutableDictionary dictionary];
+    FYInlineLayoutResult *result = nil;
+    NSUInteger maximumRounds = 12;
+    for (NSUInteger round = 0; round < maximumRounds; round++) {
+        result = [self layoutRequestsOnce:requests viewport:viewport previous:previous
+                           variantIndexes:variantIndexes attemptLog:attemptLog];
+        BOOL progressed = NO;
+        for (FYInlinePlacement *placement in result.placements) {
+            if (placement.block.kind != FYInlineBlockKindLong) { continue; }
+            BOOL degraded = placement.mode == FYInlineDisplayModeCompactEntry ||
+                            placement.mode == FYInlineDisplayModeUnplaceable;
+            if (!degraded) { continue; }
+            FYInlineLayoutRequest *request = nil;
+            for (FYInlineLayoutRequest *candidate in requests) {
+                if ([candidate.block.blockID isEqualToString:placement.block.blockID]) { request = candidate; break; }
+            }
+            if (!request) { continue; }
+            NSUInteger used = variantIndexes[placement.blockID].unsignedIntegerValue;
+            NSUInteger count = [self longCardVariantsForRequest:request viewport:viewport].count;
+            if (used + 1 < count) {
+                variantIndexes[placement.blockID] = @(used + 1);
+                progressed = YES;
+            }
+        }
+        if (!progressed) { break; }
+    }
+    // 把候选尝试记录写回结果（诊断：每个候选的宽/字号/卡尺寸/失败原因/冲突块）。
+    for (FYInlinePlacement *placement in result.placements) {
+        NSArray<NSString *> *lines = attemptLog[placement.blockID];
+        placement.variantDiagnostics = lines ?: @[];
+        self.lastVariantDiagnostics = [lines copy] ?: @[];
+    }
+    return result;
+}
+
+- (FYInlineLayoutResult *)layoutRequestsOnce:(NSArray<FYInlineLayoutRequest *> *)requests
+                                    viewport:(CGRect)viewport
+                                    previous:(FYInlineLayoutResult *)previous
+                              variantIndexes:(NSDictionary<NSString *, NSNumber *> *)variantIndexes
+                                  attemptLog:(NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *)attemptLog {
     FYInlineLayoutResult *result = [FYInlineLayoutResult new];
     if (NSWidth(viewport) < 2 || NSHeight(viewport) < 2 || requests.count == 0) {
         result.placements = @[];
@@ -938,9 +1495,11 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
     NSMutableArray<NSValue *> *sourceFrames = [NSMutableArray array];
     NSMutableArray<NSNumber *> *sourceIndices = [NSMutableArray array];
+    NSMutableArray<NSString *> *sourceTexts = [NSMutableArray array];
     for (NSUInteger index = 0; index < requests.count; index++) {
         [sourceFrames addObject:[NSValue valueWithRect:requests[index].sourceFrame]];
         [sourceIndices addObject:@(index + 1)];
+        [sourceTexts addObject:FYInlineNormalize(requests[index].block.text ?: @"")];
     }
 
     // ① 帧间身份稳定 + 单块测量 + 候选生成
@@ -974,7 +1533,20 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
         BOOL compact = NO;
         if (request.block.kind == FYInlineBlockKindLong) {
-            compact = [self prepareLongPlacementForRequest:request placement:placement viewport:viewport];
+            NSArray<NSDictionary *> *variants = [self longCardVariantsForRequest:request viewport:viewport];
+            NSUInteger variantIndex = variantIndexes[stableID].unsignedIntegerValue;
+            if (variantIndex > 0 && variantIndex < variants.count) { placement.chosenVariant = variantIndex; }
+            NSDictionary *variant = variants.count > 0 ? variants[MIN(placement.chosenVariant, variants.count - 1)] : nil;
+            compact = [self prepareLongPlacementForRequest:request placement:placement viewport:viewport variant:variant];
+            NSString *attempt = [NSString stringWithFormat:
+                @"候选#%lu 宽%.0f 字号%.0f 修饰=%@ 卡=%.0fx%.0f 正文高%.0f 滚动=%@",
+                (unsigned long)(placement.chosenVariant + 1), placement.longCardSize.width,
+                placement.chosenBodyFontSize, variant[@"chrome"] ?: @"-",
+                placement.longCardSize.width, placement.longCardSize.height,
+                placement.measuredContentHeight, placement.scrollable ? @"是" : @"否"];
+            NSMutableArray<NSString *> *lines = attemptLog[stableID];
+            if (!lines) { lines = [NSMutableArray array]; attemptLog[stableID] = lines; }
+            [lines addObject:[attempt stringByAppendingFormat:@" → %@", compact ? @"候选判定：画面放不下可读正文，改用折叠入口" : @"可排版，进入落位搜索"]];
         } else {
             [self prepareShortPlacement:placement sourceText:request.block.text viewport:viewport];
         }
@@ -1014,22 +1586,32 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
                                                                          widths:@[@(NSWidth(placement.translationFrame))]];
         [self filterCandidates:candidates placement:placement viewport:viewport
                   otherSources:sourceFrames sourceIndices:sourceIndices
-                     selfIndex:requestIndex report:report];
+                    sourceTexts:sourceTexts selfIndex:requestIndex report:report];
         placement.rejectedCandidates = report;
         [candidateLists addObject:candidates];
         [placements addObject:placement];
     }
 
-    // ② 统一安排：先处理候选最少（最受限）的块，再按阅读顺序；
+    // ② 统一安排：先处理"注定只能降级的长正文"，再按候选最少（最受限），最后按阅读顺序；
     //    合法优先，冲突的候选直接不可用 —— 不靠降低评分来允许跨栏或压扁。
     NSMutableArray<NSNumber *> *order = [NSMutableArray array];
     for (NSUInteger index = 0; index < placements.count; index++) { [order addObject:@(index)]; }
     [order sortUsingComparator:^NSComparisonResult(NSNumber *left, NSNumber *right) {
+        NSUInteger leftIndex = left.unsignedIntegerValue, rightIndex = right.unsignedIntegerValue;
         NSUInteger leftLegal = 0, rightLegal = 0;
-        for (FYInlineCandidate *candidate in candidateLists[left.unsignedIntegerValue]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 0.5) { leftLegal++; } }
-        for (FYInlineCandidate *candidate in candidateLists[right.unsignedIntegerValue]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 0.5) { rightLegal++; } }
+        // 放宽遮挡容忍度：≤10pt 的轻微交叠视为合法候选
+        for (FYInlineCandidate *candidate in candidateLists[leftIndex]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 10) { leftLegal++; } }
+        for (FYInlineCandidate *candidate in candidateLists[rightIndex]) { if (!candidate.hardRejection && candidate.occlusionDepth <= 10) { rightLegal++; } }
+        // 长正文一个合法长卡候选都没有 = 只能靠紧凑入口。它必须排在可调整的短贴片之前，
+        // 否则小贴片会先把它附近（以及它自己那一片）的空地占满，入口再也放不下，
+        // 整段正文就从画面上消失 —— 短贴片至少还有"覆盖自身/左右"这些可选项。
+        FYInlinePlacement *leftPlacement = placements[leftIndex];
+        FYInlinePlacement *rightPlacement = placements[rightIndex];
+        BOOL leftAtRisk = leftPlacement.block.kind == FYInlineBlockKindLong && leftLegal == 0;
+        BOOL rightAtRisk = rightPlacement.block.kind == FYInlineBlockKindLong && rightLegal == 0;
+        if (leftAtRisk != rightAtRisk) { return leftAtRisk ? NSOrderedAscending : NSOrderedDescending; }
         if (leftLegal != rightLegal) { return leftLegal < rightLegal ? NSOrderedAscending : NSOrderedDescending; }
-        return left.unsignedIntegerValue < right.unsignedIntegerValue ? NSOrderedAscending : NSOrderedDescending;
+        return leftIndex < rightIndex ? NSOrderedAscending : NSOrderedDescending;
     }];
 
     NSMutableArray<NSValue *> *placedFrames = [NSMutableArray array];
@@ -1055,12 +1637,14 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
             if (loopCandidate.hardRejection) { continue; }
             FYInlineCandidate *candidate = loopCandidate;
             FYInlineCandidate *usable = candidate;
-            if (candidate.occlusionDepth > 0) {
+            if (candidate.occlusionDepth > 10) {
+                // 遮挡超过 10pt：尝试微移消解
                 usable = [self candidate:candidate resolvingSliverWithin:self.stabilityTolerance
                                 viewport:viewport placement:placement
                             otherSources:sourceFrames placedFrames:placedFrames];
                 if (!usable) { continue; }
             }
+            // 遮挡 ≤10pt：直接接受，视为轻微遮挡可接受
             BOOL conflict = NO;
             for (NSValue *value in placedFrames) {
                 CGRect hit = CGRectIntersection(value.rectValue, usable.frame);
@@ -1082,12 +1666,31 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         }
 
         if (!chosen) {
-            // ③ 明确降级：长卡先给紧凑入口，再不行标记“暂不可放置”，绝不强盖别的条目。
-            if (placement.block.kind == FYInlineBlockKindLong) {
+            // ③ 明确降级：先给紧凑入口，再不行标记“暂不可放置”，绝不强盖别的条目。
+            // 多行块（含被分类判成"短"的段落）同样要走到这里：现场五行喜好正文就是被
+            // 当成短块、又没有入口，整段从画面消失的。
+            NSUInteger blockLineCount = MAX(placement.block.lineCount, (NSInteger)placement.block.lineBoxes.count);
+            BOOL canDegradeToEntry = placement.block.kind == FYInlineBlockKindLong ||
+                                     blockLineCount >= 3;
+            if (canDegradeToEntry) {
                 NSMutableArray<NSString *> *compactReport = [placement.rejectedCandidates mutableCopy] ?: [NSMutableArray array];
+                // 紧凑入口必须先按内容量好尺寸，再找位置：沿用长卡宽度会让这个本可以很小
+                // 的入口到处放不下，于是整段正文从画面上消失。
+                // 收起原因按**实际原因**给：译文本身超出可读高度（要滚动/顶到高度上限）才算"文本过长"；
+                // 卡片尺寸其实放得下、只是四周被别的原文块或贴译占满，那是"空间不足"。
+                CGFloat cardHeightCap = MIN(self.cardMaxHeight, NSHeight(viewport) * self.cardHeightFraction);
+                BOOL textTooLong = placement.scrollable ||
+                                   NSHeight(placement.translationFrame) >= cardHeightCap - 0.5;
+                [self applyFoldedEntryCopyToPlacement:placement crowded:!textTooLong];
+                CGSize compactSize = [self foldedEntrySizeForViewport:viewport
+                                                                title:placement.entryTitle
+                                                                 hint:placement.entryHint];
+                placement.compactEntrySize = compactSize;
+                placement.compactEntry = YES;
+                placement.translationFrame = NSMakeRect(0, 0, compactSize.width, compactSize.height);
                 FYInlineCandidate *compact = [self bestCompactCandidateForPlacement:placement viewport:viewport
                                                                       placedFrames:placedFrames sourceFrames:sourceFrames
-                                                                     sourceIndices:sourceIndices
+                                                                     sourceIndices:sourceIndices sourceTexts:sourceTexts
                                                                          selfIndex:index report:compactReport];
                 placement.rejectedCandidates = compactReport;
                 if (compact) {
@@ -1095,10 +1698,20 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
                     placement.anchor = FYInlineAnchorCompactEntry;
                     placement.compactEntry = YES;
                     placement.translationFrame = compact.frame;
-                    placement.reason = @"没有合法的长卡位置：改为「查看译文」紧凑入口，点击展开完整阅读卡";
+                    placement.reason = [NSString stringWithFormat:
+                        @"没有合法的贴译位置：改为折叠入口紧凑入口（%.0f×%.0f，按内容测量）：%@",
+                        NSWidth(compact.frame), NSHeight(compact.frame), placement.entryHint ?: @""];
+                    [self appendVariantOutcomeForPlacement:placement
+                                                    attempt:attemptLog
+                                                     reason:[NSString stringWithFormat:@"折叠（%@）",
+                                                             placement.entryReasonCrowded ? @"可用空间不足/重复块占位" : @"文字太长"]
+                                                     rejected:placement.rejectedCandidates];
                 } else {
                     placement.mode = FYInlineDisplayModeUnplaceable;
-                    placement.reason = @"所有候选都会遮挡其它原文块或互相冲突：本块暂不可放置（译文仍在主界面列出）";
+                    placement.reason = [NSString stringWithFormat:
+                        @"所有候选都会遮挡其它原文块或互相冲突：长卡 %.0f×%.0f、紧凑入口 %.0f×%.0f 都放不下（译文仍在主界面列出）",
+                        placement.longCardSize.width, placement.longCardSize.height,
+                        placement.compactEntrySize.width, placement.compactEntrySize.height];
                     placement.translationFrame = NSZeroRect;
                 }
             } else {
@@ -1141,27 +1754,96 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     return result;
 }
 
+/// 把这一轮候选的失败原因（含冲突块）补进诊断记录。
+- (void)appendVariantOutcomeForPlacement:(FYInlinePlacement *)placement
+                                 attempt:(NSMutableDictionary<NSString *, NSMutableArray<NSString *> *> *)attemptLog
+                                  reason:(NSString *)reason
+                                rejected:(NSArray<NSString *> *)rejected {
+    if (!placement.blockID) { return; }
+    NSMutableArray<NSString *> *lines = attemptLog[placement.blockID];
+    if (!lines) { lines = [NSMutableArray array]; attemptLog[placement.blockID] = lines; }
+    NSString *conflict = @"无";
+    for (NSString *line in rejected) {
+        if ([line containsString:@"遮挡"] || [line containsString:@"超出"] || [line containsString:@"冲突"]) {
+            conflict = line;
+            break;
+        }
+    }
+    [lines addObject:[NSString stringWithFormat:@"    ↳ %@；首个冲突：%@", reason, conflict]];
+}
+
+/// 长卡的有限候选组合：宽度 × 修饰（内边距/标题带）× 字号。
+/// 顺序按优先级：贴合原文宽度 → 减少标题与留白 → 逐档缩字（不低于 minimumLongBodyFontSize）。
+/// 有可读正文空间而全文较长时允许卡内滚动，不因此折叠。
+- (NSArray<NSDictionary *> *)longCardVariantsForRequest:(FYInlineLayoutRequest *)request viewport:(CGRect)viewport {
+    NSMutableArray<NSDictionary *> *variants = [NSMutableArray array];
+    NSArray<NSNumber *> *widths = [self cardWidthCandidatesForSource:request.sourceFrame viewport:viewport];
+    NSMutableArray<NSNumber *> *fontSizes = [NSMutableArray array];
+    CGFloat floorSize = MAX((CGFloat)10, self.minimumLongBodyFontSize);
+    for (CGFloat size = self.longBodyFontSize; size >= floorSize - 0.01; size -= 2) {
+        [fontSizes addObject:@(size)];
+    }
+    if (fontSizes.count == 0) { [fontSizes addObject:@(self.longBodyFontSize)]; }
+    for (NSNumber *widthValue in widths) {
+        // 每个宽度先试"完整修饰 + 原字号"，修饰压缩优先于缩字。
+        [variants addObject:@{@"width": widthValue, @"padding": @18, @"titleBand": @(24 + 13),
+                              @"fontSize": fontSizes.firstObject, @"chrome": @"完整"}];
+        for (NSNumber *fontSize in fontSizes) {
+            [variants addObject:@{@"width": widthValue, @"padding": @12, @"titleBand": @0,
+                                  @"fontSize": fontSize, @"chrome": @"紧凑"}];
+        }
+    }
+    return variants;
+}
+
+- (void)applyLongCardVariant:(NSDictionary *)variant toPlacement:(FYInlinePlacement *)placement {
+    CGFloat padding = [variant[@"padding"] doubleValue];
+    CGFloat titleBand = [variant[@"titleBand"] doubleValue];
+    CGFloat fontSize = [variant[@"fontSize"] doubleValue];
+    placement.panelPadding = padding;
+    placement.titleBandHeight = titleBand;
+    placement.cornerRadius = titleBand > 0 ? 12 : 10;
+    placement.font = [self fontOfSize:fontSize weight:NSFontWeightRegular];
+    placement.paragraphStyle = [self paragraphStyleWithLineSpacing:self.longLineSpacing];
+    placement.chosenBodyFontSize = fontSize;
+}
+
 /// 长卡的宽度与高度测量。返回 YES 表示这一块只能给紧凑入口
 /// （画面连可读的三行正文都放不下）。
 - (BOOL)prepareLongPlacementForRequest:(FYInlineLayoutRequest *)request
                              placement:(FYInlinePlacement *)placement
                               viewport:(CGRect)viewport {
-    NSFont *font = [self fontOfSize:self.longBodyFontSize weight:NSFontWeightRegular];
-    placement.font = font;
-    placement.paragraphStyle = [self paragraphStyleWithLineSpacing:self.longLineSpacing];
-    // 先落定内边距与标题带：下面的宽度候选测量必须用和最终绘制完全相同的正文宽度，
-    // 否则“要不要换更宽候选”会按错误的文字宽度判断。
-    placement.panelPadding = 18;
-    placement.titleBandHeight = 24 + 13;
-    placement.cornerRadius = 12;
+    return [self prepareLongPlacementForRequest:request placement:placement viewport:viewport variant:nil];
+}
+
+- (BOOL)prepareLongPlacementForRequest:(FYInlineLayoutRequest *)request
+                             placement:(FYInlinePlacement *)placement
+                              viewport:(CGRect)viewport
+                               variant:(NSDictionary *)variant {
+    if (variant) {
+        [self applyLongCardVariant:variant toPlacement:placement];
+    } else {
+        NSFont *font = [self fontOfSize:self.longBodyFontSize weight:NSFontWeightRegular];
+        placement.font = font;
+        placement.paragraphStyle = [self paragraphStyleWithLineSpacing:self.longLineSpacing];
+        placement.panelPadding = 18;
+        placement.titleBandHeight = 24 + 13;
+        placement.cornerRadius = 12;
+        placement.chosenBodyFontSize = self.longBodyFontSize;
+    }
 
     CGFloat minimumHeight = [self minimumCardHeight];
     CGFloat windowInner = NSHeight(viewport) - 24;
     if (windowInner < minimumHeight) {
         // 连三行正文都放不下：给明确的紧凑入口，不生成细条、不静默丢弃。
-        CGFloat available = MAX((CGFloat)60, NSWidth(viewport) - self.viewportMargin * 2);
-        CGFloat width = MIN(MAX((CGFloat)180, NSWidth(request.sourceFrame)), available);
-        placement.translationFrame = NSMakeRect(0, 0, width, self.compactEntryHeight);
+        // 尺寸按「查看译文」这行字测量（与绘制共用 compactEntryTitle / compactEntryFont），
+        // 不再继承长卡宽度 —— 否则这个入口本身就经常放不下。
+        // 连三行可读正文都放不下：这是**空间**不足，不是文本过长。
+        [self applyFoldedEntryCopyToPlacement:placement crowded:YES];
+        CGSize compactSize = [self foldedEntrySizeForViewport:viewport title:placement.entryTitle hint:placement.entryHint];
+        placement.compactEntrySize = compactSize;
+        placement.longCardSize = CGSizeZero;
+        placement.translationFrame = NSMakeRect(0, 0, compactSize.width, compactSize.height);
         placement.mode = FYInlineDisplayModeCompactEntry;
         placement.compactEntry = YES;
         placement.scrollable = NO;
@@ -1171,11 +1853,17 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         placement.reason = @"画面放不下可读的三行正文：使用紧凑入口";
         return YES;
     }
-    NSArray<NSNumber *> *widths = [self cardWidthCandidatesForSource:request.sourceFrame viewport:viewport];
+    NSArray<NSNumber *> *widths = nil;
+    if (variant[@"width"]) {
+        widths = @[variant[@"width"]];
+    } else {
+        widths = [self cardWidthCandidatesForSource:request.sourceFrame viewport:viewport];
+    }
     CGFloat cap = MIN(self.cardMaxHeight, NSHeight(viewport) * self.cardHeightFraction);
     // 基准宽度放不下完整译文时，允许再试一个更宽的有限候选（减少不必要的滚动），
     // 但绝不靠缩小字号去塞。
-    if ([self measuredBodyHeight:placement.translation placement:placement width:widths.firstObject.doubleValue] > cap) {
+    if (!variant[@"width"] &&
+        [self measuredBodyHeight:placement.translation placement:placement width:widths.firstObject.doubleValue] > cap) {
         widths = [self cardWidthCandidatesForSource:request.sourceFrame viewport:viewport wide:YES];
     }
     [self prepareLongPlacement:placement widthCandidates:widths windowInner:windowInner cap:cap
@@ -1184,12 +1872,27 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 }
 
 - (NSArray<NSNumber *> *)cardWidthCandidatesForSource:(CGRect)sourceFrame viewport:(CGRect)viewport wide:(BOOL)wide {
-    CGFloat available = MAX((CGFloat)200, NSWidth(viewport) - 24);
-    CGFloat desired = MAX(NSWidth(sourceFrame), 300);
+    // 过去这里只有一个宽度、并且把下限抬到 300/260 —— "固定规格卡片放不下"于是被当成
+    // "译文放不下"，明明原文区域只有 244pt 宽也生成 300pt 的卡，最后判定空间不足去折叠。
+    // 现在按原文区域给出**有限、可解释**的宽度候选：贴合原文 → 略宽 → 更宽，
+    // 一律不得超过可用宽度，也不低于可读下限。
+    CGFloat available = MIN(MAX((CGFloat)200, NSWidth(viewport) - 24), self.cardMaxWidth);
     CGFloat fraction = wide ? self.cardWideFraction : self.cardWidthFraction;
-    CGFloat base = MIN(desired, MIN(self.cardMaxWidth, MIN(available, NSWidth(viewport) * fraction)));
-    base = MAX(base, MIN((CGFloat)260, available));
-    return @[@(base)];
+    CGFloat widest = MIN(available, NSWidth(viewport) * fraction);
+    // 贴合原文区域：直接用原文宽度（只做 0.5pt 收敛），宽原文的行为与过去完全一致，
+    // 窄原文不再被硬抬到 300pt。稳定策略不靠"量化宽度"，靠候选序号只前进不回退。
+    CGFloat sourceWidth = round(NSWidth(sourceFrame) * 2.0) / 2.0;
+    NSMutableArray<NSNumber *> *widths = [NSMutableArray array];
+    void (^addWidth)(CGFloat) = ^(CGFloat width) {
+        CGFloat clamped = FYInlineClamp(width, self.minimumCardWidth, MAX(self.minimumCardWidth, MIN(widest, available)));
+        clamped = round(clamped);
+        for (NSNumber *existing in widths) { if (fabs(existing.doubleValue - clamped) < 1.0) { return; } }
+        [widths addObject:@(clamped)];
+    };
+    addWidth(sourceWidth);                                  // ① 贴合原文区域
+    addWidth(MAX(sourceWidth * 1.25, sourceWidth + 24));    // ② 略宽一档（减少滚动）
+    addWidth(MAX(sourceWidth * 1.6, 320));                  // ③ 旧版基准宽度，只在前两档都放不下时用
+    return widths;
 }
 
 - (NSArray<NSNumber *> *)cardWidthCandidatesForSource:(CGRect)sourceFrame viewport:(CGRect)viewport {
@@ -1201,21 +1904,36 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
                                            placedFrames:(NSArray<NSValue *> *)placedFrames
                                            sourceFrames:(NSArray<NSValue *> *)sourceFrames
                                           sourceIndices:(NSArray<NSNumber *> *)sourceIndices
+                                            sourceTexts:(NSArray<NSString *> *)sourceTexts
                                               selfIndex:(NSUInteger)selfIndex
                                                  report:(NSMutableArray<NSString *> *)report {
+    // 入口尺寸在调用前已经按内容量好（placement.translationFrame），这里只做候选与合法性。
     NSArray<FYInlineCandidate *> *candidates = [self candidatesForPlacement:placement viewport:viewport compactEntry:YES
                                                                        widths:@[@(NSWidth(placement.translationFrame))]];
     [self filterCandidates:candidates placement:placement viewport:viewport otherSources:sourceFrames
-             sourceIndices:sourceIndices selfIndex:selfIndex report:report];
+             sourceIndices:sourceIndices sourceTexts:sourceTexts selfIndex:selfIndex report:report];
     FYInlineCandidate *best = nil;
     for (FYInlineCandidate *candidate in candidates) {
-        if (candidate.hardRejection || candidate.occlusionDepth > 0) { continue; }
+        if (candidate.hardRejection) { continue; }
+        FYInlineCandidate *usable = candidate;
+        if (candidate.occlusionDepth > 0) {
+            // 与主路径同一套细缝消解：只允许 1~容差 点的抖动缝，靠微移消掉而不是接受遮挡。
+            usable = [self candidate:candidate resolvingSliverWithin:self.stabilityTolerance
+                            viewport:viewport placement:placement
+                        otherSources:sourceFrames placedFrames:placedFrames];
+            if (!usable) { continue; }
+        }
         BOOL conflict = NO;
         for (NSValue *value in placedFrames) {
-            if (CGRectIntersectsRect(value.rectValue, candidate.frame)) { conflict = YES; break; }
+            CGRect hit = CGRectIntersection(value.rectValue, usable.frame);
+            if (CGRectIsNull(hit) || CGRectIsEmpty(hit) || MIN(hit.size.width, hit.size.height) <= 0) { continue; }
+            conflict = YES;
+            [report addObject:[NSString stringWithFormat:@"%@：与已放置的译文面板冲突（%@）",
+                               candidate.name, NSStringFromRect(value.rectValue)]];
+            break;
         }
         if (conflict) { continue; }
-        if (!best || candidate.anchorRank < best.anchorRank) { best = candidate; }
+        if (!best || candidate.anchorRank < best.anchorRank) { best = usable; }
     }
     return best;
 }

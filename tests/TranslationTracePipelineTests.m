@@ -66,6 +66,12 @@ static void (^PendingResponse)(void);
 @end
 @implementation TracePipelineApp
 - (uint32_t)selectedWindowID { return self.fixtureWindowID; }
+// This fixture has one capture/display target; keep both APIs on the same fake ID.
+- (uint32_t)displayTargetWindowID { return self.fixtureWindowID; }
+- (void)refreshDisplayGeometryIfNeeded:(BOOL)force {}
+- (BOOL)inlinePlacementRect:(NSRect *)rect reason:(NSString **)reason { if (rect) { *rect = NSMakeRect(0, 0, 800, 600); } return YES; }
+- (NSArray *)diagnosticWindowInfos { return @[]; }
+- (BOOL)diagnosticQuickTimeRunning { return NO; }
 - (WindowItem *)selectedWindowItem { return nil; }
 - (BOOL)autoContentModeEnabled { return NO; }
 - (NSInteger)effectiveModeSegment { return self.fixtureMode; }
@@ -81,6 +87,7 @@ static void (^PendingResponse)(void);
 - (void)updateTranslationCount {}
 - (void)updateCaptionWindowWithText:(NSString *)text status:(NSString *)status { [self.captions addObject:text]; }
 - (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items { self.inlineApplies++; }
+- (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items placementRect:(NSRect)rect { self.inlineApplies++; }
 - (NSArray *)filteredInlineTextItems:(NSArray *)items strict:(BOOL)strict { return items; }
 - (NSArray *)mergedInlineTextItemsFromItems:(NSArray *)items { return items; }
 - (NSString *)recognizeTextBlocksInImage:(CGImageRef)i fastOCR:(BOOL)f languageSegment:(NSInteger)l blocks:(NSArray<OCRTextItem *> **)blocks error:(NSError **)e {
@@ -139,7 +146,7 @@ static NSUInteger Count(NSArray *records, NSString *event) {
 }
 int main(void) { @autoreleasepool {
     unsetenv("FUYI_DIAG");
-    Require(![NSFileManager.defaultManager fileExistsAtPath:@"/tmp/fuyi-diag-armed"], @"legacy screenshot diagnostics must be off before tests");
+    Require(!FuyiDiagEnabled(), @"isolated tests ignore live legacy screenshot switches");
     NSString *root = [FYTestTemporaryDirectory() stringByAppendingPathComponent:@"trace"];
     [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:NULL];
     TestTrace = [[FYTranslationTrace alloc] initWithDirectory:root clock:^{ return NSDate.date.timeIntervalSince1970; } maxBytes:1024 * 1024];
@@ -195,6 +202,10 @@ int main(void) { @autoreleasepool {
     Require(Count(Records(log), @"inline_apply") == 1, @"UI transition route can correlate inline application");
     NSString *text = [NSString stringWithContentsOfFile:log encoding:NSUTF8StringEncoding error:NULL];
     Require(![text containsString:@"TRACE_CREDENTIAL_SENTINEL"] && ![text containsString:@"TRACE_PRIVATE_PROMPT_SENTINEL"] && ![text containsString:@"Authorization"] && ![text containsString:@"example.invalid"], @"actual logging call sites exclude credential/prompt/header/URL");
+    NSDictionary *runtime = [FYRuntimeDiagnostics.shared reportForSnapshot:@{}];
+    NSString *metadata = [[NSString alloc] initWithData:[NSJSONSerialization dataWithJSONObject:runtime options:0 error:NULL] encoding:NSUTF8StringEncoding];
+    Require(![metadata containsString:@"TRACE_CREDENTIAL"] && ![metadata containsString:@"TRACE_PRIVATE"] && ![metadata containsString:@"明日は"] && ![metadata containsString:@"example.invalid"], @"runtime metadata call sites never retain credentials, prompts, dialogue or endpoint");
+    Require(Count(runtime[@"events"], @"ocr") > 0 && Count(runtime[@"events"], @"http") > 0 && Count(runtime[@"events"], @"caption") > 0, @"runtime history includes real OCR, request and caption metadata");
     NSUInteger bytes = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
     [NSFileManager.defaultManager removeItemAtPath:[root stringByAppendingPathComponent:@"control.json"] error:NULL];
     TraceCycle(on, partial); TraceCycle(on, partial);

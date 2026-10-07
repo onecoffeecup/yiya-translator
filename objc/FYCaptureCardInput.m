@@ -1,5 +1,25 @@
 #import "FYCaptureCardInput.h"
 
+FYCapturePermissionAction FYCapturePermissionActionForAvailability(FYCaptureCardAvailability availability) {
+    if (availability==FYCaptureCardAvailabilityAuthorized) return FYCapturePermissionActionContinue;
+    if (availability==FYCaptureCardAvailabilityNotDetermined) return FYCapturePermissionActionRequest;
+    return FYCapturePermissionActionReject;
+}
+
+BOOL FYCaptureFrameNeedsRecognition(uint64_t latestIndex, uint64_t lastRecognizedIndex) {
+    return latestIndex != 0 && latestIndex != lastRecognizedIndex;
+}
+
+NSString *FYCaptureCardStatusText(FYCaptureCardSessionState state, FYCaptureCardAvailability availability,
+    NSString *deviceName, uint64_t receivedFrames, uint64_t skippedFrames, NSString *detail) {
+    NSMutableString *text=[NSMutableString string];
+    [text appendFormat:@"识别输入源：采集卡 · %@ · 相机权限：%@",FYCaptureCardSessionStateLabel(state),FYCaptureCardAvailabilityLabel(availability)];
+    if (deviceName.length>0) [text appendFormat:@" · 设备：%@",deviceName];
+    if (state==FYCaptureCardSessionStateRunning) [text appendFormat:@" · 已收帧 %llu（丢弃旧帧 %llu）",(unsigned long long)receivedFrames,(unsigned long long)skippedFrames];
+    if (detail.length>0) [text appendFormat:@"\n%@",detail];
+    return text;
+}
+
 #import <AVFoundation/AVFoundation.h>
 #import <CoreImage/CoreImage.h>
 #import <CoreMedia/CoreMedia.h>

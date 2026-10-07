@@ -19,7 +19,83 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <AppKit/AppKit.h>
 
+// 短贴片视图负责拖动事件与反馈（边框加粗），不设置窗口的鼠标穿透策略。
+// 窗口 ignoresMouseEvents 由主协调器控制：默认 YES，Option 按下时切为可交互；
+// 协调器同步 dragEnabled / showsDragHint，本视图在允许时处理拖动。
+@interface FYInlinePatchView : NSView
+@property(nonatomic, copy) void (^ _Nullable onDragBegan)(void);
+@property(nonatomic, copy) void (^ _Nullable onDragEnded)(void);
+@property(nonatomic) BOOL dragEnabled;
+@property(nonatomic) BOOL showsDragHint;
+@property(nonatomic) BOOL windowDragEnabled;
+@property(nonatomic, strong, nullable) NSColor *dragHintColor;
+@property(nonatomic, strong, nullable) NSColor *normalBorderColor;
+@end
+
+// 长译文卡：标题栏可拖动整卡；正文区域用于滚动与点击打开学习。
+// 拖动与点击必须分开：标题栏按下即进入窗口拖动；正文按下后位移超过阈值就不再算点击。
+@interface FYInlineLongCardView : NSView
+@property(nonatomic, copy) void (^ _Nullable onClick)(void);
+@property(nonatomic, copy) void (^ _Nullable onHover)(BOOL inside);
+/// 拖动开始/结束：开始用于占住拖动状态（避免 Option 松开把面板变回穿透），结束用于记录新偏移。
+@property(nonatomic, copy) void (^ _Nullable onDragBegan)(void);
+@property(nonatomic, copy) void (^ _Nullable onDragEnded)(void);
+// 当前是否展示了「已选中」标识（用于判断就地更新时要不要重建内容）。
+@property(nonatomic) BOOL showsSelectedBadge;
+// 紧凑入口（空间放不下可读正文时）：点击展开完整阅读卡，而不是生成细条。
+@property(nonatomic) BOOL compactEntry;
+// 标题栏高度（flipped 坐标，y < 该值算标题栏）；默认 55。
+@property(nonatomic) CGFloat titleBarHeight;
+// 布局器给出的稳定块身份（点击/选中/学习快照都用它）。
+@property(nonatomic, copy, nullable) NSString *stableBlockID;
+// 展开的完整阅读卡：标题栏右侧显示可见的「收起」按钮（Esc 之外的入口）。
+@property(nonatomic, copy) void (^ _Nullable onCollapse)(void);
+@property(nonatomic, readonly) BOOL showsCollapseControl;
+@property(nonatomic, nullable, weak, readonly) NSButton *collapseButton;
+// 「已选中」标识视图：收起按钮出现时要往左让位（NSView.tag 是只读的，不能用它标记）。
+@property(nonatomic, nullable, weak) NSView *selectedBadgeBox;
+// 折叠入口的三行（测试与可读性断言直接读它们，确保提示真的画在卡上而不是只在 tooltip 里）。
+@property(nonatomic, nullable, weak) NSTextField *foldedEntryHintLabel;
+@property(nonatomic, nullable, weak) NSTextField *foldedEntryActionLabel;
+// 展开卡底部提示（其他贴译已暂时隐藏 / Esc 收起）。
+@property(nonatomic, nullable, weak) NSTextField *expandedFooterLabel;
+- (void)installCollapseControl;
+// 测试/无窗口环境下关闭真实窗口拖动，只走判定逻辑。
+@property(nonatomic) BOOL windowDragEnabled;
+@property(nonatomic) NSPoint pressPoint;
+@property(nonatomic) BOOL pressMovedBeyondThreshold;
+// 「收起」按钮按下中（卡片自己跟踪，见 pointIsInCollapseControl:）。
+@property(nonatomic) BOOL collapsePressed;
+- (BOOL)pointIsInCollapseControl:(NSPoint)localPoint;
+- (BOOL)pointIsInTitleBar:(NSPoint)localPoint;
+@end
+
 NS_ASSUME_NONNULL_BEGIN
+
+// Presentation text policy: join wrapped lines, preserve blank-line paragraphs.
+FOUNDATION_EXPORT NSString *FYInlineNormalizeTranslationParagraphs(NSString * _Nullable text);
+FOUNDATION_EXPORT CGFloat FYInlineLongCardLineHeight(CGFloat ascender, CGFloat descender, CGFloat leading);
+FOUNDATION_EXPORT CGFloat FYInlineLongCardMinimumHeight(CGFloat lineHeight);
+FOUNDATION_EXPORT CGFloat FYInlineLongCardBodyViewport(CGFloat cardHeight);
+FOUNDATION_EXPORT NSSize FYInlineLongCardSize(NSSize proposed, BOOL compact);
+FOUNDATION_EXPORT void FYApplyInlineLongCardBody(NSString * _Nullable translation, NSTextField *label,
+    CGFloat cardWidth, CGFloat padding, NSFont *font, NSParagraphStyle *style, NSColor *textColor);
+
+FOUNDATION_EXPORT NSScrollView *FYCreateInlineLongCardBodyScroll(NSString * _Nullable translation,
+    NSRect viewport, CGFloat cardWidth, CGFloat padding, NSFont *font, NSParagraphStyle *style, NSColor *textColor);
+
+FOUNDATION_EXPORT void FYInstallInlineFoldedEntry(FYInlineLongCardView *card, CGFloat cardWidth, CGFloat padding,
+    NSString *title, NSString *hint, NSString *action, NSFont *titleFont, NSFont *hintFont,
+    NSColor *titleColor, NSColor *hintColor, NSColor *actionColor,
+    NSTextField *(^labelFactory)(NSString *, NSFont *, NSColor *));
+
+FOUNDATION_EXPORT void FYInstallInlineLongCardHeader(FYInlineLongCardView *card, CGFloat cardWidth,
+    CGFloat padding, CGFloat titleBand, BOOL selected, NSTextField *title, NSTextField *badge,
+    NSColor *badgeColor, NSColor *ruleColor);
+
+FOUNDATION_EXPORT NSRect FYInlineLongCardBodyFrame(CGFloat width, CGFloat height, CGFloat padding, CGFloat titleBandHeight);
+FOUNDATION_EXPORT void FYInstallInlineLongCardFooter(FYInlineLongCardView *card, NSTextField *footer,
+    CGFloat padding, CGFloat height, CGFloat textWidth);
 
 #pragma mark - 输入行
 
@@ -164,6 +240,26 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 /// 正文是否需要滚动。
 @property (nonatomic) BOOL scrollable;
 @property (nonatomic) BOOL compactEntry;
+/// 折叠入口的三行文案：块标题 / 收起原因 / 「点击展开」动作。
+/// 由布局器按同一份字体测量并写进结果，渲染端直接用，保证"量出来的"就是"画出来的"。
+@property (nonatomic, copy) NSString *entryTitle;
+@property (nonatomic, copy) NSString *entryHint;
+@property (nonatomic, copy) NSString *entryAction;
+/// YES = 放不下的实际原因是周围空间拥挤（不是文本过长），提示文案不同。
+@property (nonatomic) BOOL entryReasonCrowded;
+/// YES = 这张卡是"点入口展开出来的阅读卡"：顶部显示块标题（而不是固定的「中文译文」）。
+/// 普通贴译长卡保持原有「中文译文」标题不变。
+@property (nonatomic) BOOL expandedReading;
+/// 这一块试过的长卡候选组合（宽/字号/内边距/标题带/结果/冲突块），用于诊断：
+/// 区分"文字太长"、"可用空间不足"和"重复块造成假冲突"。
+@property (nonatomic, copy) NSArray<NSString *> *variantDiagnostics;
+/// 最终采用的长卡候选序号与字号（0 表示首选组合）。
+@property (nonatomic) NSUInteger chosenVariant;
+@property (nonatomic) CGFloat chosenBodyFontSize;
+/// 长卡（完整/滚动）的测量尺寸；只用于诊断与对照。
+@property (nonatomic) CGSize longCardSize;
+/// 紧凑入口**按内容测量**出来的尺寸（字体 + 标题宽度 + 内边距），不继承长卡宽度。
+@property (nonatomic) CGSize compactEntrySize;
 @end
 
 @interface FYInlineLayoutResult : NSObject
@@ -195,10 +291,26 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 @property (nonatomic) CGFloat cardWidthFraction;    // 0.52
 @property (nonatomic) CGFloat cardWideFraction;     // 0.62（需要更宽才能减少滚动时）
 @property (nonatomic) CGFloat cardMaxHeight;        // 330
-@property (nonatomic) CGFloat cardHeightFraction;   // 0.55
+@property (nonatomic) CGFloat cardHeightFraction;
+/// 正文可读下限：逐档缩字不会低于这个值（默认 15pt）。
+@property (nonatomic) CGFloat minimumLongBodyFontSize;
+/// 长卡最小宽度（可读下限，默认 160pt）；宽度候选不得低于它，但也不再强制 300pt。
+@property (nonatomic) CGFloat minimumCardWidth;
+/// 长块尝试过的候选组合（诊断用，最近一次 layoutRequests 的结果）。
+@property (nonatomic, copy) NSArray<NSString *> *lastVariantDiagnostics;   // 0.55
 @property (nonatomic) CGFloat viewportMargin;       // 8
 @property (nonatomic) CGFloat panelGap;             // 4
 @property (nonatomic) CGFloat compactEntryHeight;   // 34
+/// 紧凑入口（「查看译文」）的标题文案、字号与左右内边距。
+/// 测量与绘制必须共用这一份：渲染端读 compactEntryTitle / compactEntryFont 画同一个字符串，
+/// 否则"测出来的宽度"和"画出来的文字"会再次不一致。
+@property (nonatomic, copy) NSString *compactEntryTitle;        // 兼容旧名：折叠入口动作文案
+@property (nonatomic) CGFloat compactEntryFontSize;             // 13
+@property (nonatomic) CGFloat compactEntryHorizontalPadding;    // 8
+/// 折叠入口文案：没有可靠标题时用的占位标题，以及两种收起原因。
+@property (nonatomic, copy) NSString *foldedEntryFallbackTitle;     // 「这段译文」
+@property (nonatomic, copy) NSString *foldedEntryHintTooLong;       // 「文本过长，已收起」
+@property (nonatomic, copy) NSString *foldedEntryHintCrowded;       // 「空间不足，已收起」
 /// 帧间稳定容差（pt）：上一帧已用同一锚定方向时，允许 1~3px 级别的细缝冲突不算遮挡，
 /// 避免 OCR 抖动让贴片在下方/上方之间跳；新出现的块（没有上一帧）不受此容差影响。
 @property (nonatomic) CGFloat stabilityTolerance;       // 默认 3
@@ -220,6 +332,23 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 - (NSFont *)longBodyFont;
 - (NSParagraphStyle *)longBodyParagraphStyle;
 - (NSFont *)longTitleFont;
+/// 紧凑入口的字体（semibold），测量与绘制共用。
+- (NSFont *)compactEntryFont;
+/// 紧凑入口按内容测量的尺寸：标题文字宽度 + 左右内边距，高度不小于 compactEntryHeight；
+/// 上限是可见区域内能放下的宽度。**不继承长卡宽度**。
+- (CGSize)compactEntrySizeForViewport:(CGRect)viewport;
+/// 长卡的有限候选组合（宽 × 修饰 × 字号），顺序即优先级；诊断与测试都用它。
+- (NSArray<NSDictionary *> *)longCardVariantsForRequest:(FYInlineLayoutRequest *)request viewport:(CGRect)viewport;
+/// 折叠入口（标题 / 提示 / 点击展开 三行）按内容测量的尺寸。
+- (CGSize)foldedEntrySizeForViewport:(CGRect)viewport title:(nullable NSString *)title
+                                hint:(nullable NSString *)hint;
+/// 同上，但动作行可显式给空串（单行总入口按一行量尺寸）。
+- (CGSize)foldedEntrySizeForViewport:(CGRect)viewport title:(nullable NSString *)title
+                                hint:(nullable NSString *)hint action:(nullable NSString *)action;
+/// 折叠入口的字体（测量与绘制共用）。
+- (NSFont *)foldedEntryHintFont;
+/// 从块文本里取一个"短标题"：只在首行确实像标题时才用，否则返回 nil（调用方用占位标题）。
++ (nullable NSString *)shortTitleForBlockText:(NSString *)text;
 
 /// 单块测量（给定宽度下的完整正文高度）。渲染器复用同一份样式计算文档高度。
 - (CGFloat)measuredBodyHeight:(NSString *)translation
