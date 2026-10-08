@@ -20,6 +20,9 @@ NS_ASSUME_NONNULL_BEGIN
                                     inputEpoch:(NSUInteger)inputEpoch
                                    inputSource:(NSInteger)inputSource;
 - (nullable NSDictionary *)requestContextForCycle:(nullable NSDictionary *)cycle;
+// Attach the captured frame to the immutable cycle before scheduling OCR.
+// Window capture has no device counter (index 0); frame_id remains unique.
+- (nullable NSDictionary *)frameContextForCycle:(nullable NSDictionary *)cycle index:(uint64_t)index;
 - (void)recordEvent:(NSString *)event context:(nullable NSDictionary *)context fields:(NSDictionary *)fields;
 @end
 

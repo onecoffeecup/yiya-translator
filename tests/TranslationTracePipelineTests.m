@@ -90,8 +90,8 @@ static void (^PendingResponse)(void);
 - (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items placementRect:(NSRect)rect { self.inlineApplies++; }
 - (NSArray *)filteredInlineTextItems:(NSArray *)items strict:(BOOL)strict { return items; }
 - (NSArray *)mergedInlineTextItemsFromItems:(NSArray *)items { return items; }
-- (NSString *)recognizeTextBlocksInImage:(CGImageRef)i fastOCR:(BOOL)f languageSegment:(NSInteger)l blocks:(NSArray<OCRTextItem *> **)blocks error:(NSError **)e {
-    *blocks = self.fixture; return [[self.fixture valueForKey:@"text"] componentsJoinedByString:@"\n"];
+- (NSArray *)recognizeTextItemsInImage:(CGImageRef)i fastOCR:(BOOL)f languageSegment:(NSInteger)l error:(NSError **)e {
+    return self.fixture;
 }
 - (NSArray<OCRTextItem *> *)blocksInsideModalIfPresent:(NSArray<OCRTextItem *> *)b inImage:(CGImageRef)i normalizedExclusions:(NSArray<NSValue *> *)e { return b; }
 @end
@@ -163,13 +163,18 @@ int main(void) { @autoreleasepool {
     Require(MockRequests == 1 && [offSources isEqual:SubmittedSources] && [offCaptions isEqual:on.captions], @"trace must preserve requests and displayed outputs");
     NSArray *records = Records(log);
     Require(Count(records,@"request_submit") == 1 && Count(records,@"request_complete") == 1 && Count(records,@"caption_apply") == 3, @"one HTTP result plus reused full captions are logged using mock transport");
-    Require(Count(records,@"ocr") == 18 && Count(records,@"stable") == 6 && Count(records,@"mode") == 6, @"every synthetic OCR frame and stability decision logged");
+    Require(Count(records,@"ocr") == 24 && Count(records,@"stable") == 6 && Count(records,@"mode") == 6, @"raw and processed OCR frames and stability decisions logged");
+    Require(Count(records,@"capture") == 6 && Count(records,@"task") == 18, @"capture and OCR scheduling lifecycle logged");
     for (NSDictionary *submit in records) {
         if (![submit[@"event"] isEqual:@"request_submit"]) { continue; }
         BOOL response = NO, apply = NO;
         for (NSDictionary *r in records) {
             if (![r[@"request_id"] isEqual:submit[@"request_id"]]) { continue; }
             Require([r[@"cycle"] isEqual:submit[@"cycle"]] && [r[@"session"] isEqual:submit[@"session"]], @"same request stays in its cycle and session");
+            Require([r[@"frame_id"] isEqual:submit[@"frame_id"]], @"same captured frame survives asynchronous delivery");
+            if ([@[@"request_submit", @"http_complete", @"request_complete"] containsObject:r[@"event"]]) {
+                Require([r[@"http_task_id"] isEqual:submit[@"http_task_id"]], @"physical HTTP task correlated separately from logical batch");
+            }
             response |= [r[@"event"] isEqual:@"request_complete"];
             apply |= [r[@"event"] isEqual:@"caption_apply"];
         }
@@ -190,6 +195,10 @@ int main(void) { @autoreleasepool {
     TraceCycle(late, full);
     HoldResponse = YES; late.fixture = full; [late timerFired:nil];
     Pump(^BOOL { return PendingResponse != nil; });
+    [late timerFired:nil];
+    BOOL busy = NO;
+    for (NSDictionary *r in Records(log)) { busy |= [r[@"reason"] isEqual:@"task_busy"]; }
+    Require(busy, @"busy cycle is observable without capturing another frame");
     late.fixtureWindowID = 43; PendingResponse(); PendingResponse = nil; HoldResponse = NO;
     Pump(^BOOL { return !late.inFlight; });
     Require(late.captions.count == 0, @"window change still drops response");

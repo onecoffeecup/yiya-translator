@@ -29,16 +29,24 @@ int main(void) { @autoreleasepool {
     Arm(directory, now, 120);
     Check([trace beginCycleForWindow:0 generation:1] == nil, @"no selected window means no cycle");
     NSDictionary *cycle = [trace beginCycleForWindow:42 generation:7];
-    NSDictionary *request = [trace requestContextForCycle:cycle];
+    NSDictionary *frame = [trace frameContextForCycle:cycle index:19];
+    NSDictionary *request = [trace requestContextForCycle:frame];
+    Check(![trace frameContextForCycle:nil index:19] && !cycle[@"frame_id"], @"frame context is immutable and disabled is cheap");
+    Check([request[@"frame_id"] isEqual:frame[@"frame_id"]] && [request[@"frame_index"] intValue] == 19,
+          @"request retains captured frame identity");
     Check(cycle != nil && [request[@"cycle"] isEqual:cycle[@"cycle"]] && request[@"request_id"] != nil, @"cycle/request correlation");
     [trace recordEvent:@"ocr" context:cycle fields:@{@"ocr_lines": @[@{@"text": @"美代は占い", @"x": @0.2, @"y": @0.1, @"w": @0.5, @"h": @0.05, @"headers": @"SECRET_IN_LINE"}], @"Authorization": @"Bearer SECRET_TOKEN", @"api_key": @"SECRET_KEY", @"payload": @"SECRET_BODY", @"error": [NSError errorWithDomain:@"SECRET_DOMAIN" code:1 userInfo:@{NSLocalizedDescriptionKey:@"SECRET_ERROR"}]}];
     [trace recordEvent:@"request_complete" context:request fields:@{@"translation": @"美代迷上占卜了", @"success": @YES}];
     NSString *text = [NSString stringWithContentsOfFile:log encoding:NSUTF8StringEncoding error:NULL];
     Check([text containsString:@"美代"] && ![text containsString:@"SECRET"] && ![text containsString:@"Bearer"] && ![text containsString:@"Authorization"], @"strict schema excludes credentials, headers, errors and raw payloads");
+    NSMutableSet *eventIDs = [NSMutableSet new];
     for (NSString *line in [text componentsSeparatedByString:@"\n"]) {
         if (!line.length) { continue; }
         NSDictionary *record = [NSJSONSerialization JSONObjectWithData:[line dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
         Check(record && [record[@"cycle"] isEqual:cycle[@"cycle"]] && [record[@"window_id"] intValue] == 42 && record[@"time_unix_ms"], @"parseable timed selected-window JSONL");
+        Check([record[@"schema_version"] intValue] == 2 && [[NSUUID alloc] initWithUUIDString:record[@"event_id"]] &&
+              ![eventIDs containsObject:record[@"event_id"]], @"versioned unique events");
+        [eventIDs addObject:record[@"event_id"]];
     }
     struct stat st; stat(log.fileSystemRepresentation, &st);
     Check((st.st_mode & 077) == 0, @"private file permissions");

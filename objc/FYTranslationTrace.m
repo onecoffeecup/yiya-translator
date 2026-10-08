@@ -108,6 +108,13 @@ void FYTracePerform(NSDictionary *context, void (^work)(void)) {
     result[@"request_id"] = NSUUID.UUID.UUIDString;
     return [result copy];
 }
+- (NSDictionary *)frameContextForCycle:(NSDictionary *)cycle index:(uint64_t)index {
+    if (!cycle) { return nil; }
+    NSMutableDictionary *result = [cycle mutableCopy];
+    result[@"frame_id"] = NSUUID.UUID.UUIDString;
+    result[@"frame_index"] = @(index);
+    return [result copy];
+}
 
 // Strict schema: never serialize arbitrary objects, NSError descriptions,
 // URLs, headers, payloads, configuration or cache keys (which contain prompts).
@@ -152,18 +159,20 @@ static NSDictionary *FYTraceSanitize(NSDictionary *fields) {
     @synchronized (self) {
         NSDictionary *control = [self activeControl];
         if (!control || ![context[@"session"] isEqual:control[@"session"]]) { return; }
-        NSSet *events = [NSSet setWithArray:@[@"cycle_begin", @"ocr", @"mode", @"stable", @"skip", @"dialogue", @"cache", @"request_submit", @"http_complete", @"request_complete", @"caption_apply", @"caption_drop", @"inline_apply", @"inline_drop"]];
+        NSSet *events = [NSSet setWithArray:@[@"cycle_begin", @"capture", @"task", @"ocr", @"mode", @"stable", @"skip", @"dialogue", @"cache", @"request_submit", @"http_complete", @"request_complete", @"caption_apply", @"caption_drop", @"inline_apply", @"inline_drop"]];
         if (![events containsObject:event]) { return; }
         NSMutableDictionary *record = [FYTraceSanitize(fields) mutableCopy];
         record[@"event"] = event;
+        record[@"schema_version"] = @2;
+        record[@"event_id"] = NSUUID.UUID.UUIDString;
         record[@"time_unix_ms"] = @(llround(self.clock() * 1000));
         record[@"pid"] = @(getpid());
         // Context also has a strict schema; it cannot smuggle arbitrary data.
-        for (NSString *key in @[@"session", @"cycle", @"request_id"]) {
+        for (NSString *key in @[@"session", @"cycle", @"request_id", @"frame_id", @"http_task_id"]) {
             id value = context[key];
             if ([value isKindOfClass:NSString.class] && [[NSUUID alloc] initWithUUIDString:value]) { record[key] = value; }
         }
-        for (NSString *key in @[@"window_id", @"generation", @"input_epoch", @"input_source"]) {
+        for (NSString *key in @[@"window_id", @"generation", @"input_epoch", @"input_source", @"frame_index"]) {
             if ([context[key] isKindOfClass:NSNumber.class]) { record[key] = context[key]; }
         }
         NSData *json = [NSJSONSerialization dataWithJSONObject:record options:NSJSONWritingSortedKeys error:NULL];

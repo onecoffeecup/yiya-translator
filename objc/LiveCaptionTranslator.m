@@ -3681,7 +3681,13 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 几何复核放在**所有提前返回之前**：即使这一轮 OCR 文本和上一轮完全一样
     //（会被 same_as_last_translated 直接 return），窗口边界检查、映射有效性检查和贴译重排也必须跑。
     [self refreshDisplayGeometryIfNeeded:NO];
-    if (self.inFlight) { return; }
+    if (self.inFlight) {
+        NSDictionary *busyTrace = [[FYTranslationTrace shared] beginCycleForWindow:[self displayTargetWindowID]
+            generation:self.translationGeneration inputEpoch:self.captureCardInput.sessionEpoch
+            inputSource:[self captureCardInputEnabled] ? 1 : 0];
+        FYTrace(busyTrace, @"skip", @{@"reason": @"task_busy"});
+        return;
+    }
     BOOL captureCard = [self captureCardInputEnabled];
     self.inFlight = YES;
     NSDate *cycleStart = [NSDate date];
@@ -3725,6 +3731,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         }
         fullImage = [self.captureCardInput copyLatestFrame];
         if (!fullImage) {
+            FYTrace(trace, @"capture", @{@"success": @NO, @"reason": @"capture_card_no_frame"});
             FYTrace(trace, @"skip", @{@"reason": @"capture_card_no_frame", @"input_epoch": @(inputEpoch)});
             self.inFlight = NO;
             [self updateCaptureCardStatus];
@@ -3741,6 +3748,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         // 我们的浮窗是独立窗口且 layer=3/25，目标窗口是 layer=0，本来就不会进截屏。
         fullImage = [self copyFullCapturedImageForWindow:windowID];
         if (!fullImage) {
+            FYTrace(trace, @"capture", @{@"success": @NO, @"reason": @"capture_unavailable"});
             [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(self.translationGeneration), @"success": @NO}];
             FYTrace(trace, @"skip", @{@"reason": @"capture_unavailable"});
             self.inFlight = NO;
@@ -3755,6 +3763,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
     self.captureUnavailable = NO;
     [self updateRunState];
+    trace = [[FYTranslationTrace shared] frameContextForCycle:trace index:captureFrameIndex];
+    FYTrace(trace, @"capture", @{@"success": @YES, @"width": @(CGImageGetWidth(fullImage)),
+                                @"height": @(CGImageGetHeight(fullImage))});
     [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(self.translationGeneration), @"success": @YES}];
     [self setStatus:@"正在 OCR"];
     NSInteger cycleGeneration = self.translationGeneration;
@@ -3768,7 +3779,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSArray<NSValue *> *exclusionSnapshot = @[];
 
     CGRect ocrScope=[self selectedOCRScope];
+    FYTrace(trace, @"task", @{@"reason": @"ocr_scheduled"});
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+      FYTracePerform(trace, ^{
+        FYTrace(trace, @"task", @{@"reason": @"ocr_started"});
         NSDate *ocrStart = [NSDate date];
         NSError *error = nil;
         NSArray<OCRTextItem *> *ocrBlocks = @[];
@@ -3786,7 +3800,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             ocrText=[self recognizeTextBlocksInImage:fullImage fastOCR:fastOCR languageSegment:languageSegment blocks:&ocrBlocks error:&error];
         } else {
             NSArray *scoped=[FYOCRManager recognizeImage:fullImage topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
-                return [self recognizeTextItemsInImage:cropped fastOCR:fastOCR languageSegment:languageSegment error:innerError];
+                NSArray *raw = [self recognizeTextItemsInImage:cropped fastOCR:fastOCR languageSegment:languageSegment error:innerError];
+                FYTrace(trace, @"ocr", @{@"stage": @"vision_raw_crop", @"ocr_lines": FYTraceOCRLines(raw),
+                                        @"blocks": @(raw.count), @"error_code": @((*innerError).code)});
+                return raw;
             } error:&error];
             ocrText=[FYOCRManager sourceTextForItems:scoped blocks:&ocrBlocks];
         }
@@ -3834,6 +3851,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         FYTrace(trace, @"ocr", @{@"stage": @"modal_scoped", @"ocr_lines": FYTraceOCRLines(modalScopedBlocks), @"blocks": @(modalScopedBlocks.count)});
         NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         CGImageRelease(fullImage);
+        FYTrace(trace, @"task", @{@"reason": @"ocr_finished", @"error_code": @(error.code)});
 
         dispatch_async(dispatch_get_main_queue(), ^{
             if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
@@ -3980,7 +3998,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
             if (!groupingChangedSinceRender && [[self translationState] shouldThrottleText:normalized geometryChanged:geometryChangedSinceRender interval:attemptThrottle
                 equivalent:^BOOL(NSString *current, NSString *previous) { return [self isSameSubtitleText:current comparedTo:previous]; }
-                now:^NSDate *{ return [NSDate date]; }]) {
+                now:^NSDate *{ return [self translationProcessingDate]; }]) {
             [self advanceExpandedReadingState];
                 FYTrace(trace, @"skip", @{@"reason": @"submission_throttle"});
                 [self setStatus:[NSString stringWithFormat:@"等待翻译返回 · 相似 %.0f%% · OCR %.1fs", submittedSimilarity * 100, ocrDuration]];
@@ -4001,7 +4019,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             FYTrace(trace, @"stable", @{@"reason": shouldWaitForStableText ? @"accepted" : @"not_required",
                                        @"stable_required": @(shouldWaitForStableText), @"stable_count": @(self.stableCandidateCount)});
             self.lastSubmittedNormalizedText = normalized;
-            self.lastTranslationAttemptDate = [NSDate date];
+            self.lastTranslationAttemptDate = [self translationProcessingDate];
 
             {
                 NSUInteger tokens = UITokenHitCount(ocrBlocks);
@@ -4226,6 +4244,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             }];
             });
         });
+      });
     });
 }
 
@@ -8449,6 +8468,8 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 
 - (NSString *)recognizeTextBlocksInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment blocks:(NSArray<OCRTextItem *> **)outBlocks error:(NSError **)error {
     NSArray<OCRTextItem *> *items = [self recognizeTextItemsInImage:image fastOCR:fastOCR languageSegment:languageSegment error:error];
+    FYTrace(FYCurrentTrace(), @"ocr", @{@"stage": @"vision_raw", @"ocr_lines": FYTraceOCRLines(items),
+                                      @"blocks": @(items.count), @"error_code": @(error ? (*error).code : 0)});
     // IncludingWindow and capture-card frames exclude our overlay windows.
     // Text-only feedback filtering would delete unchanged dates and shared kanji.
     return [FYOCRManager sourceTextForItems:items blocks:outBlocks];
@@ -8564,6 +8585,11 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         return;
     }
 
+    if (trace) {
+        NSMutableDictionary *taskTrace = [trace mutableCopy];
+        taskTrace[@"http_task_id"] = NSUUID.UUID.UUIDString;
+        trace = [taskTrace copy];
+    }
     NSInteger generation = self.translationGeneration;
     uint32_t diagnosticWindowID = [self displayTargetWindowID];
     void (^deliver)(NSString *, NSError *) = ^(NSString *translated, NSError *error) {
@@ -8672,6 +8698,9 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     if (!_translationRunState) _translationRunState=[FYTranslationRunState new];
     return _translationRunState;
 }
+// Default clock is unchanged. Replay overrides only this seam to exercise the
+// real throttling policy without waiting wall-clock seconds.
+- (NSDate *)translationProcessingDate { return NSDate.date; }
 - (NSString *)lastTranslatedNormalizedText { return [self translationState].lastTranslatedText; }
 - (void)setLastTranslatedNormalizedText:(NSString *)value { [self translationState].lastTranslatedText=value; }
 - (NSString *)lastSubmittedNormalizedText { return [self translationState].lastSubmittedText; }
