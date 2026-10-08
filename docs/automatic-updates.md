@@ -1,6 +1,6 @@
 # 应用内自动更新
 
-更新日期：2026-10-08。0.2.1 Pre-release（build 17）已包含 Sparkle 2.10.0，GitHub Pages 提供对应的签名更新清单。v0.2.0 保留；未公开的本机演练应用不进入正式清单。
+更新日期：2026-10-08。0.2.1 正式版（build 17）已包含 Sparkle 2.10.0，GitHub Pages 提供对应的签名更新清单。v0.2.0 保留；未公开的本机演练应用不进入正式清单。
 
 ## 玩家使用
 
@@ -33,7 +33,7 @@ python3 scripts/publish-update.py --site .build/update-publish
 
 该命令上传独立更新附件，重新下载核对远端 SHA-256，最后发布已签名清单并触发 Pages。已有同名附件不会被覆盖；版本倒退、身份不匹配、签名失败或远端散列不符时停止发布清单。需保留 `dist/updates/archives/` 中的已发布旧应用，以便后续生成差分包；没有可用差分时使用完整更新包。
 
-清单目前面向早期测试用户；GitHub Release 的 Pre-release 标记不会自动成为 Sparkle 的过滤条件。以后如需稳定版与测试版分流，应显式配置不同清单或频道。
+当前清单提供正式版本；GitHub Release 的 Pre-release 标记不会自动成为 Sparkle 的过滤条件。以后如需稳定版与测试版分流，应显式配置不同清单或频道。
 
 ## 发布私钥与依赖
 
@@ -83,6 +83,6 @@ python3 scripts/manual-update-test.py stop
 
 2026-10-08 本机手动演练已通过。标准弹窗实际显示 `0.2.1 (13) → 0.2.1 (14)`，安装后在原路径启动 build 14，进程由 84342 变为 84646。`verify` 确认应用身份、完整签名、三份合成资料的 SHA-256、API Key 读取和 `0700`／`0600` 权限均正确；字体 24、收藏 1 条保留。证据在本机 `~/Library/Caches/com.nanami.fuyi-build/manual-update-4650c4c1807d46ccb0adec0f3818bc5b/verification.json` 和 `prepared-evidence.json`。测试服务已停止，应用与合成资料保留供复核。该结果是独立验收应用的本机完整升级，不计为普通玩家下载、跨机器或正式译芽权限继承验收通过。
 
-接入专项证据在本机 `.build/sparkle-download/` 与 `.build/update-checks/summary.json`，最新完整回归记录在 `.build/acceptance/20261008T000530Z-5aca7b/summary.json`。原采集卡失败的单帧夹具已按生产两帧确认规则修正，专项和完整回归均通过；生产代码未改。上述回归与手动演练阶段未替换玩家应用。用户随后授权发布，0.2.1 build 17 作为 Pre-release 提供；应用和源码附件先回验，再启用正式清单。实际普通玩家下载升级、跨机器、Intel 实机与屏幕录制／相机权限继承仍待现场验收。
+接入专项证据在本机 `.build/sparkle-download/` 与 `.build/update-checks/summary.json`，最新完整回归记录在 `.build/acceptance/20261008T000530Z-5aca7b/summary.json`。原采集卡失败的单帧夹具已按生产两帧确认规则修正，专项和完整回归均通过；生产代码未改。上述回归与手动演练阶段未替换玩家应用。用户随后授权发布，0.2.1 build 17 已按用户选择设为正式 Release 和 Latest；应用和源码附件先回验，再启用正式清单。实际普通玩家下载升级、跨机器、Intel 实机与屏幕录制／相机权限继承仍待现场验收。
 
 官方参考：[接入](https://sparkle-project.org/documentation/)、[程序入口](https://sparkle-project.org/documentation/programmatic-setup/)、[发布与签名](https://sparkle-project.org/documentation/publishing/)。

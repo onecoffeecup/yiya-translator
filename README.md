@@ -2,7 +2,7 @@
 
 0.2.1 已包含 Sparkle 应用内更新；首次手动安装后，可在「译芽 → 检查更新…」安装之后的新版本。使用和发布步骤见 [自动更新说明](docs/automatic-updates.md)。
 
-**当前版本：[v0.2.1 Pre-release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1)（2026-10-08，build 17）。** 55 步完整本机回归和独立应用的手动升级验收通过；跨机器验收仍待完成。v0.2.0 保留供追溯。
+**当前版本：[v0.2.1 正式版](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1)（2026-10-08，build 17）。** 55 步完整本机回归和独立应用的手动升级验收通过；跨机器验收仍待完成。v0.2.0 保留供追溯。
 
 0.2.1 汇总语法快速分析、按需解释／深度复核、复核滚动位置、异步分词崩溃及界面贴译稳定修复。包括 `8d86684` 的字段分组、布局与 OCR 稳定改动，以及 `82216b5` 的语法更新。更新说明见 [发布说明](docs/发布说明.md)，验证范围见 [发布检查记录](docs/发布检查结果.md)。
 
@@ -10,7 +10,7 @@
 
 译芽截取指定窗口的文字区域，在本机用 Apple Vision 识别日文或英文，再调用你配置的翻译接口，把中文显示在悬浮字幕窗里。它最初是为了通过采集卡和 QuickTime 玩日文乙女游戏而做的。
 
-**已发布版本：0.2.1（早期测试版）。** 已提供 Apple Silicon + Intel 双架构构建；实际体验主要在作者的 Mac 上验证。需要 macOS 13 或更高版本、屏幕录制权限，以及你自己的翻译服务 API Key。此版本免费，接口调用费用由服务商从你的账户收取。
+**已发布版本：0.2.1（正式版）。** 已提供 Apple Silicon + Intel 双架构构建；实际体验主要在作者的 Mac 上验证。需要 macOS 13 或更高版本、屏幕录制权限，以及你自己的翻译服务 API Key。此版本免费，接口调用费用由服务商从你的账户收取。
 
 
 ## 可以做什么
@@ -38,7 +38,7 @@
 
 ## 下载后怎么用
 
-1. 在 [v0.2.1 Release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1) 下载 `yiya-0.2.1.zip`；此版本标为 Pre-release。
+1. 在 [v0.2.1 Release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1) 下载 `yiya-0.2.1.zip`。
 2. 解压后先读「先读我.txt」，把「译芽.app」拖到应用程序文件夹。
 3. 按 [首次打开说明](docs/首次打开说明.md) 打开应用并授权屏幕录制。当前包使用 ad-hoc 签名，尚未经过 Apple 公证。
 4. 按 [API Key 配置教程](docs/API-Key配置教程.md) 配置服务，点「测试翻译」。
