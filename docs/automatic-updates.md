@@ -81,7 +81,7 @@ python3 scripts/manual-update-test.py stop
 
 最新路径记录在 `.build/manual-update/latest.json`；可用 `--run` 指定历史演练目录。停止服务保留应用和合成资料供复核。直接打开「下载」中的 `.app`，不必再次用 Archive Utility 解压；服务过期后重新 `prepare --open` 即可新建演练。
 
-2026-10-08 本机已完成演练包生成、清单／附件验签、ZIP 解压验签、HTTP 内容校验、私有路径 404 检查，以及 build 13 资料读取。标准弹窗实际显示 `0.2.1 (13) → 0.2.1 (14)`；本次手动点击安装与重启验收仍待玩家完成，不能替代此前自动安装用例，也不计为普通玩家下载或跨机器验收通过。
+2026-10-08 本机手动演练已通过。标准弹窗实际显示 `0.2.1 (13) → 0.2.1 (14)`，安装后在原路径启动 build 14，进程由 84342 变为 84646。`verify` 确认应用身份、完整签名、三份合成资料的 SHA-256、API Key 读取和 `0700`／`0600` 权限均正确；字体 24、收藏 1 条保留。证据在本机 `~/Library/Caches/com.nanami.fuyi-build/manual-update-4650c4c1807d46ccb0adec0f3818bc5b/verification.json` 和 `prepared-evidence.json`。测试服务已停止，应用与合成资料保留供复核。该结果是独立验收应用的本机完整升级，不计为普通玩家下载、跨机器或正式译芽权限继承验收通过。
 
 接入专项证据在本机 `.build/sparkle-download/` 与 `.build/update-checks/summary.json`，最新完整回归记录在 `.build/acceptance/20261008T000530Z-5aca7b/summary.json`。原采集卡失败的单帧夹具已按生产两帧确认规则修正，专项和完整回归均通过；生产代码未改。此轮未替换运行中的玩家应用，也未创建 0.2.1 Release。实际普通玩家下载升级、跨机器、Intel 实机与屏幕录制／相机权限继承仍待现场验收。
 
