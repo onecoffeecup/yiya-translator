@@ -535,6 +535,7 @@ int main(void) { @autoreleasepool {
     Require([uiInput testEnqueueFrameIndex:2 pixelSize:16], @"UI confirmation needs a distinct fresh frame");
     CardCycle(uiUnmapped, CardFixture(@"設定メニュー", .3));
     Require(uiUnmapped.inlineApplies == 0, @"capture-card mode without a locatable region must not place inline panels");
+    NSLog(@"SYNTHETIC unmapped status: %@", uiUnmapped.statuses);
     Require([CardStatusText(uiUnmapped) containsString:@"暂时无法定位游戏画面"],
             @"the shortfall must be one short line in the status area");
     Require([CardStatusText(uiUnmapped) containsString:@"调整贴译位置"],

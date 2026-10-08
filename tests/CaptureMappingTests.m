@@ -541,14 +541,17 @@ static void TestCoordinateChainToLayout(void) {
         }
         Check(longPlacement != nil, @"说明弹窗拿到了排版结果");
         if (longPlacement) {
-            // 长卡本身不允许盖住自己的原文；降级成「查看译文」紧凑入口时**允许**覆盖自己的一小部分
-            // （这是本轮现场修复"长正文从画面消失"的关键：小入口优先落在正文自身范围内）。
+            // 当前布局允许所属字段内的覆盖锚点；其它字段仍须保持零重叠。
+            // 联合避让会移动已有短贴片，必须检查这一轮 withLong 的最终位置。
             BOOL degradedLong = longPlacement.mode == FYInlineDisplayModeCompactEntry ||
                                 longPlacement.mode == FYInlineDisplayModeUnplaceable;
-            Check(!CGRectIntersectsRect(longPlacement.translationFrame, longSource) || degradedLong,
-                  @"长译文卡没有盖住自己的原文框（紧凑入口允许覆盖自身一小部分）");
-            for (NSUInteger other = 0; other < result.placements.count; other++) {
-                FYInlinePlacement *shortPlacement = result.placements[other];
+            Check(!CGRectIntersectsRect(longPlacement.translationFrame, longSource) || degradedLong ||
+                  longPlacement.anchor == FYInlineAnchorOverlay,
+                  @"长卡覆盖自身时使用所属字段的覆盖锚点，其它锚点不跨入原文");
+            for (NSUInteger other = 0; other < requests.count; other++) {
+                FYInlinePlacement *shortPlacement = [withLong placementForBlockID:result.placements[other].blockID];
+                Check(shortPlacement != nil, @"联合布局保留原有选项身份");
+                if (!shortPlacement) { continue; }
                 BOOL overlapsOther = CGRectIntersectsRect(longPlacement.translationFrame, shortPlacement.translationFrame);
                 BOOL overlapsSource = CGRectIntersectsRect(longPlacement.translationFrame, sourceFrames[other].rectValue);
                 Check(!overlapsOther || longPlacement.mode == FYInlineDisplayModeCompactEntry ||
