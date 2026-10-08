@@ -38,3 +38,6 @@ __pycache__/
 # Runtime API credentials are never public source artifacts.
 api-key.json
 ed25519.key
+
+# Opt-in runtime dialogue logs belong only in private local evidence.
+*.jsonl

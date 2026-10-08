@@ -35,7 +35,9 @@ def source_hashes():
     paths = []
     for folder in ("objc", "tests", "scripts"):
         paths.extend(p for p in (ROOT / folder).rglob("*") if p.is_file() and
-                     p.suffix in {".h", ".m", ".inc", ".sh", ".py"})
+                     p.suffix in {".h", ".m", ".inc", ".sh", ".py", ".json"})
+    paths.extend(p for p in (ROOT / "tests/fixtures/replay/assets").glob("*") if p.is_file())
+    paths.extend(ROOT / name for name in ("AGENTS.md", "DEBUG_WORKFLOW.md") if (ROOT / name).is_file())
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
 
 
@@ -57,6 +59,8 @@ def execute(command, log, env, timeout):
                 process.wait()
             code = process.returncode
     lines = log.read_text(errors="replace").splitlines()
+    if state == "passed" and any(line.startswith("Outcome: baseline_passed_with_known_gaps") for line in lines):
+        state = "passed_with_known_gaps"
     first = next((line for line in lines if re.search(r"error:|FAIL:|HARNESS ERROR|TEST_ISOLATION_BLOCKED|^FAILED", line)), None)
     return dict(status=state, exit_code=code, seconds=round(time.monotonic()-started, 2),
                 first_failure=first if state != "passed" else None,
@@ -88,6 +92,7 @@ def main():
                  ("UpdateDistributionTests", [sys.executable, "tests/UpdateDistributionTests.py"], False),
                  ("UpdateInstallerTests", [sys.executable, "scripts/run-update-tests.py"], True),
                  ("ModuleTests", ["bash", "scripts/run-module-tests.sh"], False),
+                 ("ReplayRegressionTests", [sys.executable, "scripts/debug.py", "check", "--replay-only"], False),
                  ("LearningTests", ["bash", "scripts/run-learning-tests.sh"], False),
                  ("DialogueGrammarTests", ["bash", "scripts/run-dialogue-grammar-tests.sh"], False),
                  ("InlineTranslationTests", ["bash", "scripts/run-tests.sh"], True)]
@@ -125,7 +130,7 @@ def main():
             record.update(result)
             print(f"{record['suite']}: {record['status']}", flush=True)
             save()
-            if record["status"] not in ("passed", "compiled_only"):
+            if record["status"] not in ("passed", "passed_with_known_gaps", "compiled_only"):
                 failed = True
                 if record.get("first_failure"):
                     print(record["first_failure"], flush=True)
@@ -134,6 +139,8 @@ def main():
         if not report["source_unchanged"]:
             failed = True
         report["outcome"] = "incomplete" if failed else ("passed" if args.ui else "prepared_ui_not_run")
+        if not failed and any(r["status"] == "passed_with_known_gaps" for r in report["results"]):
+            report["outcome"] += "_with_known_gaps"
         save()
         print(f"Outcome: {report['outcome']}; summary: {output / 'summary.json'}")
         return 1 if failed else 0

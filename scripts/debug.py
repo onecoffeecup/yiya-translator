@@ -30,7 +30,7 @@ EXPECT_KEYS = {"requests", "sources", "captions", "inline", "errors", "in_flight
                "has_reason", "caption_contains"}
 
 
-def number(value, label, minimum=0, maximum=299000):
+def number(value, label, minimum=0, maximum=299999):
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not minimum <= value <= maximum:
         raise ValueError(f"{label}: expected finite number in {minimum}..{maximum}")
 
@@ -338,12 +338,13 @@ def main():
     frames = [e for e in read_events(args.log) if e.get("event") == "ocr" and e.get("stage") == args.stage]
     if not frames or any(e.get("lines_truncated") or any(line.get("truncated") for line in e.get("ocr_lines", [])) for e in frames):
         parser.error("No frames at selected stage, or truncated input; cannot create a faithful draft")
-    steps = [dict(at_ms=index*500, action="frame", blocks=[dict(text=line.get("text", ""),
+    start = frames[0].get("time_unix_ms", 0)
+    steps = [dict(at_ms=max(0, frame.get("time_unix_ms", start+index*500)-start), action="frame", blocks=[dict(text=line.get("text", ""),
               box=[line.get(k, 0) for k in ("x", "y", "w", "h")]) for line in frame.get("ocr_lines", [])], expect={})
              for index, frame in enumerate(frames)]
     private_json(args.output, dict(schema_version=1, name="Imported trace draft", draft=True,
                  mode="dialogue", source="window", responses=[], steps=steps,
-                 notes="Choose mode/source, timings and mocks; add assertions, remove draft. Postprocessed stages cannot recover upstream missing observations."))
+                 notes="Frame timestamps are relative to the first selected stage. Choose mode/source and mocks; add assertions, remove draft. Postprocessed stages cannot recover upstream missing observations; refinement may produce multiple vision_raw events per cycle."))
     print("Private draft saved. Add mock responses and explicit expectations before Replay.")
     return 0
 

@@ -44,6 +44,8 @@ python3 scripts/translation-trace.py stop
 
 ## 日志含义
 
+2026-10-08 的 Debug 基础设施增加 schema 2、事件 / 帧身份、采集与 OCR 任务状态和独立 HTTP task ID；新增字段、统一统计与通用 Replay 见 [DEBUG_WORKFLOW.md](../DEBUG_WORKFLOW.md)。本轮只修改源码，没有自动替换已安装应用；现场新字段必须来自包含本轮改动的构建。原来的开关、权限、限额与凭据白名单继续适用。
+
 每行是一个 JSON 对象，含 `time_unix_ms`、`session`、`cycle`、`window_id`、运行代次；翻译路径增加 `request_id`，可关联身份、缓存、网络完成和应用结果。
 
 - `ocr`：`pass1_filtered` 为第一遍后处理结果，`merged` 为精读合并结果，`modal_scoped` 为模态区域结果；界面模式增加 `inline_grouped`（分组与过滤后）和 `inline_stable`（跨帧确认后）。`ocr_lines` 含文本与归一化框，坐标原点在左下。历史构建的 `pass1_filtered` 曾按已有译文删除同文原文，不能把该阶段的缺字直接判定成 Vision 漏读；本轮干净源图已取消此过滤。

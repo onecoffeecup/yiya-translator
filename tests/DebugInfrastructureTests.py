@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Runner boundary regressions: reject unsafe/incomplete Replay and report evidence accurately."""
 import copy
+import contextlib
+import io
 import importlib.util
 import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("debug", ROOT / "scripts/debug.py")
@@ -102,6 +105,30 @@ class DebugInfrastructureTests(unittest.TestCase):
         self.assertNotEqual(result["exit_code"], 0)
         result = debug.acceptance.execute([sys.executable, "-c", "raise SystemExit(86)"], log, {}, 5)
         self.assertEqual(result["status"], "blocked")
+
+    def test_source_export_keeps_agent_rules_and_omits_private_evidence(self):
+        source_spec = importlib.util.spec_from_file_location("package_source", ROOT / "scripts/package-source.py")
+        package = importlib.util.module_from_spec(source_spec)
+        source_spec.loader.exec_module(package)
+        source = Path(self.temp.name) / "public-source"
+        source.mkdir()
+        for name in package.ROOT_FILES:
+            (source / name).write_bytes((ROOT / name).read_bytes())
+        tests = source / "tests"
+        tests.mkdir()
+        (tests / "events.jsonl").write_text('{"source":"SYNTHETIC_PRIVATE_DIALOGUE"}')
+        (tests / "api-key.json").write_text('SYNTHETIC_PRIVATE_CREDENTIAL')
+        (tests / "fixture.json").write_text('{"source":"fictional test"}')
+        package.ROOT = source
+        with contextlib.redirect_stdout(io.StringIO()):
+            package.main()
+        archive = next((source / "dist/release").glob("*.zip"))
+        with zipfile.ZipFile(archive) as zipped:
+            names = zipped.namelist()
+            self.assertTrue(any(name.endswith('/AGENTS.md') for name in names))
+            self.assertTrue(any(name.endswith('/DEBUG_WORKFLOW.md') for name in names))
+            self.assertTrue(any(name.endswith('/fixture.json') for name in names))
+            self.assertFalse(any(name.endswith(('/events.jsonl', '/api-key.json')) for name in names))
 
 
 if __name__ == "__main__":

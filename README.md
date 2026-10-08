@@ -58,6 +58,8 @@
 
 ## 从源码构建
 
+Debug 与回归入口见 [DEBUG_WORKFLOW.md](DEBUG_WORKFLOW.md)，架构与实施依据见 [审查记录](docs/debug-architecture-audit.md)。在源码根运行 `python3 scripts/debug.py check` 可无设备、无窗口、无真实 API 执行生产链路 Replay 与核心检查；报告明确单列已知产品缺口。每次修复 Bug 前需先按 [AGENTS.md](AGENTS.md) 复现并验证根因，修复后运行相关回归。真实采集和用户体验仍需单独验收。
+
 本仓库为唯一维护源码；维护者本机的旧根目录副本已于 2026-10-08 归档，不再同步或用于构建。目录与文档归属见 [维护与归档约定](docs/project-maintenance.md)。
 
 需要 macOS、Xcode Command Line Tools（`clang` 等）和 Python 3.9+。工程使用 Objective-C / AppKit，构建时下载锁定的 Sparkle；框架随应用内置，玩家无需另装运行时。

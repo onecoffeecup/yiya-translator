@@ -332,6 +332,18 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
         }
         CheckReplay(Sources.count==[Scenario[@"responses"] count],@"mock 响应未全部使用",@([Scenario[@"responses"] count]),@(Sources.count));
         CheckReplay(!HasPending() && !app.inFlight,@"回放结束仍有未完成任务",@NO,@YES);
+        if (![Scenario[@"trace_disabled"] boolValue]) {
+            NSMutableSet *httpIDs=[NSMutableSet new];
+            for (NSDictionary *event in ReadTrace(directory)) {
+                if ([event[@"event"] isEqual:@"request_submit"]) {
+                    NSString *httpID=event[@"http_task_id"];
+                    CheckReplay(httpID && ![httpIDs containsObject:httpID],@"每个实际 HTTP 提交必须有独立身份",@YES,@NO);
+                    [httpIDs addObject:httpID];
+                }
+            }
+            NSString *log=[NSString stringWithContentsOfFile:[directory stringByAppendingPathComponent:@"events.jsonl"] encoding:NSUTF8StringEncoding error:NULL];
+            CheckReplay(![log containsString:@"REPLAY_SYNTHETIC_CREDENTIAL"] && ![log containsString:@"replay.invalid"],@"诊断不得包含凭据或接口地址",@YES,@NO);
+        }
         CheckReplay(NSApp==nil && FYCurrentTrace()==nil,@"回放不能创建应用窗口或泄漏诊断上下文",@YES,@NO);
         passed=YES;
     } @catch(NSException *exception) {

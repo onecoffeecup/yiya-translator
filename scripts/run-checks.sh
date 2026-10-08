@@ -10,6 +10,7 @@ python3 tests/UpdateDistributionTests.py
 python3 scripts/run-update-tests.py
 bash scripts/run-diagnostics-tests.sh
 bash scripts/run-module-tests.sh
+python3 scripts/debug.py check --replay-only
 bash scripts/run-dialogue-grammar-tests.sh
 scripts/run-tests.sh
 scripts/run-learning-tests.sh
@@ -20,5 +21,5 @@ done
 if [ "${FY_TEST_COMPILE_ONLY:-0}" = 1 ]; then
   echo "编译检查完成；原生测试未运行，不能视为回归通过。"
 else
-  echo "全部本机回归通过。实际下载与另一台 Mac 的首次安装另见 docs/首次安装验收.md。"
+  echo "既有本机回归执行通过；Debug 报告单列尚未修复的产品缺口。实际下载与另一台 Mac 的首次安装另见 docs/首次安装验收.md。"
 fi
