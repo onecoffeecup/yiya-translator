@@ -1,0 +1,81 @@
+{
+  "schema_version": 1,
+  "name": "ellipsis-jitter",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "初めて言われた・",
+      "expect": {}
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "初めて言われた・",
+      "expect": {}
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "初めて言われた・・・",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "初めて言われた…",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "初めて言われた......",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "text": "初めて言われた．．．",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "text": "初めて言われた‥",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "初めて言われた・",
+      "translation": "测试译文甲"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "vision-image",
+  "language": "en",
+  "mode": "dialogue",
+  "source": "window",
+  "responses": [
+    {
+      "translation": "欢迎来到测试花园"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "image": "assets/english-dialogue.png",
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "image": "assets/english-dialogue.png",
+      "expect": {
+        "requests": 1,
+        "caption_contains": "欢迎来到测试花园",
+        "ocr_calls": 2
+      }
+    }
+  ],
+  "callback_timeout_ms": 30000
+}

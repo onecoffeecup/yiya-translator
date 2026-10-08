@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "name": "dialogue-recurrence",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {}
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {}
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 3,
+        "sources": [
+          "明日はみんなで図書館に行きましょう。",
+          "今日は公園で犬と一緒に遊びます。",
+          "明日はみんなで図書館に行きましょう。"
+        ],
+        "captions": [
+          "测试译文甲",
+          "测试译文乙",
+          "新的甲译文"
+        ]
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲"
+    },
+    {
+      "source": "今日は公園で犬と一緒に遊びます。",
+      "translation": "测试译文乙"
+    },
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "新的甲译文"
+    }
+  ]
+}

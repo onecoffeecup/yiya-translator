@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "name": "stale-mode",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "pending": [
+          0
+        ]
+      }
+    },
+    {
+      "at_ms": 100,
+      "action": "mode",
+      "expect": {},
+      "mode": "ui"
+    },
+    {
+      "at_ms": 200,
+      "action": "release",
+      "expect": {
+        "captions": [],
+        "drops": [
+          "mode_changed"
+        ],
+        "in_flight": false
+      },
+      "request": 0
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲",
+      "hold": true
+    }
+  ],
+  "stable": false
+}

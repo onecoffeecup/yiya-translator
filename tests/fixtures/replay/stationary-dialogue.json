@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "name": "stationary-dialogue",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 0,
+        "captions": []
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "tick",
+      "expect": {
+        "requests": 1,
+        "ocr_calls": 3,
+        "captions": [
+          "测试译文甲"
+        ],
+        "has_reason": "same_as_last_translated"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲"
+    }
+  ]
+}

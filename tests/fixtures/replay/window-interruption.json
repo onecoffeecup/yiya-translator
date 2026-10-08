@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "name": "window-interruption",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "ocr_calls": 2,
+        "captions": [
+          "测试译文甲"
+        ],
+        "has_reason": "capture_unavailable"
+      },
+      "capture_failed": true
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {}
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "测试译文甲",
+          "测试译文乙"
+        ],
+        "in_flight": false
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲"
+    },
+    {
+      "source": "今日は公園で犬と一緒に遊びます。",
+      "translation": "测试译文乙"
+    }
+  ]
+}

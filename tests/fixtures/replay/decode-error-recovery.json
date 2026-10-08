@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "name": "decode-error-recovery",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "errors": 1,
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "has_reason": "submission_throttle"
+      }
+    },
+    {
+      "at_ms": 4500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 2,
+        "errors": 1,
+        "caption_contains": "恢复译文",
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 5000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 2
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲",
+      "raw_body": "invalid json"
+    },
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "恢复译文"
+    }
+  ]
+}

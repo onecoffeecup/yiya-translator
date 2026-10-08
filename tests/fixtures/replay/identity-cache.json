@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "identity-cache",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 600,
+      "action": "cache_probe",
+      "expect": {}
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {}
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲",
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲",
+          "测试译文甲"
+        ]
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲"
+    }
+  ]
+}

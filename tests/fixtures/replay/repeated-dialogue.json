@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "name": "repeated-dialogue",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 0,
+        "captions": []
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 3500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 4000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 4500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 5000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    },
+    {
+      "at_ms": 5500,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ]
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲"
+    }
+  ]
+}

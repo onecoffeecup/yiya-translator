@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "name": "capture-card-interruption",
+  "mode": "dialogue",
+  "source": "capture_card",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ]
+      }
+    },
+    {
+      "at_ms": 100,
+      "action": "tick",
+      "expect": {
+        "requests": 1,
+        "ocr_calls": 1,
+        "has_reason": "task_busy"
+      }
+    },
+    {
+      "at_ms": 200,
+      "action": "disconnect",
+      "expect": {}
+    },
+    {
+      "at_ms": 300,
+      "action": "release",
+      "expect": {
+        "captions": [],
+        "drops": [
+          "input_session_changed"
+        ],
+        "in_flight": false
+      },
+      "request": 0
+    },
+    {
+      "at_ms": 400,
+      "action": "tick",
+      "expect": {
+        "ocr_calls": 1,
+        "has_reason": "capture_card_no_new_frame"
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "connect",
+      "expect": {}
+    },
+    {
+      "at_ms": 600,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "测试译文乙"
+        ]
+      }
+    },
+    {
+      "at_ms": 700,
+      "action": "tick",
+      "expect": {
+        "requests": 2,
+        "ocr_calls": 2,
+        "has_reason": "capture_card_no_new_frame"
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲",
+      "hold": true
+    },
+    {
+      "source": "今日は公園で犬と一緒に遊びます。",
+      "translation": "测试译文乙"
+    }
+  ],
+  "stable": false
+}

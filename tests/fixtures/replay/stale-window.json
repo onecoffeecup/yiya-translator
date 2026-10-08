@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "name": "stale-window",
+  "mode": "dialogue",
+  "source": "window",
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "pending": [
+          0
+        ]
+      }
+    },
+    {
+      "at_ms": 100,
+      "action": "window",
+      "expect": {},
+      "window_id": 43
+    },
+    {
+      "at_ms": 200,
+      "action": "release",
+      "expect": {
+        "captions": [],
+        "drops": [
+          "window_changed"
+        ],
+        "in_flight": false
+      },
+      "request": 0
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "测试译文乙"
+        ]
+      }
+    }
+  ],
+  "responses": [
+    {
+      "source": "明日はみんなで図書館に行きましょう。",
+      "translation": "测试译文甲",
+      "hold": true
+    },
+    {
+      "source": "今日は公園で犬と一緒に遊びます。",
+      "translation": "测试译文乙"
+    }
+  ],
+  "stable": false
+}
