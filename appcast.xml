@@ -1,13 +1,58 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
 --><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
-  <channel>
-    <title>译芽更新</title>
-    <link>https://onecoffeecup.github.io/yiya-translator/appcast.xml</link>
-    <description>译芽应用内更新清单</description>
-    <language>zh-CN</language>
-  </channel>
+    <channel>
+        <title>译芽更新</title>
+        <link>https://onecoffeecup.github.io/yiya-translator/appcast.xml</link>
+        <description>译芽应用内更新清单</description>
+        <language>zh-CN</language>
+        <item>
+            <title>0.2.1</title>
+            <pubDate>Thu, 08 Oct 2026 08:50:45 +0800</pubDate>
+            <link>https://github.com/onecoffeecup/yiya-translator/releases</link>
+            <sparkle:version>17</sparkle:version>
+            <sparkle:shortVersionString>0.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="plain-text"># 译芽 0.2.1 · 语法提速与字幕稳定（2026-10-08）
+
+0.2.1 Pre-release（build 17）包含 Sparkle 应用内更新，已完成本机自动安装与标准弹窗手动升级验收。现有 v0.2.0 保留供追溯。
+
+0.2.1 汇总 10 月 7 日晚至 10 月 8 日凌晨的改动。本次新建 v0.2.1 Release，保留 v0.2.0；包含 `8d86684` 的字段分组、布局与 OCR 稳定修复，以及 `82216b5` 的语法提速和复核滚动修复。
+
+## 本次更新
+
+- 语法首次分析关闭默认长推理，缩短提示与首次解释；保留原字段、原文高亮及学习缓存。只在片段无法定位时允许一次局部修复，减少自动二次请求。
+- 新增「展开解释」和「深度复核」：按需解释所选条目或复核整句；失败保留已有结果。同一条已展开解释可收起后直接复用。
+- 深度复核点击、失败和成功更新都保留阅读位置；等待期间继续滚动，结果返回后仍留在当前位置。
+- 异步分词先保存原句快照，修复切换原句或从查句进入完整学习界面时的文本并发崩溃及旧句提示回填。
+- 贴译保留独立字段、日期、同文原文与持续出现的姓名；不再截断前 20 个 OCR 块。紧排正文按句读和字段边界识别，在所属字段的空隙排版，必要时共同避让相邻自动面板。
+- 遮挡残句保留完整译文；真实对白变化连续确认。批量字幕滑条合并刷新，字色就地更新，减少闪动与重复布局。
+- 接入 Sparkle 应用内更新：可在「译芽 → 检查更新…」查看新版本，默认自动检查，由玩家选择安装。更新清单和更新包均经过签名验证；设置、收藏和学习数据继续保存在玩家自己的应用数据目录。
+
+## 下载和升级
+
+普通使用者下载 **`yiya-0.2.1.zip`**，已包含离线词典。源码构建下载 `fuyi-source-0.2.1.zip` 和 `fuyi-reference-20261004.zip`；三个附件均提供 `.sha256` 校验文件。
+
+需要 macOS 13+；安装包包含 Apple Silicon 和 Intel 双架构。解压后先读「先读我.txt」及「首次打开说明.txt」，再将 App 放入应用程序文件夹。接口费用由使用者自己的服务商账户承担。
+
+**现有 0.2.0 用户需要先手动安装一次包含 Sparkle 的版本。** 之后的新版本可通过应用内更新安装，无需每次另下新包。维护者另提供 `yiya-0.2.1-build-17-update.zip` 供 Sparkle 使用，普通首次安装仍下载上面的安装包。
+
+**从 0.2.0 升级到 0.2.1，需要重新填写一次 API Key。** Key 继续保存在当前 macOS 用户的私有应用数据文件中；之后同版本重开、重装或 build 递增会自动读取。不访问钥匙串，不随源码或应用包分发。
+
+## 验证与已知限制
+
+本轮验证范围记录在 [发布检查记录](https://github.com/onecoffeecup/yiya-translator/blob/main/docs/发布检查结果.md)。自动检查、合成采集画面和本机试用不能代替另一台 Mac 的首次安装或 Intel 实机验证。
+
+接入后的完整本机回归 55 步全部通过。独立验收应用使用标准 Sparkle 弹窗完成 build 13 → 14 安装与原路径重启；合成凭据、字体设置、收藏及资料文件散列和权限保持不变。该验收未使用真实玩家资料，正式译芽跨机器升级及权限继承仍待现场验证。
+
+本版本标记为 Pre-release。安装包采用 ad-hoc 签名，尚未经过 Apple 公证；首次打开方式随包提供。不同设备的首次授权、全屏／多屏和采集卡长时间运行仍需现场验证。此前采集卡零帧反馈的原因尚未确认，遇到此情况可改用窗口截图并导出诊断状态。
+
+AI 翻译、语法解释和参考等级可能有误；复核不保证找全所有语法，不强求 N1/N2 数量。反馈请附系统版本、芯片、复现步骤和诊断状态，并隐藏 API Key、设置文件及个人内容。
+</description>
+            <enclosure url="https://github.com/onecoffeecup/yiya-translator/releases/download/v0.2.1/yiya-0.2.1-build-17-update.zip" length="39803636" type="application/octet-stream" sparkle:edSignature="WKG7Htnfd38mLmq7cJCCFqnyCd8J3RXq2TXIVuQ2uqfG+Hoy9MTi5qILc8LQvzp0Y63bkLDb2Kpa2aR+UC8UDw=="></enclosure>
+        </item>
+    </channel>
 </rss><!-- sparkle-signatures:
-edSignature: g3jJrBf+s7byGg43Pw4ir30RFf94ptXr3UL4vTYJPIXrgnYZWsf7zFFW171MSu4+uQ5j1GtfO72etXHczRqYBw==
-length: 608
+edSignature: RBm2UWpSDwlO5z3XRwWaJgZIOwS0mQQxwagGfgQF3zdpAgKqlTKMzeXZ53KHAwJiN//hGFeOLAViDwwqA//jBw==
+length: 5357
 -->
