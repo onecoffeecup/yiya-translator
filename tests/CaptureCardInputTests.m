@@ -173,7 +173,7 @@ static CaptureCardApp *CardApp(void) {
     app.captions = [NSMutableArray new];
     app.statuses = [NSMutableArray new];
     app.inlineTranslationCache = [NSMutableDictionary new];
-    // 本套用例关注采集会话闸门，不测文本稳定度：关掉"等待稳定"让每轮都能确定性地翻译一次。
+    // 关闭对白的"等待稳定"；界面模式仍使用生产的连续两帧确认。
     CardControl *stable = [CardControl new]; stable.state = NSControlStateValueOff;
     CardControl *fit = [CardControl new]; fit.state = NSControlStateValueOff;
     app.stableTextCheckbox = (id)stable;
@@ -529,6 +529,11 @@ int main(void) { @autoreleasepool {
     [uiUnmapped start];
     [uiInput testEnqueueFrameIndex:1 pixelSize:16];
     CardCycle(uiUnmapped, CardFixture(@"設定メニュー", .3));
+    Require([CardStatusText(uiUnmapped) isEqualToString:@"正在确认界面文字"] &&
+            uiUnmapped.inlineApplies == 0 && MockRequests == 0,
+            @"the first UI frame waits for confirmation without a request or inline placement");
+    Require([uiInput testEnqueueFrameIndex:2 pixelSize:16], @"UI confirmation needs a distinct fresh frame");
+    CardCycle(uiUnmapped, CardFixture(@"設定メニュー", .3));
     Require(uiUnmapped.inlineApplies == 0, @"capture-card mode without a locatable region must not place inline panels");
     Require([CardStatusText(uiUnmapped) containsString:@"暂时无法定位游戏画面"],
             @"the shortfall must be one short line in the status area");
@@ -543,7 +548,7 @@ int main(void) { @autoreleasepool {
     }
     // 8a-2) 定位失败不影响对白翻译：切回对白模式照常产生字幕。
     uiUnmapped.fixtureMode = ContentModeDialogue;
-    Require([uiInput testEnqueueFrameIndex:2 pixelSize:16], @"dialogue check needs a fresh capture frame");
+    Require([uiInput testEnqueueFrameIndex:3 pixelSize:16], @"dialogue check needs a fresh capture frame");
     NSUInteger captionsBeforeDialogue = uiUnmapped.captions.count;
     CardCycle(uiUnmapped, CardFixture(@"次の台詞です。", .6));
     Require(uiUnmapped.captions.count == captionsBeforeDialogue + 1,
@@ -706,6 +711,9 @@ int main(void) { @autoreleasepool {
     uiMapped.selectedCaptureDeviceID = @"dev-A";
     // ⑦ 调整有效时：与窗口截图同一条贴译流程
     CardCycle(uiMapped, CardFixture(@"設定メニュー", .3));
+    Require(uiMapped.inlineApplies == 0, @"a calibrated mapping does not bypass UI text confirmation");
+    Require([mappedInput testEnqueueFrameIndex:4 pixelSize:16], @"calibrated UI confirmation needs a fresh frame");
+    CardCycle(uiMapped, CardFixture(@"設定メニュー", .3));
     Pump(^BOOL { return uiMapped.inlineApplies > 0 || uiMapped.captions.count > 0; });
     Require(uiMapped.inlineApplies == 1, @"capture card with a calibrated display mapping must place inline translations");
     // ⑧ 清除校准 → 立刻回到「映射不可用」
@@ -719,6 +727,8 @@ int main(void) { @autoreleasepool {
     uiWindow.fixtureAutoMode = NO;
     uiWindow.fixtureWindowItem = CardWindow(100, 100, 800, 600);
     uiWindow.running = YES;
+    CardCycle(uiWindow, CardFixture(@"設定メニュー", .3));
+    Require(uiWindow.inlineApplies == 0, @"window-screenshot UI also waits for its second observation");
     CardCycle(uiWindow, CardFixture(@"設定メニュー", .3));
     Pump(^BOOL { return uiWindow.inlineApplies > 0; });
     Require(uiWindow.inlineApplies == 1, @"window-screenshot mode still uses inline translation");

@@ -47,6 +47,7 @@ python3 scripts/publish-update.py --site .build/update-publish
 
 ## 本轮验证
 
+- 接入后的完整本机回归 55 步全部通过，其中 47 步实际运行原生界面／安装测试；没有跳过或仅编译步骤。包含语法动作、200 次工作区循环、OCR／贴译、采集卡、凭据和剪贴板恢复，详见 [最新发布检查记录](发布检查结果.md)。
 - arm64 / x86_64 构建通过，仍有既有的 7 条未使用函数警告。
 - 原生菜单、关闭／开启自动检查、空签名清单、真实 Sparkle 安装与重启、篡改清单拒绝、篡改更新包拒绝通过。临时测试应用使用独立 bundle ID、合成 API Key、设置和学习数据库，正常升级与失败后文件内容和权限保持不变。
 - 原有凭据检查通过：18 条文件存储检查与 10 条设置检查；真实玩家凭据和学习数据库未用于测试。
@@ -59,6 +60,6 @@ FY_TEST_ALLOW_UI=1 python3 scripts/run-update-tests.py
 
 运行真实安装测试前预留桌面；测试与 `run-acceptance.py` 共用预留锁。`--compile-only` 或 `FY_TEST_COMPILE_ONLY=1` 仅编译，不记录为安装测试通过。这两项已加入常规检查与验收入口。
 
-证据在本机 `.build/sparkle-download/` 与 `.build/update-checks/summary.json`。此轮未替换运行中的玩家应用，也未创建 0.2.1 Release。实际普通玩家下载升级、跨机器、Intel 实机与屏幕录制／相机权限继承仍待现场验收。原有采集卡回归未通过项仍见 [发布检查记录](发布检查结果.md)，本轮专项通过不等于全套回归通过。
+接入专项证据在本机 `.build/sparkle-download/` 与 `.build/update-checks/summary.json`，最新完整回归记录在 `.build/acceptance/20261008T000530Z-5aca7b/summary.json`。原采集卡失败的单帧夹具已按生产两帧确认规则修正，专项和完整回归均通过；生产代码未改。此轮未替换运行中的玩家应用，也未创建 0.2.1 Release。实际普通玩家下载升级、跨机器、Intel 实机与屏幕录制／相机权限继承仍待现场验收。
 
 官方参考：[接入](https://sparkle-project.org/documentation/)、[程序入口](https://sparkle-project.org/documentation/programmatic-setup/)、[发布与签名](https://sparkle-project.org/documentation/publishing/)。
