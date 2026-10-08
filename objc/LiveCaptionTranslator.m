@@ -3406,7 +3406,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [[self stabilityOwner] reset];
     [self setStatus:@"正在监测画面"];
 
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:MAX(0.5, self.intervalSlider.doubleValue)
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:[self recognitionPollingInterval]
                                                   target:self
                                                 selector:@selector(timerFired:)
                                                 userInfo:nil
@@ -3893,6 +3893,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 NSInteger committedMode = (self.inlineOverflowChoicePanel || self.inlineExpandedReadingPanel)
                     ? previousMode : [self stableContentModeForBlocks:ocrBlocks];
                 if (previousMode != committedMode) {
+                    // Follow the new mode's cadence without creating a timer
+                    // in headless/manual single-frame callers.
+                    if (self.timer) { [self restartTimerIfRunning]; }
                     FYTrace(trace, @"caption_drop", @{@"reason": @"mode_changed", @"previous_mode": @(previousMode), @"mode": @(committedMode)});
                     NSString *switched = committedMode == ContentModeUI ? @"自动判别：功能界面 → 切换为贴译" : @"自动判别：剧情对白 → 切换为字幕";
                     [self setStatus:switched];
@@ -8578,7 +8581,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     NSError *jsonError = nil;
     NSMutableURLRequest *request = [FYTranslationManager requestWithURL:url apiKey:apiKey model:model
         sourceText:text systemPrompt:(systemPrompt ?: [self systemPrompt]) maxTokens:maxTokens
-        disableReasoning:[self isDeepSeekRequest] error:&jsonError];
+        disableReasoning:FYIsDeepSeekService(url.absoluteString, model) error:&jsonError];
     if (!request) {
         FYTrace(trace, @"request_complete", @{@"reason": @"serialization_error", @"success": @NO, @"error_code": @(jsonError.code)});
         completion(nil, jsonError);
@@ -8708,11 +8711,20 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 - (NSDate *)lastTranslationAttemptDate { return [self translationState].lastAttemptDate; }
 - (void)setLastTranslationAttemptDate:(NSDate *)value { [self translationState].lastAttemptDate=value; }
 
+- (NSTimeInterval)recognitionPollingInterval {
+    // The interval control is not exposed in the current player UI. Dialogue
+    // must not spend another 1.2s per stability observation because of its
+    // legacy saved default. Keep accurate OCR and two/three-frame confirmation;
+    // inFlight still prevents overlapping capture/OCR/translation cycles.
+    return [self effectiveModeSegment] == ContentModeDialogue ? 0.5
+        : MAX(0.5, self.intervalSlider.doubleValue);
+}
+
 - (void)restartTimerIfRunning {
     if (!self.running) { return; }
 
     [self.timer invalidate];
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:MAX(0.5, self.intervalSlider.doubleValue)
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:[self recognitionPollingInterval]
                                                   target:self
                                                 selector:@selector(timerFired:)
                                                 userInfo:nil

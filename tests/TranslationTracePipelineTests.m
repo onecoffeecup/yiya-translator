@@ -7,6 +7,7 @@
 static FYTranslationTrace *TestTrace;
 static NSUInteger MockRequests;
 static NSMutableArray *SubmittedSources;
+static NSDictionary *LastRequestPolicy;
 static BOOL HoldResponse;
 static void (^PendingResponse)(void);
 
@@ -33,6 +34,9 @@ static void (^PendingResponse)(void);
 - (id)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion {
     // Inspect only fictional test request body; never output or log credentials.
     NSDictionary *body = [NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:NULL];
+    LastRequestPolicy = @{@"model": body[@"model"] ?: @"",
+        @"thinking_type": body[@"thinking"][@"type"] ?: @"",
+        @"reasoning_effort": body[@"reasoning_effort"] ?: @""};
     NSString *source = [body[@"messages"] lastObject][@"content"];
     [SubmittedSources addObject:source];
     MockRequests++;
@@ -52,6 +56,7 @@ static void (^PendingResponse)(void);
 @interface TraceControl : NSObject
 @property NSInteger state;
 @property NSInteger selectedSegment;
+@property double doubleValue;
 @property(copy) NSString *stringValue;
 @end
 @implementation TraceControl
@@ -118,6 +123,46 @@ static void TraceCycle(TracePipelineApp *a, NSArray *fixture) {
     a.fixture = fixture; [a timerFired:nil]; Pump(^BOOL { return !a.inFlight; });
     Require(FYCurrentTrace() == nil, @"scoped context cannot leak after timer callback");
 }
+static void CheckDialogueLatencyPolicies(void) {
+    // Exercise the actual scheduled timer and serialized HTTP request. Only
+    // fictional service configuration is inspected; no UI or real API calls.
+    TracePipelineApp *polling = TraceApp();
+    TraceControl *interval = [TraceControl new]; interval.doubleValue = 1.2;
+    polling.intervalSlider = (id)interval;
+    [polling restartTimerIfRunning];
+    NSTimeInterval dialogueInterval = polling.timer.timeInterval;
+    [polling.timer invalidate]; polling.timer = nil;
+    polling.fixtureMode = ContentModeUI;
+    [polling restartTimerIfRunning];
+    NSTimeInterval interfaceInterval = polling.timer.timeInterval;
+    [polling.timer invalidate]; polling.timer = nil;
+
+    TracePipelineApp *relay = TraceApp();
+    relay.baseURLField.stringValue = @"https://relay.example.invalid/v1";
+    relay.modelField.stringValue = @"gpt-4.1-mini";
+    relay.realtimeModelField.stringValue = @"deepseek-flash";
+    relay.stableTextCheckbox.state = NSControlStateValueOff;
+    TraceCycle(relay, Fixture(@"明日はみんなで図書館に行きましょう。", .4));
+    BOOL realtimeReasoningDisabled = [LastRequestPolicy[@"model"] isEqual:@"deepseek-flash"] &&
+        [LastRequestPolicy[@"thinking_type"] isEqual:@"disabled"] &&
+        [LastRequestPolicy[@"reasoning_effort"] isEqual:@"none"];
+
+    TracePipelineApp *other = TraceApp();
+    other.baseURLField.stringValue = @"https://relay.example.invalid/v1";
+    other.modelField.stringValue = @"deepseek-flash";
+    other.realtimeModelField.stringValue = @"gpt-4.1-mini";
+    other.stableTextCheckbox.state = NSControlStateValueOff;
+    TraceCycle(other, Fixture(@"今日は公園で犬と一緒に遊びます。", .4));
+    BOOL otherModelUnmodified = [LastRequestPolicy[@"model"] isEqual:@"gpt-4.1-mini"] &&
+        [LastRequestPolicy[@"thinking_type"] length] == 0 &&
+        [LastRequestPolicy[@"reasoning_effort"] length] == 0;
+    printf("Latency probes: dialogue_poll_ms=%.0f; interface_poll_ms=%.0f; realtime_reasoning_disabled=%d; other_model_unmodified=%d\n",
+        dialogueInterval * 1000, interfaceInterval * 1000, realtimeReasoningDisabled, otherModelUnmodified);
+    Require(dialogueInterval <= .5, @"dialogue must confirm fresh frames at most 500ms apart despite the legacy hidden 1.2s setting");
+    Require(interfaceInterval == 1.2, @"interface polling must retain its configured cadence");
+    Require(realtimeReasoningDisabled, @"DeepSeek realtime override on a relay must disable reasoning based on the actual requested model");
+    Require(otherModelUnmodified, @"a different quality model must not inject DeepSeek fields into a non-DeepSeek realtime request");
+}
 static TracePipelineApp *RunSequence(NSArray *full, NSArray *partial) {
     MockRequests = 0; SubmittedSources = [NSMutableArray new];
     TracePipelineApp *a = TraceApp();
@@ -152,6 +197,7 @@ int main(void) { @autoreleasepool {
     TestTrace = [[FYTranslationTrace alloc] initWithDirectory:root clock:^{ return NSDate.date.timeIntervalSince1970; } maxBytes:1024 * 1024];
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class, @selector(shared)), class_getClassMethod(FYTranslationTrace.class, @selector(pipelineTestShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
+    CheckDialogueLatencyPolicies();
     NSString *log = [root stringByAppendingPathComponent:@"events.jsonl"];
     NSArray *full = Fixture(@"明日はみんなで図書館に行きましょう。", .65);
     NSArray *partial = Fixture(@"明日はみんなで", .31);
