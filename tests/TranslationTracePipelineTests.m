@@ -87,6 +87,7 @@ static void (^PendingResponse)(void);
 @property NSUInteger inlineApplies;
 @property BOOL captureReadOnMain;
 @property NSUInteger ocrCalls;
+@property(copy) NSString *lastStatus;
 @property dispatch_semaphore_t captureEntered;
 @property dispatch_semaphore_t captureRelease;
 @end
@@ -124,7 +125,7 @@ static void (^PendingResponse)(void);
 - (void)updateThemeSummary {}
 - (void)updateOCRPreviewIfVisible {}
 - (void)scheduleSettingsSave {}
-- (void)setStatus:(NSString *)s {}
+- (void)setStatus:(NSString *)s { self.lastStatus=s; }
 - (void)updatePreviewFromImage:(CGImageRef)i generation:(NSInteger)g {}
 - (void)refreshLearningSource {}
 - (void)refreshLearningStatus {}
@@ -442,6 +443,7 @@ static void CheckServiceTestCancellation(void) {
         staleResponse(); Tick();
         Require([a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"] && a.captions.count == 0,
                 @"test completes independently without replacing the changed run caption");
+        if (!a.running) { Require([a.lastStatus isEqual:@"翻译测试完成"],@"a completed test clears the paused status even after window/source/scope changes"); }
         HoldResponse = NO;
     }
 }
@@ -455,6 +457,7 @@ static void CheckServiceConfigurationCancellation(void) {
         Require(oldTask.cancelCalls==1,@"changing service or testing again cancels the old service task only");
         oldResponse(); Tick();
         Require([a.serviceStatusLabel.stringValue isEqual:action==0 ? @"服务未测试" : @"正在测试服务"],@"old service completion cannot overwrite changed configuration or replacement test");
+        if (action==0) { Require([a.lastStatus isEqual:@"服务未测试"],@"cancelled service test clears paused testing status"); }
         if (action==1) { void (^fresh)(void)=PendingResponse; PendingResponse=nil; fresh(); Tick();
             Require([a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"] && a.captions.count==1,@"replacement service test completes and keeps idle test-caption behavior"); }
         HoldResponse=NO;

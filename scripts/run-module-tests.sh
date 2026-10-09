@@ -45,8 +45,8 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/InlineFontStabilityTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \
-  -framework Cocoa -o "$OUT/InlineFontStabilityTests"
-"$OUT/InlineFontStabilityTests"
+  -framework Cocoa -o python3 "$ROOT_DIR/scripts/run-headless-test.py" --sample "$OUT/InlineFontStabilityTests.sample.txt" "$OUT/InlineFontStabilityTests"
+python3 "$ROOT_DIR/scripts/run-headless-test.py" --sample "$OUT/InlineFontStabilityTests.sample.txt" "$OUT/InlineFontStabilityTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationTaskTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \

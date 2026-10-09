@@ -27,9 +27,12 @@ static NSArray *Scene(CGFloat gap) {
     ];
 }
 int main(void) { @autoreleasepool {
+    fprintf(stderr,"FONT_PROBE before default engine\n");
     CGRect viewport = CGRectMake(0, 0, 400, 400);
     FYInlineLayoutEngine *engine = [FYInlineLayoutEngine defaultEngine];
+    fprintf(stderr,"FONT_PROBE before first layout\n");
     FYInlineLayoutResult *result = [engine layoutRequests:Scene(150) viewport:viewport previous:nil];
+    fprintf(stderr,"FONT_PROBE after first layout\n");
     FYInlinePlacement *body = result.placements.firstObject;
     Check(body.mode == FYInlineDisplayModeFullCard && body.font.pointSize == 17,
           @"fixture starts with readable 17pt paragraph after fitting the crowded scene");

@@ -5415,16 +5415,18 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (void)invalidateServiceTest {
+    BOOL pending = [self.serviceStatusLabel.stringValue isEqualToString:@"正在测试服务"];
     self.serviceTestGeneration += 1;
     [self.serviceTestTaskOwner cancelActiveTask];
+    if (pending && !self.running) { [self setStatus:@"服务未测试"]; }
 }
 
 - (void)testTranslation:(id)sender {
     NSString *sample = self.languageControl.selectedSegment == 1
         ? @"Would you like to walk home together today?"
         : @"今日は一緒に帰りませんか？";
-    if (!self.running) { [self setStatus:@"正在测试翻译"]; }
     [self invalidateServiceTest];
+    if (!self.running) { [self setStatus:@"正在测试翻译"]; }
     NSInteger testGeneration = self.serviceTestGeneration;
     NSInteger runGeneration = self.translationGeneration;
     self.serviceStatusLabel.stringValue = @"正在测试服务";
@@ -5432,13 +5434,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         longText:NO serviceTest:YES completion:^(NSString *translated, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (testGeneration != self.serviceTestGeneration) { return; }
-            BOOL showTestCaption = !self.running && runGeneration == self.translationGeneration;
+            BOOL showTestStatus = !self.running;
+            BOOL showTestCaption = showTestStatus && runGeneration == self.translationGeneration;
             if (error) {
-                if (showTestCaption) { [self showError:error.localizedDescription]; [self setStatus:@"翻译测试失败"]; }
+                if (showTestStatus) { [self showError:error.localizedDescription]; [self setStatus:@"翻译测试失败"]; }
                 self.serviceStatusLabel.stringValue = @"服务测试失败";
                 self.serviceErrorLabel.stringValue = error.localizedDescription ?: @"未知错误";
             } else {
-                if (showTestCaption) { [self showError:@""]; [self setStatus:@"翻译测试完成"]; }
+                if (showTestStatus) { [self showError:@""]; [self setStatus:@"翻译测试完成"]; }
                 self.serviceStatusLabel.stringValue = @"服务测试成功";
                 self.serviceErrorLabel.stringValue = @"";
                 if (showTestCaption) { [self updateCaptionWindowWithText:[self displayableTranslation:translated sourceText:sample] status:@"翻译测试完成"]; }
