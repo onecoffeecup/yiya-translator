@@ -1,5 +1,7 @@
 #import "FYCaptureCardInput.h"
 
+NSTimeInterval const FYCaptureCardPreviewFrameInterval = 1.0 / 30.0;
+
 FYCapturePermissionAction FYCapturePermissionActionForAvailability(FYCaptureCardAvailability availability) {
     if (availability==FYCaptureCardAvailabilityAuthorized) return FYCapturePermissionActionContinue;
     if (availability==FYCaptureCardAvailabilityNotDetermined) return FYCapturePermissionActionRequest;
@@ -70,7 +72,7 @@ NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionState state) {
 }
 
 - (instancetype)init {
-    if ((self = [super init])) { _minimumInterval = 0.1; }
+    if ((self = [super init])) { _minimumInterval = FYCaptureCardPreviewFrameInterval; }
     return self;
 }
 
@@ -80,7 +82,9 @@ NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionState state) {
 
 - (BOOL)shouldStoreFrameAtTime:(NSTimeInterval)now {
     @synchronized(self) {
-        if (_frame && _minimumInterval > 0 && (now - _lastStoredTime) < _minimumInterval) {
+        // Small callback jitter must not drop every other nominal 30 Hz frame.
+        NSTimeInterval tolerance = MIN(0.001, MAX(0, _minimumInterval) * 0.05);
+        if (_frame && _minimumInterval > 0 && (now - _lastStoredTime) < _minimumInterval - tolerance) {
             _skippedCount += 1;
             return NO;
         }

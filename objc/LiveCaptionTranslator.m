@@ -501,6 +501,27 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 @end
 
+static CGImageRef FYCopyPreviewImage(CGImageRef source) {
+    if (!source) { return NULL; }
+    size_t sourceWidth = CGImageGetWidth(source), sourceHeight = CGImageGetHeight(source);
+    double scale = MIN(1.0, 2560.0 / MAX((size_t)1, MAX(sourceWidth, sourceHeight)));
+    // Retain immutable native-size frames instead of allocating and redrawing
+    // another full-frame bitmap on every preview tick.
+    if (scale >= 1.0) { return CGImageRetain(source); }
+    size_t width = MAX((size_t)1, (size_t)llround(sourceWidth * scale));
+    size_t height = MAX((size_t)1, (size_t)llround(sourceHeight * scale));
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(NULL, width, height, 8, width * 4, space,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+    CGColorSpaceRelease(space);
+    if (!context) { return NULL; }
+    CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+    CGContextDrawImage(context, CGRectMake(0, 0, width, height), source);
+    CGImageRef result = CGBitmapContextCreateImage(context);
+    CGContextRelease(context);
+    return result;
+}
+
 @interface AppDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, NSTextFieldDelegate, NSSharingServiceDelegate>
 #ifdef FY_ENABLE_UPDATES
 @property(nonatomic, strong) FYAppUpdater *appUpdater;
@@ -601,6 +622,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) FYWindowManager *windowManager;
 @property(nonatomic, strong) FYOCRManager *ocrManager;
 @property(nonatomic, strong) dispatch_queue_t captureQueue;
+@property(nonatomic, strong) dispatch_queue_t previewQueue;
+@property(nonatomic, strong) NSTimer *previewTimer;
+@property(nonatomic) BOOL previewInFlight;
+@property(nonatomic) NSUInteger previewRequestSerial;
+@property(nonatomic) NSUInteger previewRenderSerial;
+@property(nonatomic) uint64_t lastPreviewCaptureFrameIndex;
 @property(nonatomic, strong) NSMutableArray<WindowItem *> *windows;
 @property(nonatomic, strong) NSTextField *diagnosticStatusLabel;
 @property(nonatomic, strong) NSDate *lastDiagnosticCheckDate;
@@ -951,6 +978,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         _inlineStableBlockIDs = [NSMutableDictionary dictionary];
         self.inlineTranslationCache = [NSMutableDictionary dictionary];
         _captureQueue = dispatch_queue_create("com.nanami.yiya.capture", DISPATCH_QUEUE_SERIAL);
+        _previewQueue = dispatch_queue_create("com.nanami.yiya.preview", DISPATCH_QUEUE_SERIAL);
         // Create the shared recognizer before any background OCR can access it.
         [self ocrManager];
     }
@@ -3373,6 +3401,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (void)advanceTranslationGeneration {
     self.translationGeneration += 1;
+    self.previewRequestSerial += 1;
+    self.previewRenderSerial += 1;
+    self.lastPreviewCaptureFrameIndex = 0;
     [self.translationTaskOwner cancelActiveTask];
     if ([self.serviceStatusLabel.stringValue isEqualToString:@"正在测试服务"]) {
         self.serviceTestGeneration += 1;
@@ -3431,6 +3462,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [[self translationState] reset];
     [[self stabilityOwner] reset];
     [self setStatus:@"正在监测画面"];
+    [self restartPreviewTimerIfRunning];
 
     self.timer = [NSTimer scheduledTimerWithTimeInterval:[self recognitionPollingInterval]
                                                   target:self
@@ -3447,6 +3479,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.lastOCRedCaptureFrameIndex = 0;
     [self.timer invalidate];
     self.timer = nil;
+    [self.previewTimer invalidate];
+    self.previewTimer = nil;
     self.running = NO;
     self.captureUnavailable = NO;
     self.inFlight = NO;
@@ -4863,6 +4897,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.latestSourceLabel.stringValue = @"";
     [self showPreviewUnavailable:[self captureCardInputEnabled] ? @"等待采集卡画面" : @"选择窗口并开始翻译后显示画面"];
     [self updateRunState];
+    [self restartPreviewTimerIfRunning];
 }
 
 // 开始/重连采集会话。权限、设备缺失或被占用都返回 NO 并给出明确状态，绝不改用其他设备。
@@ -7888,6 +7923,62 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 
 #pragma mark - Capture and OCR
 
+- (void)restartPreviewTimerIfRunning {
+    [self.previewTimer invalidate];
+    self.previewTimer = nil;
+    self.previewRequestSerial += 1;
+    self.previewRenderSerial += 1;
+    self.lastPreviewCaptureFrameIndex = 0;
+    if (!self.running || !self.framePreview) { return; }
+    // Capture-card video targets 30 Hz; window screenshots stay at 10 Hz.
+    // Both remain independent of OCR stability and translation completion.
+    NSTimeInterval interval = [self captureCardInputEnabled] ? FYCaptureCardPreviewFrameInterval : 0.1;
+    self.previewTimer = [NSTimer timerWithTimeInterval:interval target:self
+        selector:@selector(previewTimerFired:) userInfo:nil repeats:YES];
+    [NSRunLoop.mainRunLoop addTimer:self.previewTimer forMode:NSRunLoopCommonModes];
+    [self previewTimerFired:self.previewTimer];
+}
+
+- (void)previewTimerFired:(NSTimer *)timer {
+    if (!self.running || !self.framePreview || self.previewInFlight) { return; }
+    BOOL card = [self captureCardInputEnabled];
+    FYCaptureCardInput *input = self.captureCardInput;
+    uint32_t windowID = [self displayTargetWindowID];
+    if (!card && windowID == 0) { return; }
+    uint64_t index = card ? input.latestFrameIndex : 0;
+    if (card && (index == 0 || index == self.lastPreviewCaptureFrameIndex)) { return; }
+    NSInteger generation = self.translationGeneration;
+    NSUInteger epoch = input.sessionEpoch, serial = ++self.previewRequestSerial;
+    self.previewInFlight = YES;
+    // One capture/resize/delivery at a time on a separate queue. Slow work is
+    // skipped rather than accumulating old screenshots behind translation.
+    dispatch_async(self.previewQueue, ^{
+        @autoreleasepool {
+            CGImageRef image = card ? [input copyLatestFrame] : [self copyFullCapturedImageForWindow:windowID];
+            CGImageRef preview = FYCopyPreviewImage(image);
+            if (image) { CGImageRelease(image); }
+            dispatch_async(dispatch_get_main_queue(), ^{
+                // Invalidation retains this busy slot until delivery. No newer
+                // preview task can own it, including across stop/restart.
+                self.previewInFlight = NO;
+                if (serial == self.previewRequestSerial && preview && self.running &&
+                    generation == self.translationGeneration && epoch == input.sessionEpoch &&
+                    card == [self captureCardInputEnabled] && windowID == [self displayTargetWindowID]) {
+                    self.lastPreviewCaptureFrameIndex = index;
+                    [self applyPreviewImage:preview];
+                }
+                if (preview) { CGImageRelease(preview); }
+            });
+        }
+    });
+}
+
+- (void)applyPreviewImage:(CGImageRef)image {
+    self.framePreview.image = [[NSImage alloc] initWithCGImage:image
+        size:NSMakeSize(CGImageGetWidth(image), CGImageGetHeight(image))];
+    self.previewPlaceholder.hidden = YES;
+}
+
 - (BOOL)hasScreenAccess {
     return CGPreflightScreenCaptureAccess();
 }
@@ -8960,34 +9051,20 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 
 - (void)updatePreviewFromImage:(CGImageRef)image generation:(NSInteger)generation {
     if (!image || !self.framePreview) { return; }
+    // OCR frames can be older than the independently updated live preview.
+    if (self.running && self.previewTimer) { return; }
     NSDate *now = [NSDate date];
-    if (self.lastPreviewDate && [now timeIntervalSinceDate:self.lastPreviewDate] < 1.0) { return; }
+    if (self.lastPreviewDate && [now timeIntervalSinceDate:self.lastPreviewDate] < 0.1) { return; }
     self.lastPreviewDate = now;
+    NSUInteger serial = ++self.previewRenderSerial;
     CGImageRef retained = CGImageRetain(image);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        size_t sourceWidth = CGImageGetWidth(retained);
-        size_t sourceHeight = CGImageGetHeight(retained);
-        // Keep enough pixels for Retina previews; bound memory for large captures.
-        double scale = MIN(1.0, 2560.0 / MAX((size_t)1, MAX(sourceWidth, sourceHeight)));
-        size_t width = MAX((size_t)1, (size_t)llround(sourceWidth * scale));
-        size_t height = MAX((size_t)1, (size_t)llround(sourceHeight * scale));
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(NULL, width, height, 8, width * 4, colorSpace,
-                                                      kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
-        CGColorSpaceRelease(colorSpace);
-        CGImageRef scaled = NULL;
-        if (context) {
-            CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
-            CGContextDrawImage(context, CGRectMake(0, 0, width, height), retained);
-            scaled = CGBitmapContextCreateImage(context);
-            CGContextRelease(context);
-        }
+        CGImageRef scaled = FYCopyPreviewImage(retained);
         CGImageRelease(retained);
         if (!scaled) { return; }
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (generation == self.translationGeneration) {
-                self.framePreview.image = [[NSImage alloc] initWithCGImage:scaled size:NSMakeSize(width, height)];
-                self.previewPlaceholder.hidden = YES;
+            if (generation == self.translationGeneration && serial == self.previewRenderSerial) {
+                [self applyPreviewImage:scaled];
             }
             CGImageRelease(scaled);
         });

@@ -1,8 +1,11 @@
 #import <Foundation/Foundation.h>
+
 #import <CoreGraphics/CoreGraphics.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
+/// Shared cadence for the latest-frame slot and capture-card preview (30 Hz).
+FOUNDATION_EXPORT NSTimeInterval const FYCaptureCardPreviewFrameInterval;
 FOUNDATION_EXPORT BOOL FYCaptureFrameNeedsRecognition(uint64_t latestIndex, uint64_t lastRecognizedIndex);
 
 /// 相机（视频采集）授权状态。译芽只读取授权，不在这里申请；申请必须由用户显式操作触发。
@@ -51,7 +54,7 @@ FOUNDATION_EXPORT NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionS
 /// 只保留一帧、按最短间隔限速、旧帧直接丢弃并计数，缓存因此天然有界，
 /// 不会出现积压旧画面后按序补算的情况。
 @interface FYCaptureCardFrameSlot : NSObject
-/// 两次存帧之间的最短间隔（秒），默认 0.1。到期前的帧被丢弃并计入 skippedCount。
+/// 两次存帧之间的最短间隔（秒），默认 1/30；允许最多 1 ms 调度抖动。到期前的帧被丢弃并计入 skippedCount。
 @property (nonatomic) NSTimeInterval minimumInterval;
 /// 现在是否允许存帧（限速判断）。
 - (BOOL)shouldStoreFrameAtTime:(NSTimeInterval)now;

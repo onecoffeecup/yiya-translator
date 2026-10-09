@@ -3,6 +3,13 @@
 #import "LearningAppTestSupport.h"
 #import <objc/runtime.h>
 #import <sys/stat.h>
+#import "FYTestCaptureCardInput.h"
+
+@interface AppDelegate (LivePreviewTests)
+- (void)restartPreviewTimerIfRunning;
+- (void)previewTimerFired:(NSTimer *)timer;
+- (void)applyPreviewImage:(CGImageRef)image;
+@end
 
 static FYTranslationTrace *TestTrace;
 static NSUInteger MockRequests;
@@ -141,6 +148,22 @@ static void (^PendingResponse)(void);
 @property BOOL observeGenerationReads;
 @property NSUInteger observedGenerationReads;
 @end
+
+@interface TracePreviewApp : TracePipelineApp
+@property NSUInteger previewApplies;
+@property size_t previewWidth;
+@property NSUInteger previewCaptures;
+@end
+@implementation TracePreviewApp
+- (CGImageRef)copyFullCapturedImageForWindow:(uint32_t)windowID {
+    @synchronized(self) { self.previewCaptures++; }
+    return [super copyFullCapturedImageForWindow:windowID];
+}
+- (void)applyPreviewImage:(CGImageRef)image {
+    Require(NSThread.isMainThread, @"preview images are applied on main");
+    self.previewApplies++; self.previewWidth = CGImageGetWidth(image);
+}
+@end
 @implementation TraceHeldOCRApp
 - (NSInteger)translationGeneration {
     if (NSThread.isMainThread && self.observeGenerationReads) { self.observedGenerationReads++; }
@@ -214,6 +237,125 @@ static TracePipelineApp *TraceAppOfClass(Class appClass) {
     return a;
 }
 static TracePipelineApp *TraceApp(void) { return TraceAppOfClass(TracePipelineApp.class); }
+static NSArray *Fixture(NSString *text, CGFloat width);
+static void CheckIndependentLivePreview(void) {
+    Require([AppDelegate instancesRespondToSelector:@selector(restartPreviewTimerIfRunning)],
+            @"live preview needs a scheduler independent of held translation requests");
+    for (NSUInteger source = 0; source < 2; source++) {
+        TracePreviewApp *a = (id)TraceAppOfClass(TracePreviewApp.class);
+        a.framePreview = (id)[NSObject new]; // Display boundary only; no AppKit window.
+        a.inputSourceSegment = source;
+        FYTestCaptureCardInput *card = [FYTestCaptureCardInput new]; a.captureCardInput = card;
+        Require([card testEnqueueFrameIndex:1 pixelSize:16], @"initial synthetic frame");
+        CGImageRef stale = [card copyLatestFrame];
+        a.fixture = Fixture(@"明日はみんなで図書館に行きましょう。", .65);
+        ((TraceControl *)(id)a.stableTextCheckbox).state = NSControlStateValueOff;
+        MockRequests = 0; SubmittedSources = [NSMutableArray new];
+        PendingResponse = nil; HoldResponse = YES;
+        [a timerFired:nil]; Pump(^BOOL { return PendingResponse != nil; });
+        Require(a.inFlight, @"production HTTP request is held while preview is tested");
+        NSUInteger ocrBefore = a.ocrCalls, requestsBefore = MockRequests;
+        uint64_t ocrFrameBefore = a.lastOCRedCaptureFrameIndex;
+        [a restartPreviewTimerIfRunning];
+        NSTimeInterval expectedInterval = source == 1 ? 1.0 / 30.0 : .1;
+        Require(fabs(((NSTimer *)[a valueForKey:@"previewTimer"]).timeInterval - expectedInterval) < .001,
+                @"capture-card preview targets 30 fps, window screenshots retain 10 fps");
+        for (NSUInteger index = 1; index <= 3; index++) {
+            Require([card testEnqueueFrameIndex:index + 1 pixelSize:16 + index], @"synthetic latest frame");
+            CGImageRef frame = [card copyLatestFrame]; FYTestSetWindowImage(frame); CGImageRelease(frame);
+            NSUInteger before = a.previewApplies;
+            Pump(^BOOL { return a.previewApplies > before && a.previewWidth == 16 + index; });
+            Require(a.previewWidth == 16 + index, @"preview follows new frames while translation is busy");
+        }
+        Require(a.inFlight && a.ocrCalls == ocrBefore && MockRequests == requestsBefore,
+                @"preview never clears OCR ownership or submits extra translation requests");
+        if (source == 1) {
+            NSUInteger before = a.previewApplies;
+            for (NSUInteger tick = 0; tick < 5; tick++) { [a previewTimerFired:nil]; Tick(); }
+            Require(a.previewApplies == before, @"unchanged capture-card frame is not rendered repeatedly");
+            Require(a.lastOCRedCaptureFrameIndex == ocrFrameBefore, @"preview does not consume OCR frame identity");
+        }
+        [((NSTimer *)[a valueForKey:@"previewTimer"]) setFireDate:NSDate.distantFuture];
+        Pump(^BOOL { return !a.previewInFlight; });
+        NSUInteger liveApplies = a.previewApplies;
+        // Invoke the production method, bypassing the fixture's no-op OCR display.
+        void (*update)(id, SEL, CGImageRef, NSInteger) = (void *)class_getMethodImplementation(AppDelegate.class,
+            @selector(updatePreviewFromImage:generation:));
+        update(a, @selector(updatePreviewFromImage:generation:), stale, a.translationGeneration);
+        CGImageRelease(stale);
+        Tick();
+        Require(a.previewApplies == liveApplies && a.previewWidth == 19,
+                @"old OCR pixels cannot overwrite the newer independent preview");
+        void (^response)(void) = PendingResponse; PendingResponse = nil; HoldResponse = NO;
+        [a stop]; response(); NSUInteger stopped = a.previewApplies;
+        [a previewTimerFired:nil]; Tick();
+        Require(a.previewApplies == stopped, @"paused preview stays stopped");
+    }
+    FYTestSetWindowImage(NULL);
+
+    TracePreviewApp *switched = (id)TraceAppOfClass(TracePreviewApp.class);
+    switched.framePreview = (id)[NSObject new];
+    for (NSNumber *source in @[@0, @1, @0]) {
+        switched.inputSourceSegment = source.integerValue;
+        [switched resetForInputSourceChange];
+        Require(fabs(switched.previewTimer.timeInterval - (source.integerValue == 1 ? 1.0 / 30.0 : .1)) < .001,
+                @"switching inputs applies the corresponding live preview cadence immediately");
+    }
+    [switched stop];
+
+    for (NSUInteger action = 0; action < 6; action++) {
+        TracePreviewApp *held = (id)TraceAppOfClass(TracePreviewApp.class);
+        held.framePreview = (id)[NSObject new]; held.inFlight = YES;
+        held.captureEntered = dispatch_semaphore_create(0); held.captureRelease = dispatch_semaphore_create(0);
+        dispatch_semaphore_t release = held.captureRelease;
+        [held restartPreviewTimerIfRunning];
+        __block BOOL entered = NO;
+        Pump(^BOOL {
+            if (!entered) { entered = dispatch_semaphore_wait(held.captureEntered, DISPATCH_TIME_NOW) == 0; }
+            return entered;
+        });
+        for (NSUInteger tick = 0; tick < 20; tick++) { [held previewTimerFired:nil]; }
+        Require(held.previewCaptures == 1, @"slow captures have only one preview task in flight");
+        if (action == 0) { [held stop]; }
+        if (action == 1) { held.fixtureWindowID = 43; }
+        if (action == 2) { [held advanceTranslationGeneration]; }
+        if (action == 3) { held.inputSourceSegment = 1; }
+        if (action == 4) { [held restartPreviewTimerIfRunning]; }
+        if (action == 5) { [held.captureCardInput stop]; }
+        [(NSTimer *)[held valueForKey:@"previewTimer"] invalidate];
+        dispatch_semaphore_signal(release);
+        Pump(^BOOL { return ![[held valueForKey:@"previewInFlight"] boolValue]; });
+        Require(held.previewApplies == 0, @"late pixels cannot reappear after stop/window/source/generation/restart/epoch changes");
+        [held stop];
+    }
+    printf("PASS independent live preview: held HTTP, capture 30 Hz/window 10 Hz, bounded work, stale delivery protection\n");
+}
+
+static void CheckCapturePreviewCadence(void) {
+    FYCaptureCardFrameSlot *slot = [FYCaptureCardFrameSlot new];
+    CGImageRef frame = FYTestWindowImage(CGRectNull, kCGWindowListOptionIncludingWindow, 42, kCGWindowImageDefault);
+    NSUInteger accepted = 0;
+    for (NSUInteger index = 0; index < 60; index++) {
+        // Normal 60 Hz input with sub-millisecond callback timing variation.
+        NSTimeInterval now = 100.0 + index / 60.0 + (index % 4 == 2 ? -.0005 : 0);
+        if ([slot shouldStoreFrameAtTime:now]) { [slot storeFrame:frame index:index + 1 atTime:now]; accepted++; }
+    }
+    Require(accepted == 30, @"capture-card slot must admit 30 fresh frames per second rather than the old 10 fps cap");
+    CGImageRef preview = FYCopyPreviewImage(frame);
+    Require(preview == frame, @"native-size immutable preview avoids a redundant full-frame pixel copy");
+    CGImageRelease(frame);
+    Require(CGImageGetWidth(preview) == 16, @"reused preview retains its own image lifetime");
+    CGImageRelease(preview);
+    CGColorSpaceRef space = CGColorSpaceCreateDeviceRGB();
+    CGContextRef context = CGBitmapContextCreate(NULL, 3000, 2, 8, 12000, space, kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    Require(context != NULL, @"synthetic oversized preview image");
+    CGImageRef large = CGBitmapContextCreateImage(context); CGContextRelease(context);
+    CGImageRef bounded = FYCopyPreviewImage(large);
+    Require(bounded && CGImageGetWidth(bounded) == 2560, @"oversized preview still resizes within its pixel budget");
+    CGImageRelease(large); CGImageRelease(bounded);
+    printf("PASS capture preview cadence: 30/60 synthetic frames, bounded latest slot, no redundant native-size copy\n");
+}
 static NSArray *Fixture(NSString *text, CGFloat width) {
     OCRTextItem *item = [OCRTextItem new]; item.text = text; item.boundingBox = CGRectMake(.2, .2, width, .055);
     return @[item];
@@ -390,6 +532,8 @@ int main(void) { @autoreleasepool {
     CheckLateOCRRestartOwnership();
     CheckVisibilitySnapshots();
     CheckDialogueLatencyPolicies();
+    CheckCapturePreviewCadence();
+    CheckIndependentLivePreview();
     NSString *log = [root stringByAppendingPathComponent:@"events.jsonl"];
     NSArray *full = Fixture(@"明日はみんなで図書館に行きましょう。", .65);
     NSArray *partial = Fixture(@"明日はみんなで", .31);
