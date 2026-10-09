@@ -1,4 +1,5 @@
 #import "FYInlineLayout.h"
+#import "FYLocalFont.h"
 
 NSRect FYInlineLongCardBodyFrame(CGFloat width, CGFloat height, CGFloat padding, CGFloat titleBandHeight) {
     CGFloat titleBand = 24;
@@ -998,7 +999,7 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 - (NSFont *)fontOfSize:(CGFloat)size weight:(NSFontWeight)weight {
     if (self.fontProvider) { return self.fontProvider(size, weight); }
     NSString *name = weight >= NSFontWeightSemibold ? @"STYuanti-SC-Bold" : @"STYuanti-SC-Regular";
-    return [NSFont fontWithName:name size:size] ?: [NSFont systemFontOfSize:size weight:weight];
+    return FYLocalFontNamed(name, size) ?: [NSFont systemFontOfSize:size weight:weight];
 }
 
 - (NSParagraphStyle *)paragraphStyleWithLineSpacing:(CGFloat)lineSpacing {

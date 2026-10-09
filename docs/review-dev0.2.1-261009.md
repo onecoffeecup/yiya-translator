@@ -48,14 +48,18 @@
 | --- | --- |
 | `bash scripts/run-module-tests.sh` | 退出 0；包括新增发布诊断负向检查，TranslationManager 74 项、任务 ownership 40 项及相关 OCR/几何模块通过。 |
 | `bash scripts/run-translation-trace-tests.sh` | 最终退出 0；四类运行变化、服务配置/重复测试、真实长短请求、隐藏/恢复/迟到预览、10/30Hz 生产帧槽及原子帧身份检查通过。 |
-| `bash scripts/run-headless-checks.sh` | 最终退出 0；内部实际运行 `python3 scripts/debug.py check`，64 条记录：60 passed，4 known_gap_reproduced（两个缺口各两遍）；`source_unchanged=true`。报告 `.build/debug/20261009T173730Z-25a5b8/summary.json`。 |
-| `ARCHS='arm64 x86_64' bash scripts/build-app.sh` | 最终退出 0，双架构构建与 dSYM UUID 核对通过。arm64 `DCDAF60C-B740-3969-B8A8-2C1E5E359942`，x86_64 `5431B070-CFCD-35A4-9DAE-64763DCCAC9B`。未安装。 |
+| `bash scripts/run-headless-checks.sh` | 最终退出 0；内部实际运行 `python3 scripts/debug.py check`，64 条记录：60 passed，4 known_gap_reproduced（两个缺口各两遍）；`source_unchanged=true`。最新直接命令 `python3 scripts/debug.py check` 同样退出 0，报告 `.build/debug/20261009T181219Z-639368/summary.json`。 |
+| `ARCHS='arm64 x86_64' bash scripts/build-app.sh` | 最终退出 0，双架构构建与 dSYM UUID 核对通过。arm64 `EA59FDB2-9C64-34BA-A13C-A46586B3B071`，x86_64 `D84C828C-8666-3F0E-B468-D3408C8412B3`。未安装。 |
 | `FY_TEST_COMPILE_ONLY=1 bash scripts/run-learning-app-tests.sh InlineTranslationPipelineTests` | 退出 0，COMPILED_ONLY；未执行 UI。 |
 | `FY_TEST_COMPILE_ONLY=1 bash scripts/run-learning-app-tests.sh DisplayTargetFollowTests` | 退出 0，COMPILED_ONLY；未执行 UI。 |
 | `git diff --check` | 退出 0。 |
 | `xcrun --sdk iphoneos --show-sdk-path` | 退出 1，iPhoneOS SDK 不存在；developer directory 为 CommandLineTools。未运行 iPad 构建/真机。 |
 
-统一结果为 `baseline_passed_with_known_gaps`。`english-period` 仍预期请求 1、实际 0；`latest-frame-while-busy` 仍预期不交付旧字幕、实际交付测试译文甲。未将它们改成接受错误行为的通过测试。远端 CI 与本机检查单列：已核对 `1135505` 的最新 [Headless regression #37948533571](https://github.com/onecoffeecup/yiya-translator/actions/runs/37948533571)，结果 failure，`ModuleTests` 超过 180 秒，最后完成的子套件为 InlineTextPolicyTests；日志不足以确定之后是编译还是 InlineFontStabilityTests 运行停住。“本分支跑过一次通过”不能代表审查 HEAD 通过。本轮分支推送后的 CI 另行确认。
+统一结果为 `baseline_passed_with_known_gaps`。`english-period` 仍预期请求 1、实际 0；`latest-frame-while-busy` 仍预期不交付旧字幕、实际交付测试译文甲。未将它们改成接受错误行为的通过测试。远端 CI 与本机检查单列：已核对 `1135505` 的最新 [Headless regression #37948533571](https://github.com/onecoffeecup/yiya-translator/actions/runs/37948533571)，结果 failure，`ModuleTests` 超过 180 秒，最后完成的子套件为 InlineTextPolicyTests；后续增加阶段标记和超时堆栈采样，在 [08a7889 的运行 #37970164403](https://github.com/onecoffeecup/yiya-translator/actions/runs/37970164403) 确认 InlineFontStabilityTests 在 `NSFont fontWithName:` → `TDownloadableFontManager::Download` → `DownloadFontsForProperties` 等待系统字体下载。“本分支跑过一次通过”不能代表审查 HEAD 通过。
+
+为满足 Mac 分支 CI 验收，本轮还修复了这个实际复现的字体等待问题：`objc/FYLocalFont.h` 共用于主题与贴译，在调用 AppKit 名称匹配前检查 [CoreText 可用字体列表](https://developer.apple.com/documentation/coretext/ctfontmanagercopyavailablepostscriptnames())，缺失字体使用现有系统字体回退，不下载或分发字体。已安装圆体的字体和大小不变。可用名称在当前进程内缓存，运行期间新安装字体需重开应用。新增 `LocalFontTests` 的缺失名称匹配断言先失败、修复后通过；实际主题/贴译选字一致与日文字体链也检查通过。`InlineFontStabilityTests` 保留 17pt 跨帧稳定、折叠恢复、主动改到 21pt 和新场景 19pt 的断言，改为用真实生产布局寻找当前字体的换行边界，避免可选字体缺失时固定几何夹具误报。本机圆体与系统字体两种路径均通过，统一 Debug 和双架构构建在此改动后重跑通过。采样期限仍将真正超时判为失败，未屏蔽测试。
+
+字体定位期间曾有一次采样脚本接入位置错误导致编译失败，后续独立提交修正；没有改写失败历史。远端修复后的 Headless regression 将以实际完成的运行结果另行记录。
 
 本轮源码与本机构建不会自动改变已安装应用，也没有发布新版本/附件。未安排桌面或硬件时段，因此不运行真实截图、摄像头、剪贴板或 UI 测试；Apple Silicon/Intel 的 CPU/耗电、实际多桌面状态和 iPad 真机均未验证。
 

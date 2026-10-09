@@ -26,19 +26,35 @@ static NSArray *Scene(CGFloat gap) {
         Request(@"下部菜单", @"", CGRectMake(0, 0, 400, 65), NO)
     ];
 }
+// The approved theme can use either the installed round font or the system
+// fallback. Find a real wrapping boundary for that face rather than assuming
+// that optional fonts have the same metrics on every Mac/CI image.
+static CGFloat GapForFont(FYInlineLayoutEngine *engine, CGRect viewport, CGFloat size) {
+    for (NSInteger gap = 70; gap <= 250; gap++) {
+        FYInlinePlacement *body = [engine layoutRequests:Scene(gap) viewport:viewport previous:nil].placements.firstObject;
+        if (body.mode == FYInlineDisplayModeFullCard && body.font.pointSize == size) return gap;
+    }
+    return 0;
+}
 int main(void) { @autoreleasepool {
     fprintf(stderr,"FONT_PROBE before default engine\n");
     CGRect viewport = CGRectMake(0, 0, 400, 400);
     FYInlineLayoutEngine *engine = [FYInlineLayoutEngine defaultEngine];
+    CGFloat crowdedGap = GapForFont(engine, viewport, 17);
+    CGFloat roomyGap = GapForFont(engine, viewport, 19);
+    Check(crowdedGap > 0 && roomyGap > crowdedGap,
+          @"the active local face has both a fitted 17pt and a fresh 19pt scene");
+    if (failures) return 1;
+    fprintf(stderr,"FONT_PROBE wrapping gaps: crowded=%.0f roomy=%.0f\n",crowdedGap,roomyGap);
     fprintf(stderr,"FONT_PROBE before first layout\n");
-    FYInlineLayoutResult *result = [engine layoutRequests:Scene(150) viewport:viewport previous:nil];
+    FYInlineLayoutResult *result = [engine layoutRequests:Scene(crowdedGap) viewport:viewport previous:nil];
     fprintf(stderr,"FONT_PROBE after first layout\n");
     FYInlinePlacement *body = result.placements.firstObject;
     Check(body.mode == FYInlineDisplayModeFullCard && body.font.pointSize == 17,
           @"fixture starts with readable 17pt paragraph after fitting the crowded scene");
     NSString *identity = body.blockID;
     for (NSUInteger index = 0; index < 20; index++) {
-        result = [engine layoutRequests:Scene(index % 2 ? 150 : 170) viewport:viewport previous:result];
+        result = [engine layoutRequests:Scene(index % 2 ? crowdedGap : roomyGap) viewport:viewport previous:result];
         body = result.placements.firstObject;
         Check([identity isEqualToString:body.blockID], @"OCR geometry changes preserve paragraph identity");
         Check(body.mode == FYInlineDisplayModeFullCard && body.font.pointSize == 17,
@@ -47,7 +63,7 @@ int main(void) { @autoreleasepool {
     result = [engine layoutRequests:Scene(100) viewport:viewport previous:result];
     Check(((FYInlinePlacement *)result.placements.firstObject).mode == FYInlineDisplayModeCompactEntry,
           @"temporary loss of space folds the paragraph instead of shrinking its font");
-    result = [engine layoutRequests:Scene(170) viewport:viewport previous:result];
+    result = [engine layoutRequests:Scene(roomyGap) viewport:viewport previous:result];
     Check(((FYInlinePlacement *)result.placements.firstObject).font.pointSize == 17,
           @"restoring space retains the reading font through a folded frame");
 
@@ -59,7 +75,7 @@ int main(void) { @autoreleasepool {
     result = [engine layoutRequests:openScene viewport:viewport previous:result];
     Check(((FYInlinePlacement *)result.placements.firstObject).font.pointSize == 21,
           @"an explicit font setting change starts a new font choice immediately");
-    FYInlineLayoutResult *fresh = [[FYInlineLayoutEngine defaultEngine] layoutRequests:Scene(170) viewport:viewport previous:nil];
+    FYInlineLayoutResult *fresh = [[FYInlineLayoutEngine defaultEngine] layoutRequests:Scene(roomyGap) viewport:viewport previous:nil];
     Check(((FYInlinePlacement *)fresh.placements.firstObject).font.pointSize == 19,
           @"a fresh scene does not inherit the previous paragraph's smaller font");
     NSLog(@"InlineFontStabilityTests: %lu failures", (unsigned long)failures);

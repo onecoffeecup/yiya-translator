@@ -239,6 +239,8 @@ python3 scripts/run-acceptance.py --ui
 | 贴译闪动或错位 | inline_grouped / inline_stable 的块和位置；几何代次、映射与布局；最后核对真实面板 |
 | 测试超时 | 看该步骤日志、native failure 与 task 状态；首次 Vision 初始化可用媒体夹具的回调期限，不把超时当通过 |
 
+模块中的字体检查以 60 秒为原生进程期限，超时先采样堆栈再结束，并作为失败保留。2026-10-10 的 macOS CI 堆栈确认未安装圆体的 `NSFont fontWithName:` 会等待系统字体下载；主题和贴译共用 `FYLocalFontNamed`，先按 CoreText 的可用 PostScript 名称检查，仅查找本机可用字体，缺失时走已有系统字体回退。`LocalFontTests` 检查缺失名称不进入 AppKit 匹配及真实主题/布局选字一致；字号稳定夹具用生产排版寻找当前字体的换行边界，不依赖机器安装可选字体。
+
 ## 最短手动验收清单
 
 只在自动测试覆盖不到的范围请求用户验收，列出具体画面 / 动作，不让用户重复全套。

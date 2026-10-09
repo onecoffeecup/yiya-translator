@@ -44,6 +44,11 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
 "$OUT/InlineTextPolicyTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/LocalFontTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/learning/FYLearningViews.m" \
+  -framework Cocoa -framework CoreText -o "$OUT/LocalFontTests"
+python3 "$ROOT_DIR/scripts/run-headless-test.py" --sample "$OUT/LocalFontTests.sample.txt" "$OUT/LocalFontTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/InlineFontStabilityTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \
   -framework Cocoa -o "$OUT/InlineFontStabilityTests"
 python3 "$ROOT_DIR/scripts/run-headless-test.py" --sample "$OUT/InlineFontStabilityTests.sample.txt" "$OUT/InlineFontStabilityTests"

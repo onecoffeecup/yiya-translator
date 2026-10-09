@@ -1,4 +1,5 @@
 #import "FYLearningViews.h"
+#import "../FYLocalFont.h"
 
 void FYMountLearningPage(NSArray<NSView *> *pages, NSView *host, NSInteger index) {
     if (index < 0 || index >= (NSInteger)pages.count) return;
@@ -369,10 +370,10 @@ NSAttributedStringKey const FYSourceHoverAttributeName = @"FYSourceHover";
 #pragma mark - Yiya cream-and-brown theme
 NSFont *FYUIFont(CGFloat size, NSFontWeight weight) {
     NSString *name=weight>=NSFontWeightSemibold?@"STYuanti-SC-Bold":@"STYuanti-SC-Regular";
-    return [NSFont fontWithName:name size:size] ?: [NSFont systemFontOfSize:size weight:weight];
+    return FYLocalFontNamed(name, size) ?: [NSFont systemFontOfSize:size weight:weight];
 }
 NSFont *FYJapaneseFont(CGFloat size) {
-    return [NSFont fontWithName:@"HiraMaruProN-W4" size:size] ?: [NSFont fontWithName:@"HiraginoSans-W3" size:size] ?: FYUIFont(size,NSFontWeightRegular);
+    return FYLocalFontNamed(@"HiraMaruProN-W4", size) ?: FYLocalFontNamed(@"HiraginoSans-W3", size) ?: FYUIFont(size,NSFontWeightRegular);
 }
 NSFont *FYFontForText(NSString *text,CGFloat size,NSFontWeight weight) {
     for(NSUInteger i=0;i<text.length;i++){unichar c=[text characterAtIndex:i];if((c>=0x3040&&c<=0x30ff)||(c>=0xff66&&c<=0xff9f))return FYJapaneseFont(size);}
