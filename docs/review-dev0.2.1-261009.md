@@ -6,7 +6,7 @@
 
 | 条目 | 判断与本轮结果 | 理由、证据及边界 |
 | --- | --- | --- |
-| 0-1 平台拆分 | 要改，已完成 | 从 `1135505` 保留 `ipados-poc`；Mac 分支以 `d9b916d` revert iPad 提交，没有改写历史。iPad 内容在专属分支保留，Mac HEAD 不含 ipados 目录、PoC 脚本和 README 章节。 |
+| 0-1 平台拆分 | 要改，已完成 | 从 `1135505` 保留并上传 `ipados-poc`（治理提交后为 `2f26a06`）；Mac 分支以 `d9b916d` revert iPad 提交，没有改写历史。iPad 内容在专属分支保留，Mac HEAD 不含 ipados 目录、PoC 脚本和 README 章节。 |
 | 0-2 分支规则 | 要改，已完成 | 源码 AGENTS.md 与本机工作区规则均加入 Mac/iPadOS/Windows 独立分支、共享内容独立提交的规则。治理提交单列并应用到两个分支。 |
 | 1 布局诊断隐私 | 要改，已完成发布路径修复 | 默认实现为 inert stub，`build-app.sh` 显式定义 `FY_ENABLE_LAYOUT_DEBUG=0`；截图编码、控制文件读取、文字/图像保存及覆盖层仅编译进显式启用的开发诊断版本。合法控制文件、`overlay:false` 的合成回归修复前失败，修复后没有新增任何文件。此处证实的是合法控制可触发保存，没有实施跨进程窃取实测。 |
 | 2 短批超时过大 | 要改，已完成 | 请求构造新增显式 `longText`，默认和短批固定 15 秒，仅长正文批次 60–90 秒。四、十二、四十项短批回归，及真实 AppDelegate 长短批次请求检查通过。原 `maxTokens > 240` 确会把四项按钮放宽。混合长短批次仍等待双方；短批先渲染作为后续体验改进，未混入本轮。 |
@@ -21,7 +21,11 @@
 | 7e 无符号减法可能下溢 | 不认同当前 Bug 判断，不改 | `subtitleBandItems:` 保留源对象的子集并排除空文，两处 small-box 判据一致，所以 `bandSmallBoxes <= smallBoxCount`。当前没有能违反这个不变量的生产输入证据。仅看到无符号减法不足以判定存在下溢；未来若改变两处计数合同，再补失败输入。 |
 | 7f 主线程 PNG 编码 | 发布路径已随 1 消除；开发路径暂不改 | 默认/发布构建不会编码 PNG。显式开发诊断仍同步编码；以后若改后台需验证 session 撤销、限量和图像生命周期，不在本轮更改证据采样顺序。 |
 
-维护者已确认的“原文右侧覆盖自身原文”和对白固定 0.5 秒保持原合同。
+维护者已确认的“原文右侧覆盖自身原文”和对白固定 0.5 秒保持原合同。审查行号以 `1135505` 为准；当前修复后的行号已变化，不能直接用旧行号定位新 HEAD。
+
+## 修复顺序
+
+总体认可清单的发布优先级。建议先 0 → 1 → 2 → 5 → 3：服务测试的取消边界较局部，可以先用隔离回归确认；预览调度则还需要 Apple Silicon/Intel 与实际窗口遮挡的性能验收。7a 的旧设置按用户本轮选择移除，7b 的取帧身份问题与预览/OCR 链路一并修复。4 保持独立排期；6、7c、开发诊断 PNG 优化与 iPad 五项留在后续阶段。Mac 分支的字体下载等待在 CI 中实际复现，因此作为完成分支验收的阻塞问题处理。
 
 ## iPad PoC 判断
 
@@ -59,7 +63,7 @@
 
 为满足 Mac 分支 CI 验收，本轮还修复了这个实际复现的字体等待问题：`objc/FYLocalFont.h` 共用于主题与贴译，在调用 AppKit 名称匹配前检查 [CoreText 可用字体列表](https://developer.apple.com/documentation/coretext/ctfontmanagercopyavailablepostscriptnames())，缺失字体使用现有系统字体回退，不下载或分发字体。已安装圆体的字体和大小不变。可用名称在当前进程内缓存，运行期间新安装字体需重开应用。新增 `LocalFontTests` 的缺失名称匹配断言先失败、修复后通过；实际主题/贴译选字一致与日文字体链也检查通过。`InlineFontStabilityTests` 保留 17pt 跨帧稳定、折叠恢复、主动改到 21pt 和新场景 19pt 的断言，改为用真实生产布局寻找当前字体的换行边界，避免可选字体缺失时固定几何夹具误报。本机圆体与系统字体两种路径均通过，统一 Debug 和双架构构建在此改动后重跑通过。采样期限仍将真正超时判为失败，未屏蔽测试。
 
-字体定位期间曾有一次采样脚本接入位置错误导致编译失败，后续独立提交修正；没有改写失败历史。远端修复后的 Headless regression 将以实际完成的运行结果另行记录。
+字体定位期间曾有一次采样脚本接入位置错误导致编译失败，后续独立提交修正；没有改写失败历史。修复源码 `1c4adb2` 的远端 [Headless regression #37971887839](https://github.com/onecoffeecup/yiya-translator/actions/runs/37971887839) 已完成，结论 success。下载的证据 `.build/review-ci-font-pass/20261009T181442Z-5275eb/summary.json` 为 60 passed / 4 known_gap_reproduced，`source_unchanged=true`；ModuleTests 中 LocalFontTests 与 InlineFontStabilityTests 均 0 failures，后者在系统字体下选择 132/140px 几何间隔。此成功仍不表示两个产品缺口已经修复。
 
 本轮源码与本机构建不会自动改变已安装应用，也没有发布新版本/附件。未安排桌面或硬件时段，因此不运行真实截图、摄像头、剪贴板或 UI 测试；Apple Silicon/Intel 的 CPU/耗电、实际多桌面状态和 iPad 真机均未验证。
 
