@@ -76,6 +76,10 @@ NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionState state) {
     return self;
 }
 
+@synthesize minimumInterval = _minimumInterval;
+- (NSTimeInterval)minimumInterval { @synchronized(self) { return _minimumInterval; } }
+- (void)setMinimumInterval:(NSTimeInterval)value { @synchronized(self) { _minimumInterval=value; } }
+
 - (void)dealloc {
     if (_frame) { CGImageRelease(_frame); }
 }
@@ -106,8 +110,10 @@ NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionState state) {
     if (previous) { CGImageRelease(previous); }
 }
 
-- (CGImageRef)copyLatestFrame {
+- (CGImageRef)copyLatestFrame { return [self copyLatestFrameWithIndex:NULL]; }
+- (CGImageRef)copyLatestFrameWithIndex:(uint64_t *)index {
     @synchronized(self) {
+        if (index) *index=_frame ? _latestIndex : 0;
         return _frame ? CGImageRetain(_frame) : NULL;
     }
 }
@@ -225,6 +231,7 @@ static FYCaptureCardAvailability FYAvailabilityFromAV(AVAuthorizationStatus stat
         _sessionQueue = dispatch_queue_create("com.nanami.fuyi.capturecard.session", DISPATCH_QUEUE_SERIAL);
         _frameQueue = dispatch_queue_create("com.nanami.fuyi.capturecard.frames", DISPATCH_QUEUE_SERIAL);
         _slot = [FYCaptureCardFrameSlot new];
+        _slot.minimumInterval = .1;
         _sessionReleased = YES;
         _state = FYCaptureCardSessionStateIdle;
         _stateDetail = @"采集卡未启动";
@@ -603,9 +610,10 @@ static FYCaptureCardAvailability FYAvailabilityFromAV(AVAuthorizationStatus stat
     return [_imageContext createCGImage:image fromRect:image.extent];
 }
 
-- (CGImageRef)copyLatestFrame {
-    return [_slot copyLatestFrame];
-}
+- (BOOL)previewActive { return _slot.minimumInterval < .1; }
+- (void)setPreviewActive:(BOOL)active { _slot.minimumInterval=active ? FYCaptureCardPreviewFrameInterval : .1; }
+- (CGImageRef)copyLatestFrame { return [_slot copyLatestFrame]; }
+- (CGImageRef)copyLatestFrameWithIndex:(uint64_t *)index { return [_slot copyLatestFrameWithIndex:index]; }
 
 - (uint64_t)latestFrameIndex {
     return _slot.latestIndex;

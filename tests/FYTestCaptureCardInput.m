@@ -10,6 +10,7 @@
     NSString *_testActiveName;
     NSUInteger _testEpoch;
     BOOL _testReleased;
+    BOOL _testPreviewActive;
     uint64_t _testReceived;
     uint64_t _testConversionFailures;
     FYCaptureCardFrameSlot *_testSlot;
@@ -210,6 +211,10 @@
 }
 
 - (CGImageRef)copyLatestFrame { return [_testSlot copyLatestFrame]; }
+- (CGImageRef)copyLatestFrameWithIndex:(uint64_t *)index { return [_testSlot copyLatestFrameWithIndex:index]; }
+// Synthetic input admits explicitly injected frames; cadence is tested on the production slot.
+- (BOOL)previewActive { return _testPreviewActive; }
+- (void)setPreviewActive:(BOOL)active { _testPreviewActive=active; }
 - (uint64_t)latestFrameIndex { return _testSlot.latestIndex; }
 
 @end

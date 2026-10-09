@@ -84,5 +84,10 @@ FOUNDATION_EXPORT void FYDeliverTranslationOnMain(NSInteger requestGeneration, N
                            sourceText:(NSString *)text systemPrompt:(NSString *)prompt
                             maxTokens:(NSInteger)maxTokens disableReasoning:(BOOL)disableReasoning
                                 error:(NSError **)error;
+// Only long-text batches may extend the 15-second request timeout.
++ (NSMutableURLRequest *)requestWithURL:(NSURL *)url apiKey:(NSString *)key model:(NSString *)model
+                           sourceText:(NSString *)text systemPrompt:(NSString *)prompt
+                            maxTokens:(NSInteger)maxTokens disableReasoning:(BOOL)disableReasoning
+                             longText:(BOOL)longText error:(NSError **)error;
 + (NSString *)translationFromData:(NSData *)data statusCode:(NSInteger)statusCode error:(NSError **)error;
 @end

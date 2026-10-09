@@ -7,10 +7,10 @@
 @property(nonatomic,strong) NSMutableArray<NSString *> *submittedSources;
 @end
 @implementation PipelineApp
-- (void)translateTextRealtime:(NSString *)text systemPrompt:(NSString *)prompt maxTokens:(NSInteger)maxTokens completion:(void (^)(NSString *,NSError *))completion {
+- (void)translateText:(NSString *)text systemPrompt:(NSString *)prompt maxTokens:(NSInteger)maxTokens modelOverride:(NSString *)model longText:(BOOL)longText serviceTest:(BOOL)serviceTest completion:(void (^)(NSString *,NSError *))completion {
     self.requestCount++;
     [self.submittedSources addObject:text];
-    BOOL longText=[prompt containsString:@"公告翻译器"];
+    Require(!serviceTest && longText==[prompt containsString:@"公告翻译器"],@"batch category is explicitly propagated at transport boundary");
     Require(maxTokens==(longText?320:240),@"single item route preserves token minimum");
     if(self.holdsRequests) { if(longText)self.longCompletion=completion;else self.shortCompletion=completion;return; }
     completion(longText?@"1. 长正文译文":@"1. 短标签译文",nil);

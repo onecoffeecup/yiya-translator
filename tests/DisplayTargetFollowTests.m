@@ -193,6 +193,7 @@ static FollowApp *FollowMakeApp(FYLearningStore *store, FYLearningAnalyzer *anal
                                                                    catalog:catalog];
     [app createMainWindow];
     // 本套件验证几何跟随，不验证"等待文本稳定/两遍放大 OCR"：关掉它们让每轮只做一次 OCR。
+    app.stableTextCheckbox = [NSButton checkboxWithTitle:@"synthetic stability gate" target:nil action:NULL];
     app.stableTextCheckbox.state = NSControlStateValueOff;
     app.autoFitRegionCheckbox.state = NSControlStateValueOff;
     app.fixtureWindows = @[];

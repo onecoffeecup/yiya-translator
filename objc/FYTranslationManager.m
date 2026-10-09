@@ -191,6 +191,13 @@ static NSString *FYTrimString(id value) {
                            sourceText:(NSString *)text systemPrompt:(NSString *)prompt
                             maxTokens:(NSInteger)maxTokens disableReasoning:(BOOL)disableReasoning
                                 error:(NSError **)error {
+    return [self requestWithURL:url apiKey:key model:model sourceText:text systemPrompt:prompt
+        maxTokens:maxTokens disableReasoning:disableReasoning longText:NO error:error];
+}
++ (NSMutableURLRequest *)requestWithURL:(NSURL *)url apiKey:(NSString *)key model:(NSString *)model
+                           sourceText:(NSString *)text systemPrompt:(NSString *)prompt
+                            maxTokens:(NSInteger)maxTokens disableReasoning:(BOOL)disableReasoning
+                             longText:(BOOL)longText error:(NSError **)error {
     if (!FYChatCompletionsURLWithError(url.absoluteString, error)) { return nil; }
     NSMutableDictionary *payload = [@{@"model": model, @"messages": @[
         @{@"role": @"system", @"content": prompt}, @{@"role": @"user", @"content": FYTrimString(text)}],
@@ -205,7 +212,7 @@ static NSString *FYTrimString(id value) {
     request.HTTPMethod = @"POST";
     // Small realtime responses keep their current latency bound. Nonstreaming
     // batches need time to produce larger output, but remain cancellable/bounded.
-    request.timeoutInterval = maxTokens <= 240 ? 15 : MIN(90, MAX(60, ceil(maxTokens / 30.0) + 15));
+    request.timeoutInterval = longText ? MIN(90, MAX(60, ceil(maxTokens / 30.0) + 15)) : 15;
     request.HTTPBody = body;
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [request setValue:[NSString stringWithFormat:@"Bearer %@", key] forHTTPHeaderField:@"Authorization"];

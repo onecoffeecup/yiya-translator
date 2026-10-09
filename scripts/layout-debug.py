@@ -52,7 +52,8 @@ def main():
         now = time.time()
         atomic_json(DIRECTORY / "control.json", dict(session=str(uuid.uuid4()), issued_at=now,
                     expires_at=now + args.seconds, overlay=not args.no_overlay))
-        print(f"Raw layout diagnostics enabled for {args.seconds}s: {DIRECTORY}")
+        print(f"Layout diagnostic control armed for {args.seconds}s: {DIRECTORY}")
+        print("Default/release apps ignore this file. Requires a developer build with FY_ENABLE_LAYOUT_DEBUG=1.")
         print("Includes captured images, OCR and translations. Limit: 120 frames, 300 layouts, 64 MiB per session. App is not started.")
     elif args.command == "stop":
         (DIRECTORY / "control.json").unlink(missing_ok=True)
@@ -67,7 +68,8 @@ def main():
             raise ValueError("Refusing symlink control")
         control = json.loads(path.read_text()) if path.exists() else {}
         active = control.get("issued_at", 0) <= time.time() < control.get("expires_at", 0)
-        print(f"Layout diagnostics {'enabled' if active else 'disabled'}; evidence: {DIRECTORY}")
+        print(f"Layout control {'armed' if active else 'disabled'}; evidence: {DIRECTORY}")
+        print("Control state does not confirm app recording; default/release apps ignore it.")
     elif args.command == "check":
         output = args.output or ROOT / ".build/layout-debug" / ("run-" + uuid.uuid4().hex[:8])
         private_directory(output)

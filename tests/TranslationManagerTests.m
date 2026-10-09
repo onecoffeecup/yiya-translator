@@ -25,9 +25,15 @@ int main(void) { @autoreleasepool {
     NSDictionary *payload=[NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:nil];
     Check([request.HTTPMethod isEqualToString:@"POST"] && request.timeoutInterval==15,@"small realtime request retains short timeout");
     NSURLRequest *longRequest=[FYTranslationManager requestWithURL:request.URL apiKey:@"fixture-key" model:@"fixture-model"
-        sourceText:@"1. 合成公告正文" systemPrompt:@"fixture" maxTokens:2200 disableReasoning:NO error:&error];
+        sourceText:@"1. 合成公告正文" systemPrompt:@"fixture" maxTokens:2200 disableReasoning:NO longText:YES error:&error];
     Check(longRequest.timeoutInterval >= 60 && longRequest.timeoutInterval <= 90,
           @"large nonstreaming output has a bounded 60-90 second timeout");
+    for (NSNumber *count in @[@4, @12, @40]) {
+        NSURLRequest *shortBatch=[FYTranslationManager requestWithURL:request.URL apiKey:@"fixture" model:@"test"
+            sourceText:@"1. 合成按钮" systemPrompt:@"fixture" maxTokens:FYInlineBatchMaxTokens(count.unsignedIntegerValue,NO)
+            disableReasoning:NO error:&error];
+        Check(shortBatch.timeoutInterval==15,@"short batches keep 15 seconds even above 240 output tokens");
+    }
     Check([payload[@"max_tokens"] integerValue]==120 && [payload[@"reasoning_effort"] isEqual:@"none"],@"minimum token budget and reasoning disabled");
     NSData *data=[@"{\"choices\":[{\"message\":{\"content\":\" 翻译 \"}}]}" dataUsingEncoding:NSUTF8StringEncoding];
     Check([[FYTranslationManager translationFromData:data statusCode:200 error:&error] isEqualToString:@"翻译"] && !error,@"content decoding");

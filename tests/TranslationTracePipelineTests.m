@@ -15,6 +15,8 @@ static FYTranslationTrace *TestTrace;
 static NSUInteger MockRequests;
 static NSMutableArray *SubmittedSources;
 static NSDictionary *LastRequestPolicy;
+@class TraceTask;
+static TraceTask *LastTask;
 static BOOL HoldResponse;
 static void (^PendingResponse)(void);
 
@@ -27,12 +29,13 @@ static void (^PendingResponse)(void);
 
 @interface TraceTask : NSObject
 @property(copy) void (^response)(void);
+@property NSUInteger cancelCalls;
 - (void)resume;
 - (void)cancel;
 @end
 @implementation TraceTask
 - (void)resume { if (HoldResponse) { PendingResponse = self.response; } else { self.response(); } }
-- (void)cancel {}
+- (void)cancel { self.cancelCalls++; }
 @end
 @interface TraceSession : NSObject
 - (id)dataTaskWithRequest:(NSURLRequest *)request completionHandler:(void (^)(NSData *, NSURLResponse *, NSError *))completion;
@@ -43,12 +46,12 @@ static void (^PendingResponse)(void);
     NSDictionary *body = [NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:NULL];
     LastRequestPolicy = @{@"model": body[@"model"] ?: @"",
         @"thinking_type": body[@"thinking"][@"type"] ?: @"",
-        @"reasoning_effort": body[@"reasoning_effort"] ?: @""};
+        @"reasoning_effort": body[@"reasoning_effort"] ?: @"", @"timeout": @(request.timeoutInterval)};
     NSString *source = [body[@"messages"] lastObject][@"content"];
     [SubmittedSources addObject:source];
     MockRequests++;
     NSString *translated = [source hasPrefix:@"1. "] ? @"1. 测试界面" : [NSString stringWithFormat:@"测试译文%lu", (unsigned long)MockRequests];
-    TraceTask *task = [TraceTask new];
+    TraceTask *task = [TraceTask new]; LastTask = task;
     task.response = ^{ completion(Envelope(translated), Response(), nil); };
     return task;
 }
@@ -149,6 +152,15 @@ static void (^PendingResponse)(void);
 @property NSUInteger observedGenerationReads;
 @end
 
+@interface TraceWindowState : NSObject
+@property(getter=isVisible) BOOL visible;
+@property(getter=isMiniaturized) BOOL miniaturized;
+@property(getter=isOnActiveSpace) BOOL onActiveSpace;
+@property NSWindowOcclusionState occlusionState;
+@end
+@implementation TraceWindowState
+@end
+
 @interface TracePreviewApp : TracePipelineApp
 @property NSUInteger previewApplies;
 @property size_t previewWidth;
@@ -233,6 +245,10 @@ static TracePipelineApp *TraceAppOfClass(Class appClass) {
     a.realtimeModelField = (id)TextControl(@"test-model");
     a.serviceStatusLabel = (id)TextControl(@"服务未测试");
     a.serviceErrorLabel = (id)TextControl(@"");
+    if ([a isKindOfClass:TracePreviewApp.class]) {
+        TraceWindowState *window=[TraceWindowState new]; window.visible=YES; window.onActiveSpace=YES;
+        window.occlusionState=NSWindowOcclusionStateVisible; a.mainWindow=(id)window;
+    }
     a.learningCoordinator = [[FYLearningCoordinator alloc] initWithStore:nil analyzer:nil tokenizer:nil catalog:nil];
     return a;
 }
@@ -303,7 +319,7 @@ static void CheckIndependentLivePreview(void) {
     }
     [switched stop];
 
-    for (NSUInteger action = 0; action < 6; action++) {
+    for (NSUInteger action = 0; action < 7; action++) {
         TracePreviewApp *held = (id)TraceAppOfClass(TracePreviewApp.class);
         held.framePreview = (id)[NSObject new]; held.inFlight = YES;
         held.captureEntered = dispatch_semaphore_create(0); held.captureRelease = dispatch_semaphore_create(0);
@@ -322,6 +338,7 @@ static void CheckIndependentLivePreview(void) {
         if (action == 3) { held.inputSourceSegment = 1; }
         if (action == 4) { [held restartPreviewTimerIfRunning]; }
         if (action == 5) { [held.captureCardInput stop]; }
+        if (action == 6) { ((TraceWindowState *)(id)held.mainWindow).visible=NO; [held refreshPreviewVisibility:nil]; }
         [(NSTimer *)[held valueForKey:@"previewTimer"] invalidate];
         dispatch_semaphore_signal(release);
         Pump(^BOOL { return ![[held valueForKey:@"previewInFlight"] boolValue]; });
@@ -331,7 +348,43 @@ static void CheckIndependentLivePreview(void) {
     printf("PASS independent live preview: held HTTP, capture 30 Hz/window 10 Hz, bounded work, stale delivery protection\n");
 }
 
+static void CheckHiddenPreview(void) {
+    for (NSUInteger state=0; state<4; state++) {
+        TracePreviewApp *a=(id)TraceAppOfClass(TracePreviewApp.class);
+        a.framePreview=(id)[NSObject new];
+        TraceWindowState *w=(id)a.mainWindow;
+        [a restartPreviewTimerIfRunning]; Pump(^BOOL { return !a.previewInFlight; });
+        NSUInteger before=a.previewCaptures;
+        if(state==0) w.visible=NO;
+        if(state==1) w.miniaturized=YES;
+        if(state==2) w.onActiveSpace=NO;
+        if(state==3) w.occlusionState=0;
+        [a restartPreviewTimerIfRunning];
+        [a previewTimerFired:nil]; Tick();
+        Require(!a.previewTimer && a.previewCaptures==before,@"hidden/minimized/other-space/occluded preview performs no screenshots");
+        w.visible=YES; w.miniaturized=NO; w.onActiveSpace=YES; w.occlusionState=NSWindowOcclusionStateVisible;
+        [a restartPreviewTimerIfRunning];
+        Pump(^BOOL { return a.previewCaptures>before && !a.previewInFlight; });
+        Require(a.previewTimer!=nil,@"visible preview resumes immediately");
+        [a stop];
+    }
+}
 static void CheckCapturePreviewCadence(void) {
+    FYCaptureCardInput *input=[FYCaptureCardInput new];
+    Require(!input.previewActive,@"input defaults to OCR-only cadence");
+    input.previewActive=YES; Require(input.previewActive,@"visible preview enables 30 Hz conversion");
+    input.previewActive=NO; Require(!input.previewActive,@"hidden preview restores 10 Hz conversion");
+    FYCaptureCardFrameSlot *ownedSlot=[input valueForKey:@"slot"];
+    CGImageRef injected=FYTestWindowImage(CGRectNull,kCGWindowListOptionIncludingWindow,42,kCGWindowImageDefault);
+    for (NSNumber *visible in @[@NO,@YES]) {
+        input.previewActive=visible.boolValue; [ownedSlot clear]; NSUInteger accepted=0;
+        for (NSUInteger index=0;index<60;index++) {
+            NSTimeInterval now=100+index/60.0;
+            if ([ownedSlot shouldStoreFrameAtTime:now]) { [ownedSlot storeFrame:injected index:index+1 atTime:now]; accepted++; }
+        }
+        Require(accepted==(visible.boolValue ? 30 : 10),@"actual input-owned slot converts 10 background or 30 visible frames per second");
+    }
+    CGImageRelease(injected);
     FYCaptureCardFrameSlot *slot = [FYCaptureCardFrameSlot new];
     CGImageRef frame = FYTestWindowImage(CGRectNull, kCGWindowListOptionIncludingWindow, 42, kCGWindowImageDefault);
     NSUInteger accepted = 0;
@@ -374,6 +427,7 @@ static void CheckServiceTestCancellation(void) {
         [a testTranslation:nil];
         Require([a.serviceStatusLabel.stringValue isEqual:@"正在测试服务"] && PendingResponse,
                 @"synthetic service test begins and holds its response");
+        TraceTask *testTask = LastTask;
         void (^staleResponse)(void) = PendingResponse; PendingResponse = nil;
         switch (action) {
             case 0: [a start]; [a.timer invalidate]; a.timer = nil; break;
@@ -384,12 +438,56 @@ static void CheckServiceTestCancellation(void) {
                 [a controlValueChanged:a.regionXSlider]; break;
         }
         Pump(^BOOL { return !a.inFlight; });
-        Require([a.serviceStatusLabel.stringValue isEqual:@"服务未测试"], @"run changes reset a pending service test");
+        Require([a.serviceStatusLabel.stringValue isEqual:@"正在测试服务"] && testTask.cancelCalls == 0, @"run changes must leave service test owned and pending");
         staleResponse(); Tick();
-        Require([a.serviceStatusLabel.stringValue isEqual:@"服务未测试"] && a.captions.count == 0,
-                @"late test response cannot restore stale status or caption");
+        Require([a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"] && a.captions.count == 0,
+                @"test completes independently without replacing the changed run caption");
         HoldResponse = NO;
     }
+}
+static void CheckServiceConfigurationCancellation(void) {
+    for (NSUInteger action=0;action<2;action++) {
+        TracePipelineApp *a=TraceApp(); a.running=NO; SubmittedSources=[NSMutableArray new]; HoldResponse=YES;
+        [a testTranslation:nil]; TraceTask *oldTask=LastTask;
+        void (^oldResponse)(void)=PendingResponse; PendingResponse=nil;
+        if (action==0) { [a serviceSettingsChanged]; }
+        else { [a testTranslation:nil]; }
+        Require(oldTask.cancelCalls==1,@"changing service or testing again cancels the old service task only");
+        oldResponse(); Tick();
+        Require([a.serviceStatusLabel.stringValue isEqual:action==0 ? @"服务未测试" : @"正在测试服务"],@"old service completion cannot overwrite changed configuration or replacement test");
+        if (action==1) { void (^fresh)(void)=PendingResponse; PendingResponse=nil; fresh(); Tick();
+            Require([a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"] && a.captions.count==1,@"replacement service test completes and keeps idle test-caption behavior"); }
+        HoldResponse=NO;
+    }
+}
+static void CheckInlineRequestTimeouts(void) {
+    TracePipelineApp *a=TraceApp(); HoldResponse=NO; SubmittedSources=[NSMutableArray new];
+    NSMutableArray *items=[NSMutableArray array],*indexes=[NSMutableArray array],*keys=[NSMutableArray array];
+    for (NSUInteger index=0;index<4;index++) {
+        [items addObject:Fixture(@"合成按钮",.1).firstObject]; [indexes addObject:@(index)]; [keys addObject:[NSString stringWithFormat:@"fixture-%lu",(unsigned long)index]];
+    }
+    for (NSNumber *longText in @[@NO,@YES]) {
+        __block BOOL done=NO;
+        NSMutableArray *translations=[NSMutableArray arrayWithArray:@[@"",@"",@"",@""]];
+        [a translateInlineBatch:items indexes:indexes keys:keys translations:translations long:longText.boolValue completion:^(NSError *error) { Require(!error,@"synthetic inline batch decodes"); done=YES; }];
+        Pump(^BOOL { return done; });
+        NSTimeInterval timeout=[LastRequestPolicy[@"timeout"] doubleValue];
+        Require(longText.boolValue ? timeout>=60 && timeout<=90 : timeout==15,@"actual AppDelegate short/long batch request uses explicit timeout category");
+    }
+}
+static void CheckAtomicCaptureIdentity(void) {
+    TracePipelineApp *a=TraceApp(); a.inputSourceSegment=1; a.fixture=@[];
+    FYTestCaptureCardInput *card=[FYTestCaptureCardInput new]; a.captureCardInput=card;
+    Require([card testEnqueueFrameIndex:1 pixelSize:16],@"first synthetic capture frame");
+    dispatch_semaphore_t entered=dispatch_semaphore_create(0), release=dispatch_semaphore_create(0);
+    dispatch_async(a.captureQueue, ^{ dispatch_semaphore_signal(entered); dispatch_semaphore_wait(release,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC)); });
+    Require(dispatch_semaphore_wait(entered,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0,@"capture queue held before tick");
+    [a timerFired:nil]; Require(a.inFlight,@"queued capture owns busy slot");
+    Require([card testEnqueueFrameIndex:2 pixelSize:18],@"new frame arrives before background copy");
+    dispatch_semaphore_signal(release); Pump(^BOOL { return !a.inFlight; });
+    Require(a.lastOCRedCaptureFrameIndex==2,@"OCR identity is the atomically copied frame, rather than the tick snapshot");
+    NSUInteger calls=a.ocrCalls; [a timerFired:nil]; Tick();
+    Require(a.ocrCalls==calls,@"same actual frame cannot enter OCR twice"); [a stop];
 }
 static void CheckLateCaptureCancellation(void) {
     for (NSUInteger route = 0; route < 2; route++) {
@@ -457,8 +555,9 @@ static void CheckDialogueLatencyPolicies(void) {
     // Exercise the actual scheduled timer and serialized HTTP request. Only
     // fictional service configuration is inspected; no UI or real API calls.
     TracePipelineApp *polling = TraceApp();
-    TraceControl *interval = [TraceControl new]; interval.doubleValue = 1.2;
-    polling.intervalSlider = (id)interval;
+    // Synthetic legacy preferences, isolated in-memory store.
+    [NSUserDefaults.standardUserDefaults setObject:@{@"interval":@4,@"fastOCR":@YES,@"stableText":@NO} forKey:SettingsKey];
+    [polling loadSettings];
     [polling restartTimerIfRunning];
     NSTimeInterval dialogueInterval = polling.timer.timeInterval;
     [polling.timer invalidate]; polling.timer = nil;
@@ -489,7 +588,7 @@ static void CheckDialogueLatencyPolicies(void) {
     printf("Latency probes: dialogue_poll_ms=%.0f; interface_poll_ms=%.0f; realtime_reasoning_disabled=%d; other_model_unmodified=%d\n",
         dialogueInterval * 1000, interfaceInterval * 1000, realtimeReasoningDisabled, otherModelUnmodified);
     Require(dialogueInterval <= .5, @"dialogue must confirm fresh frames at most 500ms apart despite the legacy hidden 1.2s setting");
-    Require(interfaceInterval == 1.2, @"interface polling must retain its configured cadence");
+    Require(interfaceInterval == 1.2, @"interface polling ignores old hidden cadence and uses 1.2 seconds");
     Require(realtimeReasoningDisabled, @"DeepSeek realtime override on a relay must disable reasoning based on the actual requested model");
     Require(otherModelUnmodified, @"a different quality model must not inject DeepSeek fields into a non-DeepSeek realtime request");
 }
@@ -528,6 +627,10 @@ int main(void) { @autoreleasepool {
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class, @selector(shared)), class_getClassMethod(FYTranslationTrace.class, @selector(pipelineTestShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
     CheckServiceTestCancellation();
+    CheckHiddenPreview();
+    CheckServiceConfigurationCancellation();
+    CheckInlineRequestTimeouts();
+    CheckAtomicCaptureIdentity();
     CheckLateCaptureCancellation();
     CheckLateOCRRestartOwnership();
     CheckVisibilitySnapshots();

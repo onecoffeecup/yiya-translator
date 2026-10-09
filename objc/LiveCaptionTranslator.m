@@ -755,7 +755,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSSlider *regionYSlider;
 @property(nonatomic, strong) NSSlider *regionWidthSlider;
 @property(nonatomic, strong) NSSlider *regionHeightSlider;
-@property(nonatomic, strong) NSSlider *intervalSlider;
 @property(nonatomic, strong) NSSlider *captionOpacitySlider;
 @property(nonatomic, strong) NSSlider *captionFontSizeSlider;
 @property(nonatomic, strong) NSSlider *captionHeightSlider;
@@ -768,8 +767,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSColorWell *batchTextColorWell;
 @property(nonatomic, strong) NSTimer *batchAppearanceTimer;
 @property(nonatomic, strong) NSSegmentedControl *captionThemeControl;
+#ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
+// Replay may bypass only the stability gate to isolate downstream boundaries.
 @property(nonatomic, strong) NSButton *stableTextCheckbox;
-@property(nonatomic, strong) NSButton *fastOCRCheckbox;
+#endif
 @property(nonatomic, strong) NSButton *autoFitRegionCheckbox;
 @property(nonatomic, strong) NSButton *manualOCRScopeCheckbox;
 @property(nonatomic, strong) NSTextField *baseURLField;
@@ -809,6 +810,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSTimer *timer;
 @property(nonatomic, strong) NSURLSessionDataTask *activeTranslationTask;
 @property(nonatomic, strong) FYTranslationTaskOwner *translationTaskOwner;
+@property(nonatomic, strong) FYTranslationTaskOwner *serviceTestTaskOwner;
 @property(nonatomic) NSInteger translationGeneration;
 @property(nonatomic) BOOL running;
 @property(nonatomic) BOOL inFlight;
@@ -2858,25 +2860,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [stack addArrangedSubview:[self label:@"识别方式" font:FYUIFont(15, NSFontWeightBold) color:[NSColor labelColor]]];
 
     self.languageControl = [self segmentedWithLabels:@[@"日语", @"英语"] action:@selector(controlValueChanged:)];
-    self.intervalSlider = [self sliderWithMin:0.5 max:4 value:1.2 action:@selector(controlValueChanged:)];
-    self.stableTextCheckbox = [NSButton checkboxWithTitle:@"等待同一段 OCR 文本连续稳定后再翻译" target:self action:@selector(controlValueChanged:)];
-    self.stableTextCheckbox.state = NSControlStateValueOn;
-    self.fastOCRCheckbox = [NSButton checkboxWithTitle:@"快速 OCR（更实时，可能少量误识别）" target:self action:@selector(controlValueChanged:)];
-    self.fastOCRCheckbox.state = NSControlStateValueOff;
     self.autoFitRegionCheckbox = [NSButton checkboxWithTitle:@"自动贴合文字识别（不依赖固定区域，小字更准）" target:self action:@selector(controlValueChanged:)];
     self.autoFitRegionCheckbox.state = NSControlStateValueOn;
 
-    NSStackView *presetRow = [self horizontalStack];
-    [presetRow addArrangedSubview:[NSButton buttonWithTitle:@"实时优先" target:self action:@selector(useRealtimePreset:)]];
-    [presetRow addArrangedSubview:[NSButton buttonWithTitle:@"准确优先" target:self action:@selector(useAccuratePreset:)]];
-
     [stack addArrangedSubview:[self settingsRowWithLabel:@"原文语言" view:self.languageControl]];
-    NSStackView *advanced = [self verticalStack];
-    [advanced addArrangedSubview:[self settingsRowWithLabel:@"识别间隔" view:self.intervalSlider]];
-    [advanced addArrangedSubview:presetRow];
-    [advanced addArrangedSubview:self.stableTextCheckbox];
-    [advanced addArrangedSubview:self.fastOCRCheckbox];
-    [advanced addArrangedSubview:self.autoFitRegionCheckbox];
     return stack;
 }
 
@@ -3405,11 +3392,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.previewRenderSerial += 1;
     self.lastPreviewCaptureFrameIndex = 0;
     [self.translationTaskOwner cancelActiveTask];
-    if ([self.serviceStatusLabel.stringValue isEqualToString:@"正在测试服务"]) {
-        self.serviceTestGeneration += 1;
-        self.serviceStatusLabel.stringValue = @"服务未测试";
-        self.serviceErrorLabel.stringValue = @"";
-    }
 }
 
 - (void)toggleRunning:(id)sender {
@@ -3475,6 +3457,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 - (void)stop {
     [[FYRuntimeDiagnostics shared] recordEvent:@"stop" fields:@{@"window_id": @([self selectedWindowID])}];
     // 停采立刻释放采集会话并作废旧帧：暂停后不会再有画面进入 OCR。
+    self.captureCardInput.previewActive = NO;
     [self.captureCardInput stop];
     self.lastOCRedCaptureFrameIndex = 0;
     [self.timer invalidate];
@@ -3658,6 +3641,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (void)refreshOverlayVisibility:(id)sender {
+    [self refreshPreviewVisibility:nil];
     NSArray *previousWindows = self.overlayWindowSnapshot;
     NSNumber *previousPID = self.overlayOwnerPIDSnapshot;
     self.overlayWindowSnapshot = [self selectedWindowID] ? ([self onScreenWindowInfos] ?: @[]) : @[];
@@ -3809,7 +3793,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     NSDictionary *captureTrace = trace;
     dispatch_async(self.captureQueue, ^{
         // Window pixels and capture-card image conversion must not block AppKit.
-        CGImageRef fullImage = captureCard ? [self.captureCardInput copyLatestFrame] : [self copyFullCapturedImageForWindow:windowID];
+        uint64_t actualCaptureFrameIndex = 0;
+        CGImageRef fullImage = captureCard ? [self.captureCardInput copyLatestFrameWithIndex:&actualCaptureFrameIndex] : [self copyFullCapturedImageForWindow:windowID];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
                 inputEpoch != self.captureCardInput.sessionEpoch) {
@@ -3833,16 +3818,16 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                 }
                 return;
             }
-            if (captureCard) { self.lastOCRedCaptureFrameIndex = captureFrameIndex; }
+            if (captureCard) { self.lastOCRedCaptureFrameIndex = actualCaptureFrameIndex; }
             self.captureUnavailable = NO;
             [self updateRunState];
-            trace = [[FYTranslationTrace shared] frameContextForCycle:trace index:captureFrameIndex];
+            trace = [[FYTranslationTrace shared] frameContextForCycle:trace index:actualCaptureFrameIndex];
             FYTrace(trace, @"capture", @{@"success": @YES, @"width": @(CGImageGetWidth(fullImage)),
                                         @"height": @(CGImageGetHeight(fullImage))});
             [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(self.translationGeneration), @"success": @YES}];
             [self setStatus:@"正在 OCR"];
             [self updatePreviewFromImage:fullImage generation:cycleGeneration];
-            BOOL fastOCR = self.fastOCRCheckbox.state == NSControlStateValueOn;
+            BOOL fastOCR = NO;
             BOOL autoFit = self.autoFitRegionCheckbox == nil || self.autoFitRegionCheckbox.state == NSControlStateValueOn;
             NSInteger languageSegment = self.languageControl.selectedSegment;
             self.learningCoordinator.japaneseMode = (languageSegment == 0);
@@ -3854,7 +3839,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
             CGRect ocrScope=[self selectedOCRScope];
             NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:fullImage metadata:@{
                 @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
-                @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"frame_index":@(captureFrameIndex), @"scope":FYLayoutDebugRect(ocrScope)}];
+                @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"frame_index":@(actualCaptureFrameIndex), @"scope":FYLayoutDebugRect(ocrScope)}];
             FYTrace(trace, @"task", @{@"reason": @"ocr_scheduled"});
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
               FYInlineDebugTracePerform(trace, layoutDebug, ^{
@@ -4093,7 +4078,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         return;
                     }
 
-                    BOOL shouldWaitForStableText = self.stableTextCheckbox.state == NSControlStateValueOn || fastOCR;
+                    BOOL shouldWaitForStableText = YES;
+#ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
+                    if (self.stableTextCheckbox) { shouldWaitForStableText = self.stableTextCheckbox.state == NSControlStateValueOn; }
+#endif
                     // 界面模式不等稳定：用户滑完就希望立刻看到译文，多等一帧就多一分延迟
                     if (currentFrameMode == ContentModeUI) { shouldWaitForStableText = NO; }
                     if (shouldWaitForStableText && ![self isStableText:normalized]) {
@@ -4868,6 +4856,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         }
         [self updateCaptureCardStatus];
     } else {
+        self.captureCardInput.previewActive = NO;
         [self.captureCardInput stop];
         if (self.running) { [self timerFired:self.timer]; }
         [self setStatus:@"识别输入源已切换为窗口截图"];
@@ -4919,12 +4908,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         [self updateCaptureCardStatus];
         return NO;
     }
+    input.previewActive = self.running && self.framePreview && [self livePreviewVisible];
     [self updateCaptureCardStatus];
     return YES;
 }
 
 - (void)reconnectCaptureDevice:(id)sender {
     // 重连 = 新会话：先释放旧会话并作废旧帧，避免断开期间继续用旧画面。
+    self.captureCardInput.previewActive = NO;
     [self.captureCardInput stop];
     self.lastOCRedCaptureFrameIndex = 0;
     if (![self captureCardInputEnabled]) {
@@ -5000,9 +4991,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [self updateCaptionAppearance];
     [self updateThemeSummary];
     [self updateOCRPreviewIfVisible];
-    if (self.running && sender == self.intervalSlider) {
-        [self restartTimerIfRunning];
-    }
     [self scheduleSettingsSave];
 }
 
@@ -5241,9 +5229,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.detectedModeSegment = ContentModeUI;
     self.candidateModeSegment = -1;
     self.candidateModeHits = 0;
-    self.intervalSlider.doubleValue = 1.5;
-    self.stableTextCheckbox.state = NSControlStateValueOn;
-    self.fastOCRCheckbox.state = NSControlStateValueOff;
     [self controlValueChanged:nil];
     [self useFullWindowRegion:nil];
     [self restartTimerIfRunning];
@@ -5378,24 +5363,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     });
 }
 
-- (void)useRealtimePreset:(id)sender {
-    self.intervalSlider.doubleValue = 0.5;
-    self.stableTextCheckbox.state = NSControlStateValueOff;
-    self.fastOCRCheckbox.state = NSControlStateValueOn;
-    [self restartTimerIfRunning];
-    [self setStatus:@"已切换为实时优先"];
-    [self scheduleSettingsSave];
-}
-
-- (void)useAccuratePreset:(id)sender {
-    self.intervalSlider.doubleValue = 1.2;
-    self.stableTextCheckbox.state = NSControlStateValueOn;
-    self.fastOCRCheckbox.state = NSControlStateValueOff;
-    [self restartTimerIfRunning];
-    [self setStatus:@"已切换为准确优先"];
-    [self scheduleSettingsSave];
-}
-
 - (void)requestScreenAccess:(id)sender {
     if ([self hasScreenAccess]) {
         [self setStatus:@"屏幕录制权限已可用"];
@@ -5447,28 +5414,34 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [[NSWorkspace sharedWorkspace] openURL:url];
 }
 
+- (void)invalidateServiceTest {
+    self.serviceTestGeneration += 1;
+    [self.serviceTestTaskOwner cancelActiveTask];
+}
+
 - (void)testTranslation:(id)sender {
     NSString *sample = self.languageControl.selectedSegment == 1
         ? @"Would you like to walk home together today?"
         : @"今日は一緒に帰りませんか？";
-    [self setStatus:@"正在测试翻译"];
-    self.serviceTestGeneration += 1;
+    if (!self.running) { [self setStatus:@"正在测试翻译"]; }
+    [self invalidateServiceTest];
     NSInteger testGeneration = self.serviceTestGeneration;
+    NSInteger runGeneration = self.translationGeneration;
     self.serviceStatusLabel.stringValue = @"正在测试服务";
-    [self translateText:sample completion:^(NSString *translated, NSError *error) {
+    [self translateText:sample systemPrompt:[self systemPrompt] maxTokens:240 modelOverride:nil
+        longText:NO serviceTest:YES completion:^(NSString *translated, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (testGeneration != self.serviceTestGeneration) { return; }
+            BOOL showTestCaption = !self.running && runGeneration == self.translationGeneration;
             if (error) {
-                [self showError:error.localizedDescription];
-                [self setStatus:@"翻译测试失败"];
+                if (showTestCaption) { [self showError:error.localizedDescription]; [self setStatus:@"翻译测试失败"]; }
                 self.serviceStatusLabel.stringValue = @"服务测试失败";
                 self.serviceErrorLabel.stringValue = error.localizedDescription ?: @"未知错误";
             } else {
-                [self showError:@""];
-                [self setStatus:@"翻译测试完成"];
+                if (showTestCaption) { [self showError:@""]; [self setStatus:@"翻译测试完成"]; }
                 self.serviceStatusLabel.stringValue = @"服务测试成功";
                 self.serviceErrorLabel.stringValue = @"";
-                [self updateCaptionWindowWithText:[self displayableTranslation:translated sourceText:sample] status:@"翻译测试完成"];
+                if (showTestCaption) { [self updateCaptionWindowWithText:[self displayableTranslation:translated sourceText:sample] status:@"翻译测试完成"]; }
             }
         });
     }];
@@ -5544,7 +5517,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         @"regionY": @(self.regionYSlider.doubleValue),
         @"regionWidth": @(self.regionWidthSlider.doubleValue),
         @"regionHeight": @(self.regionHeightSlider.doubleValue),
-        @"interval": @(self.intervalSlider.doubleValue),
         @"captionOpacity": @(self.captionOpacitySlider.doubleValue),
         @"captionFontSize": @(self.captionFontSizeSlider.doubleValue),
         @"captionHeight": @(self.captionHeightSlider.doubleValue),
@@ -5556,8 +5528,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         @"batchMaxHeight": @(self.batchHeightSlider.doubleValue),
         @"batchTextColor": FYAppearanceColorHex(self.batchTextColorWell.color),
         @"captionTheme": @(self.captionThemeControl.selectedSegment),
-        @"stableText": @(self.stableTextCheckbox.state == NSControlStateValueOn),
-        @"fastOCR": @(self.fastOCRCheckbox.state == NSControlStateValueOn),
         @"manualOCRScope": @(self.manualOCRScopeCheckbox.state == NSControlStateValueOn),
         @"autoFitRegion": @(self.autoFitRegionCheckbox.state == NSControlStateValueOn),
         @"baseURL": self.baseURLField.stringValue ?: @"",
@@ -5592,7 +5562,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     if (field == self.apiKeyField) { self.credentialLoadFailed = NO; }
     [self scheduleSettingsSave];
     if (field == self.baseURLField || field == self.modelField || field == self.realtimeModelField || field == self.apiKeyField) {
-        self.serviceTestGeneration += 1;
+        [self invalidateServiceTest];
         self.serviceStatusLabel.stringValue = @"服务未测试";
         self.serviceErrorLabel.stringValue = @"";
     }
@@ -5614,6 +5584,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
     [self saveSettings:nil];
     [self stop];
+    [self invalidateServiceTest];
     [self.globalShortcuts stop];
     [self.studyChatSession cancel];
     [self cancelQuickSentenceAnalysis];
@@ -5621,7 +5592,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (void)serviceSettingsChanged {
-    self.serviceTestGeneration += 1;
+    [self invalidateServiceTest];
     self.serviceStatusLabel.stringValue = @"服务未测试";
     self.serviceErrorLabel.stringValue = @"";
     [self saveSettings:nil];
@@ -5641,7 +5612,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.regionYSlider.doubleValue = settings[@"regionY"] ? [settings[@"regionY"] doubleValue] : 0.52;
     self.regionWidthSlider.doubleValue = settings[@"regionWidth"] ? [settings[@"regionWidth"] doubleValue] : 0.90;
     self.regionHeightSlider.doubleValue = settings[@"regionHeight"] ? [settings[@"regionHeight"] doubleValue] : 0.42;
-    self.intervalSlider.doubleValue = settings[@"interval"] ? [settings[@"interval"] doubleValue] : 1.2;
     self.captionOpacitySlider.doubleValue = settings[@"captionOpacity"] ? [settings[@"captionOpacity"] doubleValue] : 0.58;
     self.captionFontSizeSlider.doubleValue = settings[@"captionFontSize"] ? [settings[@"captionFontSize"] doubleValue] : 30;
     self.captionHeightSlider.doubleValue = settings[@"captionHeight"] ? [settings[@"captionHeight"] doubleValue] : 180;
@@ -5656,8 +5626,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.batchHeightSlider.doubleValue = settings[@"batchMaxHeight"] ? [settings[@"batchMaxHeight"] doubleValue] : 330;
     self.batchTextColorWell.color = FYAppearanceColorFromHex(settings[@"batchTextColor"], FYAdventureColor(@"ink"));
     [self applyBatchAppearanceToLayoutEngine];
-    self.stableTextCheckbox.state = settings[@"stableText"] ? ([settings[@"stableText"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
-    self.fastOCRCheckbox.state = settings[@"fastOCR"] ? ([settings[@"fastOCR"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOff;
     self.manualOCRScopeCheckbox.state=[settings[@"manualOCRScope"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff;
     self.autoFitRegionCheckbox.state = settings[@"autoFitRegion"] ? ([settings[@"autoFitRegion"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
     self.baseURLField.stringValue = settings[@"baseURL"] ?: @"https://api.openai.com/v1";
@@ -6055,7 +6023,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     NSString *prompt = FYInlineBatchPrompt(source, isLong);
     NSInteger maxTokens = FYInlineBatchMaxTokens(items.count, isLong);
 
-    [self translateTextRealtime:numberedText systemPrompt:prompt maxTokens:maxTokens completion:^(NSString *translated, NSError *error) {
+    NSString *realtimeModel = Trim(self.realtimeModelField.stringValue);
+    [self translateText:numberedText systemPrompt:prompt maxTokens:maxTokens
+        modelOverride:realtimeModel.length ? realtimeModel : @"deepseek-flash"
+        longText:isLong serviceTest:NO completion:^(NSString *translated, NSError *error) {
         if (error) { completion(error); return; }
 
         NSArray<NSString *> *parsed = [self parseNumberedTranslations:translated expectedCount:items.count];
@@ -7923,13 +7894,30 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 
 #pragma mark - Capture and OCR
 
+- (BOOL)livePreviewVisible {
+    NSWindow *window = self.mainWindow;
+    return window && window.isVisible && !window.isMiniaturized && window.isOnActiveSpace &&
+        (window.occlusionState & NSWindowOcclusionStateVisible) != 0;
+}
+
+- (void)refreshPreviewVisibility:(id)sender {
+    BOOL active = self.running && self.framePreview && [self livePreviewVisible];
+    self.captureCardInput.previewActive = active && [self captureCardInputEnabled];
+    if (active != (self.previewTimer != nil)) { [self restartPreviewTimerIfRunning]; }
+}
+- (void)windowDidChangeOcclusionState:(NSNotification *)notification { [self refreshPreviewVisibility:notification]; }
+- (void)windowDidMiniaturize:(NSNotification *)notification { [self refreshPreviewVisibility:notification]; }
+- (void)windowDidDeminiaturize:(NSNotification *)notification { [self refreshPreviewVisibility:notification]; }
+
 - (void)restartPreviewTimerIfRunning {
     [self.previewTimer invalidate];
     self.previewTimer = nil;
     self.previewRequestSerial += 1;
     self.previewRenderSerial += 1;
     self.lastPreviewCaptureFrameIndex = 0;
-    if (!self.running || !self.framePreview) { return; }
+    BOOL active = self.running && self.framePreview && [self livePreviewVisible];
+    self.captureCardInput.previewActive = active && [self captureCardInputEnabled];
+    if (!active) { return; }
     // Capture-card video targets 30 Hz; window screenshots stay at 10 Hz.
     // Both remain independent of OCR stability and translation completion.
     NSTimeInterval interval = [self captureCardInputEnabled] ? FYCaptureCardPreviewFrameInterval : 0.1;
@@ -7940,6 +7928,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 }
 
 - (void)previewTimerFired:(NSTimer *)timer {
+    if (![self livePreviewVisible]) { [self refreshPreviewVisibility:nil]; return; }
     if (!self.running || !self.framePreview || self.previewInFlight) { return; }
     BOOL card = [self captureCardInputEnabled];
     FYCaptureCardInput *input = self.captureCardInput;
@@ -7954,17 +7943,18 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     // skipped rather than accumulating old screenshots behind translation.
     dispatch_async(self.previewQueue, ^{
         @autoreleasepool {
-            CGImageRef image = card ? [input copyLatestFrame] : [self copyFullCapturedImageForWindow:windowID];
+            uint64_t actualIndex = 0;
+            CGImageRef image = card ? [input copyLatestFrameWithIndex:&actualIndex] : [self copyFullCapturedImageForWindow:windowID];
             CGImageRef preview = FYCopyPreviewImage(image);
             if (image) { CGImageRelease(image); }
             dispatch_async(dispatch_get_main_queue(), ^{
                 // Invalidation retains this busy slot until delivery. No newer
                 // preview task can own it, including across stop/restart.
                 self.previewInFlight = NO;
-                if (serial == self.previewRequestSerial && preview && self.running &&
+                if (serial == self.previewRequestSerial && preview && self.running && [self livePreviewVisible] &&
                     generation == self.translationGeneration && epoch == input.sessionEpoch &&
                     card == [self captureCardInputEnabled] && windowID == [self displayTargetWindowID]) {
-                    self.lastPreviewCaptureFrameIndex = index;
+                    self.lastPreviewCaptureFrameIndex = actualIndex;
                     [self applyPreviewImage:preview];
                 }
                 if (preview) { CGImageRelease(preview); }
@@ -8764,6 +8754,13 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
              maxTokens:(NSInteger)maxTokens
          modelOverride:(NSString *)modelOverride
             completion:(void (^)(NSString *translated, NSError *error))completion {
+    [self translateText:text systemPrompt:systemPrompt maxTokens:maxTokens modelOverride:modelOverride
+        longText:NO serviceTest:NO completion:completion];
+}
+
+- (void)translateText:(NSString *)text systemPrompt:(NSString *)systemPrompt maxTokens:(NSInteger)maxTokens
+        modelOverride:(NSString *)modelOverride longText:(BOOL)longText serviceTest:(BOOL)serviceTest
+        completion:(void (^)(NSString *, NSError *))completion {
     NSDictionary *trace = FYCurrentTrace();
     NSString *apiKey = Trim(self.apiKeyField.stringValue);
     if (apiKey.length == 0) {
@@ -8796,7 +8793,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     NSError *jsonError = nil;
     NSMutableURLRequest *request = [FYTranslationManager requestWithURL:url apiKey:apiKey model:model
         sourceText:text systemPrompt:(systemPrompt ?: [self systemPrompt]) maxTokens:maxTokens
-        disableReasoning:FYIsDeepSeekService(url.absoluteString, model) error:&jsonError];
+        disableReasoning:FYIsDeepSeekService(url.absoluteString, model) longText:longText error:&jsonError];
     if (!request) {
         FYTrace(trace, @"request_complete", @{@"reason": @"serialization_error", @"success": @NO, @"error_code": @(jsonError.code)});
         completion(nil, jsonError);
@@ -8808,18 +8805,21 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         taskTrace[@"http_task_id"] = NSUUID.UUID.UUIDString;
         trace = [taskTrace copy];
     }
-    NSInteger generation = self.translationGeneration;
+    if (serviceTest && !self.serviceTestTaskOwner) { self.serviceTestTaskOwner = [FYTranslationTaskOwner new]; }
+    if (!serviceTest && !self.translationTaskOwner) { self.translationTaskOwner = [FYTranslationTaskOwner new]; }
+    FYTranslationTaskOwner *owner = serviceTest ? self.serviceTestTaskOwner : self.translationTaskOwner;
+    NSInteger generation = serviceTest ? self.serviceTestGeneration : self.translationGeneration;
     uint32_t diagnosticWindowID = [self displayTargetWindowID];
     __block __weak NSURLSessionDataTask *submittedTask = nil;
     void (^deliver)(NSString *, NSError *) = ^(NSString *translated, NSError *error) {
         [[FYRuntimeDiagnostics shared] recordEvent:@"translation" fields:@{@"window_id": @(diagnosticWindowID), @"generation": @(generation), @"success": @(!error), @"error_code": @(error.code)}];
         FYTrace(trace, @"request_complete", @{@"success": @(!error), @"error_code": @(error.code), @"translation": error ? @"" : (translated ?: @"")});
-        FYDeliverTranslationOnMain(generation, ^NSInteger { return self.translationGeneration; },
+        FYDeliverTranslationOnMain(generation, ^NSInteger { return serviceTest ? self.serviceTestGeneration : self.translationGeneration; },
             translated, error, ^(NSString *value, NSError *failure) {
-                [self.translationTaskOwner finishTask:submittedTask];
+                [owner finishTask:submittedTask];
                 completion(value, failure);
             }, ^{
-                [self.translationTaskOwner finishTask:submittedTask];
+                [owner finishTask:submittedTask];
                 FYTrace(trace, @"caption_drop", @{@"reason": @"generation_changed_before_delivery"});
             });
     };
@@ -8831,15 +8831,13 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         [[FYRuntimeDiagnostics shared] recordEvent:@"http" fields:@{@"window_id": @(diagnosticWindowID), @"generation": @(generation), @"http_status": @([(NSHTTPURLResponse *)response statusCode]), @"error_code": @(error.code), @"elapsed_ms": @([[NSDate date] timeIntervalSinceDate:httpStart] * 1000)}];
         FYTrace(trace, @"http_complete", @{@"http_status": @([(NSHTTPURLResponse *)response statusCode]), @"elapsed_ms": @([[NSDate date] timeIntervalSinceDate:httpStart] * 1000), @"error_code": @(error.code)});
     } completion:deliver];
-    self.activeTranslationTask = task;
+    owner.activeTask = task;
     submittedTask = task;
     FYTrace(trace, @"request_submit", @{@"source": Trim(text), @"generation": @(generation)});
     [task resume];
 }
 
 - (NSURL *)chatCompletionsURL { return FYChatCompletionsURL(self.baseURLField.stringValue); }
-
-- (BOOL)isDeepSeekRequest { return FYIsDeepSeekService(self.baseURLField.stringValue, self.modelField.stringValue); }
 
 - (NSString *)systemPrompt {
     return [self systemPromptForMode:[self effectiveModeSegment]];
@@ -8933,12 +8931,8 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 - (void)setLastTranslationAttemptDate:(NSDate *)value { [self translationState].lastAttemptDate=value; }
 
 - (NSTimeInterval)recognitionPollingInterval {
-    // The interval control is not exposed in the current player UI. Dialogue
-    // must not spend another 1.2s per stability observation because of its
-    // legacy saved default. Keep accurate OCR and two/three-frame confirmation;
-    // inFlight still prevents overlapping capture/OCR/translation cycles.
-    return [self effectiveModeSegment] == ContentModeDialogue ? 0.5
-        : MAX(0.5, self.intervalSlider.doubleValue);
+    // Legacy hidden settings do not affect players' capture/OCR policy.
+    return [self effectiveModeSegment] == ContentModeDialogue ? 0.5 : 1.2;
 }
 
 - (void)restartTimerIfRunning {
@@ -9052,7 +9046,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 - (void)updatePreviewFromImage:(CGImageRef)image generation:(NSInteger)generation {
     if (!image || !self.framePreview) { return; }
     // OCR frames can be older than the independently updated live preview.
-    if (self.running && self.previewTimer) { return; }
+    if (self.running) { return; }
     NSDate *now = [NSDate date];
     if (self.lastPreviewDate && [now timeIntervalSinceDate:self.lastPreviewDate] < 0.1) { return; }
     self.lastPreviewDate = now;

@@ -27,7 +27,7 @@ flowchart LR
 | AppDelegate | `objc/LiveCaptionTranslator.m` 的 `start` / `stop` / `timerFired:` 及翻译、显示编排；不是独立管线框架 |
 | 输入 | 窗口 `CGWindowListCreateImage(IncludingWindow)`；`FYCaptureCardInput` 的 AVFoundation 会话、单帧槽与 epoch；QuickTime / OBS 作为显示窗口 |
 | OCR | `FYOCRManager` 的 Vision、区域回映、精读与合并、模态过滤、对白与字段稳定 |
-| 翻译 | `FYTranslationManager` 的请求构造、短请求 15 秒 / 较长批次 60–90 秒的数据等待超时、HTTP / JSON 解码、缓存与主线程交付策略；没有独立自动重试队列 |
+| 翻译 | `FYTranslationManager` 的请求构造、对白及短文本批次 15 秒 / 显式长正文批次 60–90 秒的数据等待超时、HTTP / JSON 解码、缓存与主线程交付策略；没有独立自动重试队列 |
 | 学习状态 | `FYLearningCoordinator` 的句子身份、版本、不完整帧复用及固定阅读；`FYLearningStore` 的 SQLite 持久化 |
 | 显示 | `FYWindowManager` / `FYGeometryManager` 的目标与映射；`FYInlineLayout` 的贴译排版；AppDelegate 的字幕、面板、折叠与入口 |
 | 诊断 | `FYRuntimeDiagnostics` 元数据内存环；`FYTranslationTrace` 显式启用的文字 JSONL |
@@ -115,7 +115,7 @@ python3 scripts/layout-debug.py check
 
 `debug.py check` 已包含这套检查和 102 帧界面抖动 Replay。六类固定合成截图与 OCR 存在 `tests/fixtures/layout/`。无真实窗口的 NSCell / 正文视图测量不等于桌面浮窗、真实采集映射或游戏验收。
 
-先构建包含新诊断代码的应用，并在明确安排的桌面时段由用户启用后，才保存画面和文字证据：
+默认和发布构建将 `FY_ENABLE_LAYOUT_DEBUG` 固定为 0；合法控制文件也不能启用保存或覆盖层。下列 `start` 命令仅对明确编译 `FY_ENABLE_LAYOUT_DEBUG=1` 的开发诊断构建有效，该构建不得分发。合成 P0–P3 回归单独打开此编译开关。现场排查须使用开发诊断构建，并在明确安排的桌面时段由用户启用后，才保存画面和文字证据：
 
 ```bash
 python3 scripts/layout-debug.py start --seconds 120
@@ -170,6 +170,8 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 导入日志生成 `draft:true`：保留所选阶段的相对帧时间；需选择模式、输入源，填写服务 mock 和用户预期断言后删除 draft。`modal_scoped` 已是后处理结果，不能恢复前面丢掉的观察；精读可能产生同 cycle 多条 `vision_raw`，需人工辨别。截断日志不能作为完整场景导入。既有 `InlineOCRFrameReplayTests` 仍用于资料页专项历史回放，不作为通用 Replay。
 
 ## 当前覆盖与产品缺口
+
+2026-10-10 审查修复：短批超时按显式批次类别设置，不随按钮数量放宽；服务测试使用独立任务 owner 和代次，运行/切窗/切源不再取消测试，服务配置改变或重复测试仍取消旧测试。主窗口隐藏、最小化、位于其它 Space 或完全遮挡时暂停独立预览；重新可见时恢复。采集卡转换在可见预览时为 30 Hz，隐藏或仅 OCR 时为 10 Hz；取帧同时原子取得帧号。旧识别间隔/快速 OCR/等待稳定/预设已从生产 UI、设置读写和运行策略删除，固定对白 0.5 秒、界面 1.2 秒、准确 OCR，保留原稳定流程。测试可显式绕过稳定门以隔离下游边界，生产构建没有该注入开关。完整审查与验证见 [本轮报告](docs/review-dev0.2.1-261009.md)。
 
 2026-10-09 预览卡顿修复：画面预览使用独立的 Common Modes timer（窗口截图 100 ms，采集卡约 33.3 ms） 和串行后台取帧 / 缩放队列，不再等待 OCR 或 HTTP 完成；采集卡预览与 OCR 分开记录帧序号。最多一个预览任务在途，不因暂停 / 重启清除尚未结束的任务槽；代次、窗口、输入源、会话 epoch 与请求序号变化后拒绝旧画面。`TranslationTracePipelineTests` 挂起生产 HTTP 入口的 mock 回复，验证两种输入仍显示连续新帧、没有额外 OCR / 请求，并检查积压限制和迟到画面丢弃。旧 OCR 预览入口在独立 timer 活跃时不覆盖画面。此修复只解耦预览；下方 `latest-frame-while-busy` 的 OCR / 旧字幕缺口仍保留，不能把预览通过当作该缺口修复。详见 [预览卡顿说明](docs/live-preview-stall.md)。
 

@@ -62,6 +62,8 @@ FOUNDATION_EXPORT NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionS
 - (void)storeFrame:(CGImageRef)frame index:(uint64_t)index atTime:(NSTimeInterval)now;
 /// 最近一帧的副本；调用方负责 CGImageRelease。没有帧时返回 NULL。
 - (CGImageRef)copyLatestFrame CF_RETURNS_RETAINED;
+/// Atomically retain pixels and their sequence number from the same frame slot.
+- (CGImageRef)copyLatestFrameWithIndex:(uint64_t * _Nullable)index CF_RETURNS_RETAINED;
 /// 清空当前帧（新会话/停止时必须调用，避免继续用旧帧）。
 - (void)clear;
 - (void)resetCounters;
@@ -77,6 +79,8 @@ FOUNDATION_EXPORT NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionS
 /// `requestAccessWithCompletion:` 在主线程调用；状态回调 `stateChangeHandler` 也在主队列触发。
 /// `copyLatestFrame` 任何线程可用。
 @interface FYCaptureCardInput : NSObject
+/// Visible preview: 30 Hz; OCR-only background input: 10 Hz.
+@property(nonatomic) BOOL previewActive;
 
 @property (nonatomic, readonly) FYCaptureCardSessionState state;
 /// 给用户看的状态说明（中文），说明失败原因与下一步动作。
@@ -107,6 +111,8 @@ FOUNDATION_EXPORT NSString *FYCaptureCardSessionStateLabel(FYCaptureCardSessionS
 /// 停止并释放采集会话，同时作废当前帧。
 - (void)stop;
 - (CGImageRef)copyLatestFrame CF_RETURNS_RETAINED;
+/// Atomically retain pixels and their sequence number from the same frame slot.
+- (CGImageRef)copyLatestFrameWithIndex:(uint64_t * _Nullable)index CF_RETURNS_RETAINED;
 - (uint64_t)latestFrameIndex;
 /// 最近一帧的像素尺寸。没有帧或尺寸无效时返回 NO（调用方据此判断"能否建立坐标映射"）。
 - (BOOL)latestFrameSize:(CGSize *)outSize;
