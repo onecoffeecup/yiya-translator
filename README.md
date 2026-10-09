@@ -80,10 +80,6 @@ open "$HOME/Applications/译芽.app"
 
 详细步骤见 [源码构建](docs/源码构建.md)。维护者打包和发布见 [发布流程](docs/发布流程.md)，当前验证范围见 [发布检查结果](docs/发布检查结果.md)。
 
-## iPadOS Lite 技术评估
-
-iPadOS 17+ 的 USB-C UVC 视频采集 PoC 已准备独立源码，尚未通过 iPadOS 设备构建、签名安装或真机采集验收。当前只验证视频输入，不包含 OCR、翻译、音频和学习功能；不作为可下载的 Lite 产品。真机采集通过后才接入共享翻译核心。见 [可行性与复用方案](docs/ipados-lite-feasibility.md)、[PoC 工程与运行说明](ipados/CapturePoC/README.md)、[实际验证记录](docs/ipados-lite-validation.md)。
-
 ## 视觉规范
 
 项目已接入用户确认的「奶油棕花境」：暖奶油底、深棕圆体、浅草绿按钮、圆角阅读卡片，以及左下角樱花树与猫咪。中文采用华文圆体，日文采用 Hiragino Maru Gothic；字体不可用时回退至系统无衬线字体，不随包分发系统字体。
