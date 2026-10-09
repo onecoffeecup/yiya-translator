@@ -1,0 +1,35 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {};
+    objectVersion = 56;
+    objects = {
+        A00000000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1600;}; buildConfigurationList = A00000000000000000000010; compatibilityVersion = "Xcode 14.0"; developmentRegion = zh_CN; hasScannedForEncodings = 0; knownRegions = (zh_CN, en, Base); mainGroup = A00000000000000000000002; productRefGroup = A00000000000000000000003; projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000004);};
+        A00000000000000000000002 = {isa = PBXGroup; children = (A00000000000000000000005, A00000000000000000000006, A00000000000000000000003); sourceTree = "<group>";};
+        A00000000000000000000003 = {isa = PBXGroup; children = (A00000000000000000000007); name = Products; sourceTree = "<group>";};
+        A00000000000000000000004 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000011; buildPhases = (A00000000000000000000008, A00000000000000000000009, A0000000000000000000000A); buildRules = (); dependencies = (); name = YiyaCapturePoC; productName = YiyaCapturePoC; productReference = A00000000000000000000007; productType = "com.apple.product-type.application";};
+        A00000000000000000000005 = {isa = PBXGroup; children = (B00000000000000000000001, B00000000000000000000002, B00000000000000000000003, B00000000000000000000004, B00000000000000000000005); path = Sources; sourceTree = "<group>";};
+        A00000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>";};
+        A00000000000000000000007 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = YiyaCapturePoC.app; sourceTree = BUILT_PRODUCTS_DIR;};
+        A00000000000000000000008 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (C00000000000000000000001, C00000000000000000000002, C00000000000000000000003, C00000000000000000000004, C00000000000000000000005); runOnlyForDeploymentPostprocessing = 0;};
+        A00000000000000000000009 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+        A0000000000000000000000A = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+        B00000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePrimitives.swift; sourceTree = "<group>";};
+        B00000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptureService.swift; sourceTree = "<group>";};
+        B00000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapturePreview.swift; sourceTree = "<group>";};
+        B00000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>";};
+        B00000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YiyaCapturePoCApp.swift; sourceTree = "<group>";};
+        C00000000000000000000001 = {isa = PBXBuildFile; fileRef = B00000000000000000000001;};
+        C00000000000000000000002 = {isa = PBXBuildFile; fileRef = B00000000000000000000002;};
+        C00000000000000000000003 = {isa = PBXBuildFile; fileRef = B00000000000000000000003;};
+        C00000000000000000000004 = {isa = PBXBuildFile; fileRef = B00000000000000000000004;};
+        C00000000000000000000005 = {isa = PBXBuildFile; fileRef = B00000000000000000000005;};
+        A00000000000000000000010 = {isa = XCConfigurationList; buildConfigurations = (D00000000000000000000001, D00000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+        A00000000000000000000011 = {isa = XCConfigurationList; buildConfigurations = (D00000000000000000000003, D00000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+        D00000000000000000000001 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; DEBUG_INFORMATION_FORMAT = dwarf; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;};};
+        D00000000000000000000002 = {isa = XCBuildConfiguration; name = Release; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 17.0; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O";};};
+        D00000000000000000000003 = {isa = XCBuildConfiguration; name = Debug; buildSettings = {PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.nanami.yiya.capturepoc; INFOPLIST_FILE = Info.plist; GENERATE_INFOPLIST_FILE = NO; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; SWIFT_EMIT_LOC_STRINGS = NO; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";};};
+        D00000000000000000000004 = {isa = XCBuildConfiguration; name = Release; buildSettings = {PRODUCT_NAME = "$(TARGET_NAME)"; PRODUCT_BUNDLE_IDENTIFIER = com.nanami.yiya.capturepoc; INFOPLIST_FILE = Info.plist; GENERATE_INFOPLIST_FILE = NO; CODE_SIGN_STYLE = Automatic; TARGETED_DEVICE_FAMILY = 2; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SUPPORTS_MACCATALYST = NO; SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO; SWIFT_EMIT_LOC_STRINGS = NO; LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";};};
+    };
+    rootObject = A00000000000000000000001;
+}
