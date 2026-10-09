@@ -57,3 +57,9 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
   "$ROOT_DIR/tests/WindowPolicyTests.m" "$ROOT_DIR/objc/FYWindowManager.m" \
   -framework Cocoa -o "$OUT/WindowPolicyTests"
 "$OUT/WindowPolicyTests"
+
+# Use release optimization and disabled diagnostics; no real control or pixels.
+clang -O2 -DFY_ENABLE_LAYOUT_DEBUG=0 -fobjc-arc -fmodules -mmacosx-version-min=13.0 \
+  -I "$ROOT_DIR/objc" "$ROOT_DIR/tests/LayoutDebugReleaseTests.m" "${FY_LAYOUT_SOURCES[@]}" \
+  -framework Cocoa -o "$OUT/LayoutDebugReleaseTests"
+"$OUT/LayoutDebugReleaseTests"

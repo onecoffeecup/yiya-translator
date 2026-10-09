@@ -68,6 +68,7 @@ NSDictionary *FYLayoutDebugSnapshot(FYInlineLayoutResult *result, FYInlineLayout
         @"changed": @(result!=previous && result.changedFromPrevious), @"layout_reused": @(result==previous), @"layout_pass_count": @(result==previous ? 0 : result.layoutPassCount), @"update_reason": reason ?: @"unspecified", @"blocks": blocks};
 }
 
+#if defined(FY_ENABLE_LAYOUT_DEBUG) && FY_ENABLE_LAYOUT_DEBUG
 // The same drawing routine serves the live overlay and the exported PNG.
 static void DrawSnapshot(NSDictionary *snapshot) {
     CGRect viewport = FYDebugRectFromArray(snapshot[@"viewport"]);
@@ -245,3 +246,22 @@ static void DrawSnapshot(NSDictionary *snapshot) {
 }
 - (void)clearOverlay { [self.overlay close]; self.overlay=nil; [self.expiryTimer invalidate]; self.expiryTimer=nil; }
 @end
+
+#else
+// Default and release builds cannot be armed by another process's control file.
+@implementation FYInlineLayoutDebug
++ (NSString *)defaultDirectory { return [NSString stringWithFormat:@"/tmp/yiya-layout-debug-%u", getuid()]; }
++ (instancetype)shared { static FYInlineLayoutDebug *debug; static dispatch_once_t once;
+    dispatch_once(&once, ^{ debug=[self new]; }); return debug; }
+- (instancetype)initWithDirectory:(NSString *)directory { return [super init]; }
+- (BOOL)isActive { return NO; }
+- (NSDictionary *)beginFrameWithImage:(CGImageRef)image metadata:(NSDictionary *)metadata { return nil; }
+- (void)recordItems:(NSArray *)items stage:(NSString *)stage context:(NSDictionary *)context {}
+- (void)recordLayout:(NSDictionary *)snapshot context:(NSDictionary *)context {}
+- (void)recordLayout:(NSDictionary *)snapshot context:(NSDictionary *)context renderedImages:(NSDictionary *)images {}
+- (void)recordDecision:(NSString *)reason context:(NSDictionary *)context {}
+- (void)showSnapshot:(NSDictionary *)snapshot viewport:(CGRect)viewport {}
+- (void)refreshVisible:(BOOL)visible level:(NSInteger)level {}
+- (void)clearOverlay {}
+@end
+#endif

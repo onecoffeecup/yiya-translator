@@ -43,7 +43,7 @@ for arch in $ARCHS; do
   # Direct compile-and-link commands discard the temporary DWARF objects.
   for source in "${SOURCES[@]}"; do
     object="$objects_dir/$(basename "${source%.m}").o"
-    clang -c -O2 -g -fobjc-arc -DFY_ENABLE_UPDATES=1 -fmodules \
+    clang -c -O2 -g -fobjc-arc -DFY_ENABLE_UPDATES=1 -DFY_ENABLE_LAYOUT_DEBUG=0 -fmodules \
       -fmodules-cache-path="$MODULE_CACHE" -F "$SPARKLE_DIR" \
       -arch "$arch" -mmacosx-version-min="$MIN_MACOS" -Wall \
       "$source" -o "$object"

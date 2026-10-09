@@ -6,7 +6,7 @@ source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
 OUT="$ROOT_DIR/.build/layout-debug"
 mkdir -p "$OUT"
-clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang -DFY_ENABLE_LAYOUT_DEBUG=1 -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -Wno-nullability-completeness -Wno-unused-function -Wno-nonnull \
   -fmodules-cache-path="$OUT/module-cache" -include "$ROOT_DIR/tests/FYTestIsolation.h" \
   -I objc -I objc/learning \

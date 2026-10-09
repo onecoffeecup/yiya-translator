@@ -11,7 +11,8 @@ FOUNDATION_EXPORT NSDictionary *FYLayoutDebugSnapshot(FYInlineLayoutResult *resu
     FYInlineLayoutResult *previous, CGRect viewport, NSDictionary *rendered, NSString *reason);
 
 // No screenshots, user defaults, credentials, network or window acquisition here.
-// Only an explicitly armed private control file permits saving the image supplied by capture.
+// Default/release builds are inert. FY_ENABLE_LAYOUT_DEBUG=1 is for developer builds
+// with an explicitly armed private control file; never distribute those builds.
 @interface FYInlineLayoutDebug : NSObject
 + (instancetype)shared;
 + (NSString *)defaultDirectory;

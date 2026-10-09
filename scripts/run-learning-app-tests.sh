@@ -11,7 +11,9 @@ if [[ ! "$TEST_SOURCE" =~ ^[A-Za-z][A-Za-z0-9]*$ ]]; then
 fi
 TEST_OUTPUT="${2:-$ROOT_DIR/.build/test-results/$TEST_SOURCE}"
 mkdir -p "$ROOT_DIR/.build/release" "$TEST_OUTPUT"
-clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-nullability-completeness -Wno-unused-function \
+LAYOUT_DEBUG_FLAGS=()
+if [[ "$TEST_SOURCE" == "InlineLayoutDebugUITests" ]]; then LAYOUT_DEBUG_FLAGS=(-DFY_ENABLE_LAYOUT_DEBUG=1); fi
+clang ${LAYOUT_DEBUG_FLAGS[@]+"${LAYOUT_DEBUG_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-nullability-completeness -Wno-unused-function \
   -fmodules-cache-path="$FY_TEST_MODULE_CACHE" \
   -DFY_TEST_REQUIRES_UI=1 -include "$ROOT_DIR/tests/FYTestIsolation.h" \
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
