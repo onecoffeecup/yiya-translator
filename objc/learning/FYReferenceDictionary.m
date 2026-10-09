@@ -38,10 +38,19 @@
                     if (requestedReading.length && ![record[@"readings"] containsObject:requestedReading]) {continue;}
                     NSMutableDictionary *matched=[record mutableCopy];
                     NSMutableOrderedSet *levels=[NSMutableOrderedSet orderedSet];
-                    for(NSDictionary *evidence in record[@"reference_level_matches"]){
+                    id matches = record[@"reference_level_matches"];
+                    if (matches && ![matches isKindOfClass:NSArray.class]) {
+                        error=[NSError errorWithDomain:@"FYReferenceDictionary" code:3 userInfo:@{NSLocalizedDescriptionKey:@"词典等级记录损坏，请更新资料包。"}]; break;
+                    }
+                    for(id evidence in matches){
+                        if (![evidence isKindOfClass:NSDictionary.class] || ![evidence[@"word"] isKindOfClass:NSString.class] ||
+                            ![evidence[@"level"] isKindOfClass:NSString.class] || [evidence[@"level"] length] == 0) {
+                            error=[NSError errorWithDomain:@"FYReferenceDictionary" code:3 userInfo:@{NSLocalizedDescriptionKey:@"词典等级记录损坏，请更新资料包。"}]; break;
+                        }
                         NSString *form=[evidence[@"word"] precomposedStringWithCompatibilityMapping];
                         if([form isEqualToString:query]){[levels addObject:evidence[@"level"]];}
                     }
+                    if (error) { break; }
                     // Reading-only matches are ambiguous across written forms: do not merge their grades.
                     matched[@"reference_levels"]=levels.array;
                     matched[@"queried_form"]=query;
@@ -51,7 +60,7 @@
             }
         }
         if(stmt){sqlite3_finalize(stmt);}
-        dispatch_async(dispatch_get_main_queue(),^{completion(error?@[]:[records copy],error);});
+        if (completion) { dispatch_async(dispatch_get_main_queue(),^{completion(error?@[]:[records copy],error);}); }
     });
 }
 @end

@@ -86,7 +86,9 @@ def main():
         output = base / f"{stamp}-{uuid.uuid4().hex[:6]}"
         output.mkdir()
         suites = test_suites()
-        steps = [("TestIsolationTests", ["bash", "scripts/run-isolation-tests.sh"], False),
+        steps = [("SourceManifestTests", [sys.executable, "tests/SourceManifestTests.py"], False),
+                 ("CaptureCardOfflineTests", [sys.executable, "tests/CaptureCardOfflineTests.py"], False),
+                 ("TestIsolationTests", ["bash", "scripts/run-isolation-tests.sh"], False),
                  ("ReferenceData", [sys.executable, "scripts/reference-data.py", "check"], False),
                  ("RuntimeDiagnosticsTests", ["bash", "scripts/run-diagnostics-tests.sh"], False),
                  ("DistributionTests", [sys.executable, "tests/DistributionTests.py"], False),
@@ -95,6 +97,7 @@ def main():
                  ("ModuleTests", ["bash", "scripts/run-module-tests.sh"], False),
                  ("ReplayRegressionTests", [sys.executable, "scripts/debug.py", "check", "--replay-only"], False),
                  ("LearningTests", ["bash", "scripts/run-learning-tests.sh"], False),
+                 ("LearningStoreResilienceTests", ["bash", "scripts/run-learning-resilience-tests.sh"], False),
                  ("DialogueGrammarTests", ["bash", "scripts/run-dialogue-grammar-tests.sh"], False),
                  ("InlineTranslationTests", ["bash", "scripts/run-tests.sh"], True)]
         steps.extend((s, ["bash", "scripts/run-learning-app-tests.sh", s, str(output / s)], True) for s in suites)

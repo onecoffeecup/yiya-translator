@@ -131,8 +131,26 @@ BOOL FYIsDeepSeekService(NSString *baseURL, NSString *model) {
 - (void)clear { self.key=nil; self.value=nil; }
 @end
 
-@implementation FYTranslationTaskOwner
-- (void)cancelActiveTask { [self.activeTask cancel]; self.activeTask = nil; }
+@implementation FYTranslationTaskOwner {
+    NSMutableArray<NSURLSessionDataTask *> *_tasks;
+}
+@synthesize activeTask = _activeTask;
+- (void)setActiveTask:(NSURLSessionDataTask *)task {
+    _activeTask = task;
+    if (!task) { return; }
+    if (!_tasks) { _tasks = [NSMutableArray new]; }
+    if ([_tasks indexOfObjectIdenticalTo:task] == NSNotFound) { [_tasks addObject:task]; }
+}
+- (void)finishTask:(NSURLSessionDataTask *)task {
+    if (!task) { return; }
+    [_tasks removeObjectIdenticalTo:task];
+    if (_activeTask == task) { _activeTask = _tasks.lastObject; }
+}
+- (void)cancelActiveTask {
+    NSArray *tasks = [_tasks copy];
+    [_tasks removeAllObjects]; _activeTask = nil;
+    for (NSURLSessionDataTask *task in tasks) { [task cancel]; }
+}
 @end
 
 void FYDeliverTranslationOnMain(NSInteger requestGeneration, NSInteger (^currentGeneration)(void),
@@ -184,7 +202,11 @@ static NSString *FYTrimString(id value) {
     NSData *body = [NSJSONSerialization dataWithJSONObject:payload options:0 error:error];
     if (!body) { return nil; }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.HTTPMethod = @"POST"; request.timeoutInterval = 15; request.HTTPBody = body;
+    request.HTTPMethod = @"POST";
+    // Small realtime responses keep their current latency bound. Nonstreaming
+    // batches need time to produce larger output, but remain cancellable/bounded.
+    request.timeoutInterval = maxTokens <= 240 ? 15 : MIN(90, MAX(60, ceil(maxTokens / 30.0) + 15));
+    request.HTTPBody = body;
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
     [request setValue:[NSString stringWithFormat:@"Bearer %@", key] forHTTPHeaderField:@"Authorization"];
     return request;

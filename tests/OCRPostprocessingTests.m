@@ -246,6 +246,20 @@ int main(void) {
         NSMutableArray *smallItems=[NSMutableArray array];
         for(NSUInteger i=0;i<4;i++) [smallItems addObject:Item(@"項目",.1+i*.2,.5,.1,.02)];
         Expect([FYOCRManager looksLikeUIFrame:smallItems], @"four small non-ruby items identify UI");
+        NSArray *shortDialogue=@[Item(@"青木",.28,.27,.05,.032), Item(@"あの、",.30,.20,.07,.032),
+            Item(@"青木悠",.30,.14,.11,.032), Item(@"ですけど……",.30,.08,.14,.032)];
+        Expect(![FYOCRManager looksLikeUIFrame:shortDialogue] && [FYOCRManager contentModeForItems:shortDialogue fallback:1]==0,
+               @"speaker plus short spoken lines is dialogue, not four menu boxes");
+        Expect([FYOCRManager looksLikeUIFrame:[shortDialogue arrayByAddingObjectsFromArray:@[back,menu]]],
+               @"explicit menu controls still override a compact dialogue-shaped band");
+        NSMutableArray *upperShort=[NSMutableArray new], *lowerLabels=[NSMutableArray new];
+        for (NSUInteger i=0;i<shortDialogue.count;i++) {
+            OCRTextItem *item=shortDialogue[i]; CGRect box=item.boundingBox; box.origin.y+=.5;
+            [upperShort addObject:Item(item.text,box.origin.x,box.origin.y,box.size.width,box.size.height)];
+            [lowerLabels addObject:Item(@"案内項目",item.boundingBox.origin.x,item.boundingBox.origin.y,item.boundingBox.size.width,item.boundingBox.size.height)];
+        }
+        Expect([FYOCRManager looksLikeUIFrame:upperShort] && [FYOCRManager looksLikeUIFrame:lowerLabels],
+               @"upper-screen options and lower-screen non-spoken labels remain UI");
         Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@" 思い出した。使用 "] isEqual:@"思い出した。"], @"two-kanji trailing button stripped from kana dialogue");
         Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"そうだ。操作説明"] isEqual:@"そうだ。"], @"four-kanji trailing button stripped");
         Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"そうだ。使"] isEqual:@"そうだ。使"], @"single trailing kanji retained");

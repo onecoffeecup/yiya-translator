@@ -207,9 +207,12 @@ def run(args):
         try:
             if args.command == "check" and not getattr(args, "replay_only", False):
                 steps = [("DebugInfrastructureTests", [sys.executable, "tests/DebugInfrastructureTests.py"]),
+                         ("SourceManifestTests", [sys.executable, "tests/SourceManifestTests.py"]),
+                         ("CaptureCardOfflineTests", [sys.executable, "tests/CaptureCardOfflineTests.py"]),
                          ("TestIsolationTests", ["bash", "scripts/run-isolation-tests.sh"]),
                          ("RuntimeDiagnosticsTests", ["bash", "scripts/run-diagnostics-tests.sh"]),
                          ("ModuleTests", ["bash", "scripts/run-module-tests.sh"]),
+                         ("LearningStoreResilienceTests", ["bash", "scripts/run-learning-resilience-tests.sh"]),
                          ("InlineLayoutDebugTests", [sys.executable, "scripts/layout-debug.py", "check", "--output", str(output / "layout-evidence")]),
                          ("TranslationTraceTests", ["bash", "scripts/run-translation-trace-tests.sh"]),
                          ("DialogueGrammarTests", ["bash", "scripts/run-dialogue-grammar-tests.sh"])]

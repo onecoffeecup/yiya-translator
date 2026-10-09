@@ -43,6 +43,31 @@ int main(void) { @autoreleasepool {
     Check(!HasCode([recorder reportForSnapshot:snapshot][@"findings"], @"screen_permission_missing"), @"capture card does not require screen permission");
     snapshot[@"quicktime_running"] = @YES; snapshot[@"quicktime_windows"] = @0;
     Check(HasCode([recorder reportForSnapshot:snapshot][@"findings"], @"quicktime_not_visible"), @"running QuickTime without visible movie window is distinguished");
+    // A static game frame must not erase the request incident before export.
+    FYRuntimeDiagnostics *busy = [[FYRuntimeDiagnostics alloc] initWithClock:^{ return now; } capacity:6];
+    [busy recordEvent:@"http" fields:@{@"http_status":@429, @"elapsed_ms":@900}];
+    [busy recordEvent:@"translation" fields:@{@"success":@NO, @"error_code":@429}];
+    [busy recordEvent:@"http" fields:@{@"http_status":@200, @"elapsed_ms":@2980}];
+    for (NSUInteger i=0;i<100;i++) {
+        now += .5;
+        [busy recordEvent:@"cycle" fields:@{}];
+        [busy recordEvent:@"capture" fields:@{@"success":@YES}];
+        [busy recordEvent:@"ocr" fields:@{@"blocks":@4, @"elapsed_ms":@130}];
+    }
+    NSArray *incidents = [busy.recentEvents filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSDictionary *e, NSDictionary *bindings) {
+        (void)bindings;
+        return [e[@"event"] isEqual:@"http"] || [e[@"event"] isEqual:@"translation"];
+    }]];
+    Check(incidents.count==3, @"routine OCR must retain recent HTTP timing and failure evidence");
+    Check(busy.recentEvents.count==6, @"priority retention remains bounded");
+    FYRuntimeDiagnostics *requestsOnly = [[FYRuntimeDiagnostics alloc] initWithClock:^{ return now; } capacity:2];
+    [requestsOnly recordEvent:@"http" fields:@{@"http_status":@429}];
+    [requestsOnly recordEvent:@"translation" fields:@{@"success":@NO, @"error_code":@429}];
+    [requestsOnly recordEvent:@"ocr" fields:@{@"blocks":@4}];
+    Check([requestsOnly.recentEvents.firstObject[@"event"] isEqual:@"http"] && requestsOnly.recentEvents.count==2,
+          @"routine events cannot evict a buffer entirely filled with request evidence");
+    now += 301;
+    Check(busy.recentEvents.count==0, @"retained request evidence still expires in five minutes");
     NSString *directory = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
     [NSFileManager.defaultManager createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:NULL];
     NSURL *url = [NSURL fileURLWithPath:[directory stringByAppendingPathComponent:@"诊断.json"]];

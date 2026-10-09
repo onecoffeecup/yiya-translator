@@ -3,6 +3,11 @@
 
 static const NSTimeInterval FYDiagnosticRetention = 300;
 
+static BOOL FYDiagnosticRequestEvidence(NSDictionary *event) {
+    return [@[@"http", @"translation", @"start", @"stop", @"selection"] containsObject:event[@"event"]] ||
+        [event[@"error_code"] integerValue] != 0;
+}
+
 static NSDictionary *FYDiagnosticNumbers(NSDictionary *input, NSArray<NSString *> *keys) {
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
     for (NSString *key in keys) {
@@ -53,7 +58,17 @@ static NSString *FYDiagnosticRole(id role) {
     @synchronized (self) {
         record[@"time_unix_ms"] = @(llround(self.clock() * 1000));
         [self prune];
-        if (self.events.count >= self.capacity) { [self.events removeObjectAtIndex:0]; self.discarded++; }
+        if (self.events.count >= self.capacity) {
+            // Static frames generate capture/OCR events several times a second.
+            // Evict routine frame metadata before recent request/error evidence.
+            NSUInteger index = [self.events indexOfObjectPassingTest:^BOOL(NSDictionary *e, NSUInteger idx, BOOL *stop) {
+                (void)idx; (void)stop;
+                return !FYDiagnosticRequestEvidence(e);
+            }];
+            if (index == NSNotFound && !FYDiagnosticRequestEvidence(record)) { self.discarded++; return; }
+            if (index == NSNotFound) { index = 0; }
+            [self.events removeObjectAtIndex:index]; self.discarded++;
+        }
         [self.events addObject:[record copy]];
     }
 }

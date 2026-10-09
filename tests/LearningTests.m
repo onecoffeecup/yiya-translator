@@ -50,6 +50,35 @@ static FYGrammarCatalog *LoadCatalog(void) {
     return catalog;
 }
 
+@interface FYLearningAnalyzer (ReadingCueProbe)
+- (NSArray<NSDictionary *> *)grammarReadingCuesForText:(NSString *)text;
+- (BOOL)cue:(NSDictionary *)cue range:(NSRange)range isNestedIn:(NSArray<NSDictionary *> *)cues text:(NSString *)text;
+@end
+@interface FYReadingCueProbe : FYLearningAnalyzer
+@property(nonatomic, strong) NSMutableSet *visited;
+@property(nonatomic) NSUInteger duplicateVisits;
+@end
+@implementation FYReadingCueProbe
+- (BOOL)cue:(NSDictionary *)cue range:(NSRange)range isNestedIn:(NSArray<NSDictionary *> *)cues text:(NSString *)text {
+    NSString *key = [NSString stringWithFormat:@"%@:%@", cue[@"catalog_id"] ?: cue[@"observed_form"], NSStringFromRange(range)];
+    if ([self.visited containsObject:key]) { self.duplicateVisits++; }
+    [self.visited addObject:key];
+    return [super cue:cue range:range isNestedIn:cues text:text];
+}
+@end
+static void TestReadingCueEnumeration(void) {
+    FYReadingCueProbe *analyzer = [FYReadingCueProbe new]; analyzer.catalog = LoadCatalog();
+    analyzer.visited = [NSMutableSet new];
+    NSArray *cues = [analyzer grammarReadingCuesForText:@"それは夢みたい。"];
+    Check(cues.count > 0, @"catalog cue fixture has actual matches");
+    Check(analyzer.duplicateVisits == 0, @"each cue occurrence is examined once instead of repeating a unique span 32 times");
+    analyzer.visited = [NSMutableSet new];
+    cues = [analyzer grammarReadingCuesForText:@"夢みたい。でも旅行したい。"];
+    BOOL standalone = NO;
+    for (NSDictionary *cue in cues) { if ([cue[@"observed_form"] isEqual:@"たい"]) { standalone = YES; } }
+    Check(standalone, @"a later standalone form survives an earlier nested occurrence");
+}
+
 static void TestTokenizerTextSnapshots(void) {
     FYJapaneseTokenizer *tokenizer = [FYJapaneseTokenizer new];
     [tokenizer setCompletionQueue:dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0)];
@@ -109,6 +138,7 @@ static void TestTokenizerTextSnapshots(void) {
 int main(void) {
     @autoreleasepool {
         TestTokenizerTextSnapshots();
+        TestReadingCueEnumeration();
         FYVocabularyEntry *first=[FYVocabularyEntry new], *second=[FYVocabularyEntry new];
         first.vocabularyID=@"first"; second.vocabularyID=@"second";
         Check([FYLearningCoordinator vocabularyInList:@[first,second] identifier:@"second" fallbackIndex:0]==second, @"词条稳定身份优先于旧位置");

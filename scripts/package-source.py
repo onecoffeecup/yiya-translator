@@ -11,7 +11,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parent.parent
 ROOT_FILES = [".gitignore", ".gitattributes", "README.md", "LICENSE", "VERSION",
               "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "AGENTS.md", "DEBUG_WORKFLOW.md"]
-PUBLIC_DIRECTORIES = ["objc", "scripts", "tests", "tools", "resources", "docs"]
+PUBLIC_DIRECTORIES = ["objc", "scripts", "tests", "tools", "resources", "docs", ".github"]
 TOKEN = re.compile(rb"\b(?:sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16})\b")
 
 

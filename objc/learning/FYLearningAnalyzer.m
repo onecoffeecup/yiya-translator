@@ -292,7 +292,7 @@ static NSError *FYCanceledError(void) {
         NSString *longForm = other[@"observed_form"];
         if (!other[@"catalog_id"] || longForm.length <= [cue[@"observed_form"] length] || [other[@"catalog_id"] isEqual:cue[@"catalog_id"]]) { continue; }
         for (NSInteger n=0;n<32;n++) {
-            NSRange outer = [self verifiedRangeForText:longForm occurrence:n inText:text];
+            NSRange outer = [self rangeForText:longForm occurrence:n inText:text];
             if (outer.location == NSNotFound) { break; }
             if (outer.location <= range.location && NSMaxRange(outer) >= NSMaxRange(range)) { return YES; }
         }
@@ -345,7 +345,7 @@ static NSError *FYCanceledError(void) {
         BOOL hasStandalone = !cue[@"catalog_id"];
         NSString *form = cue[@"observed_form"];
         for (NSInteger occurrence=0; !hasStandalone && occurrence<32; occurrence++) {
-            NSRange range = [self verifiedRangeForText:form occurrence:occurrence inText:compact];
+            NSRange range = [self rangeForText:form occurrence:occurrence inText:compact];
             if (range.location == NSNotFound) { break; }
             BOOL nested = [self cue:cue range:range isNestedIn:cues text:compact];
             if (!nested) { hasStandalone = YES; }

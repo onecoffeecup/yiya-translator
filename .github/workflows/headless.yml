@@ -1,0 +1,22 @@
+name: Headless regression
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated checks
+        run: bash scripts/run-headless-checks.sh
+      - name: Preserve regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: headless-debug-report
+          path: .build/debug/
+          if-no-files-found: ignore

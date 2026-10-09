@@ -98,6 +98,11 @@ int main(void) { @autoreleasepool {
     [popupLevel makeKeyAndOrderFront:nil];
     Tick();
     LevelTestApp *levelApp = [LevelTestApp new];
+    // The target must actually be selected: an empty picker now intentionally
+    // skips window-list polling rather than inferring a target from a test PID.
+    levelApp.windowPopup = [[NSPopUpButton alloc] init];
+    [levelApp.windowPopup addItemWithTitle:@"Pop-up level target"];
+    levelApp.windowPopup.selectedItem.representedObject = @(popupLevel.windowNumber);
     [levelApp createCaptionWindow];
     levelApp.captionPanelShownByUser = YES;
     [levelApp refreshOverlayVisibility:nil];

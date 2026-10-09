@@ -4,6 +4,6 @@ NS_ASSUME_NONNULL_BEGIN
 @interface FYReferenceDictionary : NSObject
 - (instancetype)initWithURL:(nullable NSURL *)url;
 - (void)lookupWord:(NSString *)word reading:(nullable NSString *)reading
-       completion:(void (^)(NSArray<NSDictionary *> *records, NSError *_Nullable error))completion;
+       completion:(void (^_Nullable)(NSArray<NSDictionary *> *records, NSError *_Nullable error))completion;
 @end
 NS_ASSUME_NONNULL_END

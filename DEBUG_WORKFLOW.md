@@ -10,7 +10,7 @@
 
 ```mermaid
 flowchart LR
-  T[主线程 timer 与几何复核] --> I[单窗口截图或采集卡最新帧]
+  T[主线程 timer 与几何复核] --> I[后台串行队列 单窗口截图或采集卡最新帧]
   I --> O[工作队列 Vision 裁剪 精读 后处理]
   O --> S[主线程模式与稳定确认]
   S --> D[对白身份与单项缓存]
@@ -27,7 +27,7 @@ flowchart LR
 | AppDelegate | `objc/LiveCaptionTranslator.m` 的 `start` / `stop` / `timerFired:` 及翻译、显示编排；不是独立管线框架 |
 | 输入 | 窗口 `CGWindowListCreateImage(IncludingWindow)`；`FYCaptureCardInput` 的 AVFoundation 会话、单帧槽与 epoch；QuickTime / OBS 作为显示窗口 |
 | OCR | `FYOCRManager` 的 Vision、区域回映、精读与合并、模态过滤、对白与字段稳定 |
-| 翻译 | `FYTranslationManager` 的请求构造、15 秒超时、HTTP / JSON 解码、缓存与主线程交付策略；没有独立自动重试队列 |
+| 翻译 | `FYTranslationManager` 的请求构造、短请求 15 秒 / 较长批次 60–90 秒的数据等待超时、HTTP / JSON 解码、缓存与主线程交付策略；没有独立自动重试队列 |
 | 学习状态 | `FYLearningCoordinator` 的句子身份、版本、不完整帧复用及固定阅读；`FYLearningStore` 的 SQLite 持久化 |
 | 显示 | `FYWindowManager` / `FYGeometryManager` 的目标与映射；`FYInlineLayout` 的贴译排版；AppDelegate 的字幕、面板、折叠与入口 |
 | 诊断 | `FYRuntimeDiagnostics` 元数据内存环；`FYTranslationTrace` 显式启用的文字 JSONL |
@@ -39,6 +39,9 @@ flowchart LR
 以下命令均在源码仓库根执行，需要 macOS 13+、clang / Xcode Command Line Tools 与 Python 3.9+。Debug 不需要接设备、开游戏、填真实 Key、下载 Sparkle 或安装大型平台。
 
 ```bash
+# 完整无界面入口：源码清单、资料/更新分发、学习与 Debug；CI 使用同一命令
+bash scripts/run-headless-checks.sh
+
 # 默认核心检查：测试隔离、诊断、模块、生产链路、Replay 与已知缺口
 python3 scripts/debug.py check
 
@@ -55,13 +58,19 @@ python3 scripts/debug.py trace /absolute/private/path/events.jsonl
 python3 scripts/debug.py import-trace /absolute/private/path/events.jsonl /absolute/private/path/draft.json
 ```
 
+`scripts/run-checks.sh` 默认执行无界面入口，随后明确报告桌面检查未运行。只有在安排好的桌面时段设 `FY_TEST_ALLOW_UI=1` 才执行 UI / 更新安装验收；`FY_TEST_COMPILE_ONLY=1` 仅编译这些套件。GitHub Actions 使用 macOS 15 runner，报告上传到工作流附件；本机通过不代表远端 CI 已执行。
+
+2026-10-09 补齐采集卡脚本覆盖：`debug.py check` 和 `run-acceptance.py` 均执行 `SourceManifestTests` 与 `CaptureCardOfflineTests`。后者以仓库中的合成图片调用真正的 `run-capture-card-check.sh offline` 和签名 OCR 工具，验证 Accurate / Fast、指定台词缺失必须失败、文件缺失、硬件门禁及并行正反断言隔离（含强制重建）；不创建窗口、不读取真实凭据或学习库、不连接采集设备或请求翻译。每轮离线核对独立传参、独立报告，同一工具的重建 / 签名串行化。默认无界面入口与 CI 经 Debug 复用这一步。
+
+2026-10-08 审查修复新增了实际请求超时、并发任务释放/取消、服务测试代次复位、AppKit 参数线程、迟到截屏丢弃、窗口轮询快照复用、数据库事务/关库/短暂锁/空回调/坏词典及语法片段枚举回归。OCR 最小文本高度直接观察实际 Vision 请求，不再靠可能读不到源码而跳过的字符串断言。发布构建使用 `-O2 -g`，生成并核对两架构 dSYM UUID；符号文件留在本地发布归档，不随应用包分发。
+
 报告在 `.build/debug/<UTC时间戳>-<随机标识>/`：`summary.txt` 便于阅读，`summary.json` 记录命令、执行状态、源码 / 夹具 / 媒体哈希和日志路径；逐场景 JSON 记录检查点、请求源文、字幕 / 界面交付及失败的预期 / 实际。报告目录 0700，文件 0600；私有 Replay 的报告同样可能包含敏感对白，不提交、不附发布包。虚拟时间变化不等待现实秒数；构建 / 进程超时由 `--timeout` 控制，回调期限默认 5 秒，媒体夹具允许 30 秒冷启动。
 
 `check` 每个场景默认两遍；`--repeat 1` 可缩短局部调试，`--repeat 2` 用于最终证据。正常基线成功退出 0；新回归失败、超时、隔离阻断、输出缺失或重复结果不一致均退出非零。`known_gap_reproduced` 只有失败步骤与预期 / 实际严格匹配登记证据才成立；崩溃或其它失败不能冒充已知缺口。有缺口时总结果是 `baseline_passed_with_known_gaps`，不是全部产品验收通过。直接运行对应已知缺口的 `replay` 仍退出 1。
 
 ## 诊断记录
 
-普通「运行设置 → 诊断与反馈」只保留最近 5 分钟 / 600 条内存元数据，用户导出才落盘，不含截图、台词、服务地址或凭据。优先用它检查权限、窗口、采集、OCR / HTTP 状态和数字错误码。
+普通「运行设置 → 诊断与反馈」只保留最近 5 分钟 / 600 条内存元数据，用户导出才落盘，不含截图、台词、服务地址或凭据。 容量满时优先淘汰常规帧事件，保留近期请求耗时和错误证据；仍受总条数与时间上限约束。优先用它检查权限、窗口、采集、OCR / HTTP 状态和数字错误码。
 
 需要文字链路时，由用户明确启用：
 
@@ -187,7 +196,20 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 
 ## 相关检查与常见排查
 
+采集卡检查按故障边界选择，不能拿一种检查替代另一种：
+
+| 变更或问题 | 必须补充的检查 | 范围 |
+| --- | --- | --- |
+| 源文件清单、诊断脚本、OCR 或对白提取 | `python3 tests/CaptureCardOfflineTests.py`；统一 Debug / 验收已包含 | 合成图片 → 当前生产 OCR / 对白提取，包含失败断言；无硬件 |
+| 真实画面漏字或对白残缺 | 用户明确授权的已保存图片：`bash scripts/run-capture-card-check.sh offline /absolute/private/frame.png '必须包含的文字'` | 当前源码处理该画面；原图与文字报告仅私有保存 |
+| 相机权限、设备列表、收不到帧、会话释放 | 安排设备时段后显式调用脚本的 `inspect` / `authorize-ui` / `capture` | 新的真实设备证据；不得自动混入 headless / CI |
+| 对白被误判贴译、跨帧身份、缓存或迟到字幕 | 自动模式 Replay、稳定与交付测试 | 离线脚本仅调用 OCR / 对白提取，不验证主循环自动模式与异步交付 |
+| 字幕白底、贴译位置、QuickTime / OBS 显示映射 | 相关 AppKit / 映射测试与现场验收 | OCR 检查不证明实际浮窗外观或映射 |
+
+设备探针的进程退出 0 只表示程序完成，验收还须检查 `status.json`：列表检查为 `inspected_only`；取帧须为 `captured_requested_frames`、达到请求帧数、`session_released=true`、`audio_inputs=0`、`screen_capture_used=false`。无权限、无帧、超时、被门禁阻断均不能写成采集通过。首次授权、拔插与长期运行另外验收。
+
 ```bash
+python3 tests/CaptureCardOfflineTests.py
 bash scripts/run-module-tests.sh
 bash scripts/run-translation-trace-tests.sh
 bash scripts/run-diagnostics-tests.sh

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib-sources.sh"
 OUT="$ROOT_DIR/.build/module-tests"
 SANITIZER_FLAGS=()
 if [[ "${FY_TEST_ASAN:-0}" == "1" ]]; then
@@ -13,17 +14,22 @@ fi
 mkdir -p "$OUT"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
-  "$ROOT_DIR/tests/GeometryManagerTests.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" \
+  "$ROOT_DIR/tests/GeometryManagerTests.m" "$ROOT_DIR/objc/FYGeometryManager.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/GeometryManagerTests"
 "$OUT/GeometryManagerTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
-  "$ROOT_DIR/tests/OCRPostprocessingTests.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" \
+  "$ROOT_DIR/tests/OCRPostprocessingTests.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/OCRPostprocessingTests"
 "$OUT/OCRPostprocessingTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
-  "$ROOT_DIR/tests/InlineOCRFrameStabilizerTests.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" \
+  "$ROOT_DIR/tests/OCRVisionConfigurationTests.m" "${FY_OCR_SOURCES[@]}" \
+  -framework Cocoa -framework Vision -o "$OUT/OCRVisionConfigurationTests"
+"$OUT/OCRVisionConfigurationTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/InlineOCRFrameStabilizerTests.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/InlineOCRFrameStabilizerTests"
 "$OUT/InlineOCRFrameStabilizerTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \

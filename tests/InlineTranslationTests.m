@@ -60,6 +60,14 @@ static void Check(BOOL condition, NSString *message) {
     }
 }
 
+static void WaitForCaptureCycle(AppDelegate *app) {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    while (app.inFlight && deadline.timeIntervalSinceNow > 0) {
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    }
+    Check(!app.inFlight, @"asynchronous capture/recovery must finish before its product assertions");
+}
+
 int main(void) {
     @autoreleasepool {
         [NSApplication sharedApplication];
@@ -798,6 +806,7 @@ int main(void) {
         recoveryApp.running = YES;
         recoveryApp.testWindows = @[TestWindow(202, @"QuickTime Player - 录影"), TestWindow(303, @"Safari - 其他窗口")];
         [recoveryApp timerFired:nil];
+        WaitForCaptureCycle(recoveryApp);
         Check([recoveryApp selectedWindowID] == 202,
               @"a recreated target window must be selected automatically after capture fails");
         Check([recoveryApp.runStateLabel.stringValue containsString:@"等待目标窗口"],
@@ -805,6 +814,7 @@ int main(void) {
         recoveryApp.testWindows = @[TestWindow(303, @"Safari - 其他窗口")];
         recoveryApp.lastWindowRecoveryAttemptDate = nil;
         [recoveryApp timerFired:nil];
+        WaitForCaptureCycle(recoveryApp);
         Check([recoveryApp selectedWindowID] == 202,
               @"automatic recovery must not silently switch to an unrelated window");
         [recoveryApp stop];
@@ -1251,35 +1261,7 @@ int main(void) {
         Check(SubtitleBandItemsFromBlocks(junkItems).count == 0,
               @"short OCR noise must not form a subtitle band");
 
-        // 守卫：Vision 的 minimumTextHeight 必须留在 0.02。
-        // 这个参数对小字极敏感：实测同一张截图，0.01/0.015 只读到名字框的错读 `ことと`，
-        // **对白正文「思い出した。」完全读不到**（表现为整句对白凭空消失），
-        // 而 0.02 能正常读出。它不在运行时数据里，只能靠源码断言守住。
-        NSString *sourcePath = [NSString stringWithFormat:@"%s/../objc/LiveCaptionTranslator.m", __FILE__];
-        NSString *sourceText = [NSString stringWithContentsOfFile:sourcePath
-                                                        encoding:NSUTF8StringEncoding
-                                                           error:NULL];
-        if (sourceText.length > 0) {
-            NSUInteger occurrences = 0;
-            NSRange searchRange = NSMakeRange(0, sourceText.length);
-            while (YES) {
-                NSRange found = [sourceText rangeOfString:@"request.minimumTextHeight" options:0 range:searchRange];
-                if (found.location == NSNotFound) { break; }
-                occurrences += 1;
-                NSUInteger next = NSMaxRange(found);
-                searchRange = NSMakeRange(next, sourceText.length - next);
-            }
-            Check(occurrences >= 2, @"both Vision request paths should set minimumTextHeight explicitly");
-            // 自适应：按图像高度换算（目标约 28px），因为固定比例在不同窗口尺寸下会失效。
-            // 实测 2727×1536 时 0.02 正好，1710×963 时文字占比 0.054，0.02 会把对白漏掉。
-            Check([sourceText rangeOfString:@"targetTextPixels / imageHeight"].location != NSNotFound,
-                  @"the primary OCR path must scale minimumTextHeight to the image height");
-            // 目标像素必须够大：实测对白高 52px，28px 读不到，48px 才读到。
-            Check([sourceText rangeOfString:@"fastOCR ? 32.0 : 48.0"].location != NSNotFound,
-                  @"the target text height must be 48px (28px still drops the 52px dialogue)");
-            Check([sourceText rangeOfString:@"minimumTextHeight = 0.02;"].location != NSNotFound,
-                  @"the enlarged second-pass OCR path must also use minimumTextHeight 0.02");
-        }
+        // Actual Vision configuration is checked by headless OCRVisionConfigurationTests.
 
         // 回归：OCR 会把紧邻对白的小按钮粘进同一行（实测 `思い出した。使用`）。
         // 不切掉的话模型照着输出「想起来了。使用」，按钮文字就混进了字幕。

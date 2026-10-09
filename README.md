@@ -76,6 +76,8 @@ open "$HOME/Applications/译芽.app"
 
 `install-app.sh` 会退出正在运行的译芽、备份原 App，再安装到 `~/Applications`；你的学习记录位于独立的数据目录。仅构建或检查时不必运行安装脚本。
 
+`run-checks.sh` 默认执行无界面基线；独立入口为 `bash scripts/run-headless-checks.sh`，GitHub Actions 使用同一入口。桌面测试需先安排空闲时段再设 `FY_TEST_ALLOW_UI=1`；默认检查不会占用桌面或读真实 Key。源码清单统一在 `scripts/lib-sources.sh`；发布构建使用 `-O2 -g`，dSYM 与二进制 UUID 核对后保存在本机 `dist/symbols/`，不放进玩家安装包。
+
 详细步骤见 [源码构建](docs/源码构建.md)。维护者打包和发布见 [发布流程](docs/发布流程.md)，当前验证范围见 [发布检查结果](docs/发布检查结果.md)。
 
 ## 视觉规范

@@ -19,8 +19,16 @@ static void RunOwnership(void) {
     Check((id)owner.activeTask==current && old.cancelCalls==0,@"replacement does not cancel previous task");
     [owner cancelActiveTask];
     Check(current.cancelCalls==1 && !owner.activeTask,@"cancel current task and clear ownership");
+    Check(old.cancelCalls==1,@"run cancellation also cancels earlier concurrent batches");
     [owner cancelActiveTask];
     Check(current.cancelCalls==1,@"repeated cancellation does not cancel cleared task");
+    owner.activeTask=(id)old; owner.activeTask=(id)current;
+    [owner finishTask:(id)old]; [owner cancelActiveTask];
+    Check(old.cancelCalls==1 && current.cancelCalls==2,@"completed batches are removed from cancellation ownership");
+    owner.activeTask=(id)old; owner.activeTask=(id)current;
+    [owner finishTask:(id)current];
+    Check((id)owner.activeTask==old,@"completing last batch leaves earlier pending batch owned");
+    [owner finishTask:(id)old]; Check(!owner.activeTask,@"all completed tasks release ownership");
 }
 @interface FixtureProtocol : NSURLProtocol
 @end

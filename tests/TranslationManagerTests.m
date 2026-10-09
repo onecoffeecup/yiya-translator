@@ -23,7 +23,11 @@ int main(void) { @autoreleasepool {
     NSError *requestError=nil;
     Check(![FYTranslationManager requestWithURL:[NSURL URLWithString:@"http://example.invalid/chat/completions"] apiKey:@"fixture" model:@"test" sourceText:@"日文" systemPrompt:@"translate" maxTokens:20 disableReasoning:NO error:&requestError] && requestError.code==FYTranslationURLInsecureRemoteHTTP,@"request builder cannot bypass remote HTTP credential guard");
     NSDictionary *payload=[NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:nil];
-    Check([request.HTTPMethod isEqualToString:@"POST"] && request.timeoutInterval==15,@"wire settings");
+    Check([request.HTTPMethod isEqualToString:@"POST"] && request.timeoutInterval==15,@"small realtime request retains short timeout");
+    NSURLRequest *longRequest=[FYTranslationManager requestWithURL:request.URL apiKey:@"fixture-key" model:@"fixture-model"
+        sourceText:@"1. 合成公告正文" systemPrompt:@"fixture" maxTokens:2200 disableReasoning:NO error:&error];
+    Check(longRequest.timeoutInterval >= 60 && longRequest.timeoutInterval <= 90,
+          @"large nonstreaming output has a bounded 60-90 second timeout");
     Check([payload[@"max_tokens"] integerValue]==120 && [payload[@"reasoning_effort"] isEqual:@"none"],@"minimum token budget and reasoning disabled");
     NSData *data=[@"{\"choices\":[{\"message\":{\"content\":\" 翻译 \"}}]}" dataUsingEncoding:NSUTF8StringEncoding];
     Check([[FYTranslationManager translationFromData:data statusCode:200 error:&error] isEqualToString:@"翻译"] && !error,@"content decoding");

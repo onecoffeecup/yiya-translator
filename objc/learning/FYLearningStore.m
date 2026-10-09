@@ -193,6 +193,8 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         if (_db) { sqlite3_close(_db); _db = NULL; }
         return error;
     }
+    // A second app/process may hold a brief write lock; wait off the main thread.
+    sqlite3_busy_timeout(_db, 1500);
     sqlite3_exec(_db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
     NSError *migrationError = [self migrate];
     if (migrationError) {
@@ -365,10 +367,11 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         NSError *error = nil;
         if (self.db) {
             int rc = sqlite3_close(self.db);
-            self.db = NULL;
-            self.opened = NO;
             if (rc != SQLITE_OK) {
                 error = [NSError errorWithDomain:@"FYLearningStore" code:rc userInfo:@{NSLocalizedDescriptionKey: @"关闭数据库失败"}];
+            } else {
+                self.db = NULL;
+                self.opened = NO;
             }
         }
         [self deliverError:error completion:completion];
@@ -463,6 +466,11 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                completion:(void (^)(NSError *))completion {
     dispatch_async(self.queue, ^{
         NSError *error = [self ensureOpened];
+        BOOL began = NO;
+        if (!error) {
+            began = sqlite3_exec(self.db, "BEGIN IMMEDIATE", NULL, NULL, NULL) == SQLITE_OK;
+            if (!began) { error = FYStoreError(self.db, @"开始回填译文事务失败"); }
+        }
         if (!error) {
             const char *vSQL = "UPDATE sentence_versions SET translation = ? WHERE sentence_id = ? AND version = ?;";
             sqlite3_stmt *stmt = NULL;
@@ -483,10 +491,18 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                     sqlite3_bind_text(sstmt, 1, FYTrimmed(translation).UTF8String, -1, SQLITE_TRANSIENT);
                     sqlite3_bind_text(sstmt, 2, FYTrimmed(sentenceID).UTF8String, -1, SQLITE_TRANSIENT);
                     sqlite3_bind_int(sstmt, 3, (int)version);
-                    sqlite3_step(sstmt);
+                    if (sqlite3_step(sstmt) != SQLITE_DONE) { error = FYStoreError(self.db, @"回填最新译文失败"); }
                     sqlite3_finalize(sstmt);
+                } else {
+                    error = FYStoreError(self.db, @"准备最新译文语句失败");
                 }
             }
+        }
+        if (began) {
+            if (!error && sqlite3_exec(self.db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
+                error = FYStoreError(self.db, @"提交回填译文事务失败");
+            }
+            if (error) { sqlite3_exec(self.db, "ROLLBACK", NULL, NULL, NULL); }
         }
         [self deliverError:error completion:completion];
     });
@@ -946,7 +962,7 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         }
         if(!error && sqlite3_exec(self.db,"COMMIT",NULL,NULL,NULL)!=SQLITE_OK){error=FYStoreError(self.db,@"提交句子收藏失败");}
         if(error){sqlite3_exec(self.db,"ROLLBACK",NULL,NULL,NULL);}
-        dispatch_async(self.deliveryQueue,^{completion(!exists && !error,error);});
+        if (completion) { dispatch_async(self.deliveryQueue,^{completion(!exists && !error,error);}); }
     });
 }
 - (void)fetchSentenceBookmarks:(void (^)(NSArray<FYRequestIdentity *> *,NSError *))completion {
@@ -961,7 +977,7 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                 }if(rc!=SQLITE_DONE){error=FYStoreError(self.db,@"读取句子收藏失败");}sqlite3_finalize(stmt);
             }else{error=FYStoreError(self.db,@"准备句子收藏列表失败");}
         }
-        dispatch_async(self.deliveryQueue,^{completion(values,error);});
+        if (completion) { dispatch_async(self.deliveryQueue,^{completion(values,error);}); }
     });
 }
 

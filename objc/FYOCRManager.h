@@ -150,10 +150,6 @@ FOUNDATION_EXPORT BOOL FYOCRBlockSitsOnBrightBackdrop(OCRTextItem *block, const 
 + (NSArray<OCRTextItem *> *)splitMultilineItems:(NSArray<OCRTextItem *> *)items;
 // String path deliberately retains one-character lines and Vision result order.
 + (NSString *)textFromRecognizedLines:(NSArray<NSString *> *)lines;
-- (NSString *)recognizeTextInImage:(CGImageRef)image
-                         fastOCR:(BOOL)fastOCR
-                 languageSegment:(NSInteger)languageSegment
-                           error:(NSError **)error;
 @property(nonatomic, copy) void (^configurationObserver)(BOOL fastOCR, NSInteger languageSegment, size_t width, size_t height, CGFloat minimumHeight);
 - (NSArray<OCRTextItem *> *)recognizeTextItemsInImage:(CGImageRef)image
                                            fastOCR:(BOOL)fastOCR

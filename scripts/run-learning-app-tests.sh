@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib-test.sh"
 fy_test_ui_gate
@@ -16,7 +17,7 @@ clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-nullability-comp
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
   "$ROOT_DIR/tests/$TEST_SOURCE.m" "$ROOT_DIR/tests/FYTestIsolation.m" \
   "$ROOT_DIR/tests/FYTestCaptureCardInput.m" \
-  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m" "$ROOT_DIR/objc/FYCaptureCardInput.m" "$ROOT_DIR"/objc/learning/*.m \
+  "${FY_APP_LINK_SOURCES[@]}" \
   -framework Cocoa -framework Security -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision \
   -framework Carbon -framework NaturalLanguage \
   -framework AVFoundation -framework CoreImage -framework CoreMedia -framework CoreVideo \

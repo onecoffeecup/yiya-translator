@@ -55,6 +55,15 @@ else
   echo "==> 跳过构建（--no-build）"
 fi
 
+# Archive matching crash symbols privately by build, outside either app zip.
+DSYM="$ROOT_DIR/.build/release/LiveCaptionTranslator.dSYM"
+diff <(dwarfdump --uuid "$ROOT_DIR/.build/release/$FY_EXECUTABLE_NAME" | awk '{print $2, $3}' | sort) \
+     <(dwarfdump --uuid "$DSYM" | awk '{print $2, $3}' | sort)
+SYMBOLS_DIR="$ROOT_DIR/dist/symbols/yiya-$VERSION-build-$BUILD_NUMBER"
+mkdir -p "$SYMBOLS_DIR"
+ditto --noextattr "$DSYM" "$SYMBOLS_DIR/LiveCaptionTranslator.dSYM"
+dwarfdump --uuid "$DSYM" > "$SYMBOLS_DIR/UUID.txt"
+
 echo "==> 组装 bundle"
 rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR"
@@ -128,6 +137,7 @@ mv "$UPDATE_ZIP.tmp" "$UPDATE_ZIP"
 echo
 echo "发布包：$ZIP_PATH"
 echo "应用内更新包：$UPDATE_ZIP"
+echo "本地崩溃符号：$SYMBOLS_DIR"
 echo "准备签名更新清单：python3 scripts/prepare-update.py --archive \"$UPDATE_ZIP\" --tag \"v$VERSION\" --notes docs/发布说明.md"
 echo "大小：$(du -h "$ZIP_PATH" | cut -f1)"
 cat "$ZIP_PATH.sha256"

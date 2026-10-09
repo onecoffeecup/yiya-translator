@@ -60,9 +60,10 @@ FOUNDATION_EXPORT BOOL FYTranslationCacheCanStore(NSInteger requestGeneration, N
     NSInteger requestServiceGeneration, NSInteger currentServiceGeneration, NSString *translated);
 FOUNDATION_EXPORT void FYDeliverTranslationOnMain(NSInteger requestGeneration, NSInteger (^currentGeneration)(void),
     NSString *translated, NSError *error, void (^completion)(NSString *, NSError *), void (^dropped)(void));
-// Main-thread owner; assigning a replacement intentionally does not cancel the old task.
+// Main-thread owner. Batches may run concurrently; a run change cancels all of them.
 @interface FYTranslationTaskOwner : NSObject
 @property(nonatomic, strong) NSURLSessionDataTask *activeTask;
+- (void)finishTask:(NSURLSessionDataTask *)task;
 - (void)cancelActiveTask;
 @end
 

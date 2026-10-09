@@ -1329,8 +1329,36 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
 
     if (tokenHitCount >= 2) { return YES; }
     if (tokenHitCount >= 1 && (smallBoxCount >= 2 || edgeCount >= 3)) { return YES; }
-    if (smallBoxCount >= 4) { return YES; }
-    if (blocks.count >= 5 && smallBoxCount >= 3) { return YES; }
+    if (smallBoxCount >= 4 || (blocks.count >= 5 && smallBoxCount >= 3)) {
+        // A speaker label and several short dialogue lines are also small boxes.
+        // Exempt only a compact, aligned lower-screen band with actual spoken
+        // text; explicit UI tokens and substantial-line density still win.
+        NSArray<OCRTextItem *> *band = [self subtitleBandItems:blocks];
+        NSUInteger kanaLines = 0, bandSmallBoxes = 0;
+        BOOL compact = band.count >= 3, punctuated = NO;
+        NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…・、"];
+        OCRTextItem *previous = nil;
+        for (OCRTextItem *item in band) {
+            CGRect box = item.boundingBox;
+            NSString *text = FYNormalizeOCRTextForComparison(item.text);
+            if (CGRectGetMidY(box) > 0.45 || box.size.height < 0.026 || box.size.width > 0.30) { compact = NO; }
+            if (previous) {
+                CGRect before = previous.boundingBox;
+                CGFloat lineHeight = MAX(before.size.height, box.size.height);
+                if (fabs(CGRectGetMinX(before) - CGRectGetMinX(box)) > MAX(0.025, lineHeight) ||
+                    fabs(CGRectGetMidY(before) - CGRectGetMidY(box)) > lineHeight * 2.5) { compact = NO; }
+            }
+            if (text.length >= 3 && [self containsJapaneseKana:text]) {
+                kanaLines++;
+                if ([enders characterIsMember:[text characterAtIndex:text.length - 1]]) { punctuated = YES; }
+            }
+            if (text.length <= 8 && box.size.height < 0.036 && box.size.width < 0.20 &&
+                ![self isFurigana:item nearLargerLineInItems:blocks]) { bandSmallBoxes++; }
+            previous = item;
+        }
+        NSUInteger menuBoxes = compact && kanaLines >= 2 && punctuated ? smallBoxCount - bandSmallBoxes : smallBoxCount;
+        if (menuBoxes >= 4 || (blocks.count >= 5 && menuBoxes >= 3)) { return YES; }
+    }
     // 贴边文字很多、且完全没有宽行 —— 但这必须**同时**带上 UI 按钮词才算数。
     // 单独用贴边信号太弱：对白游戏的字幕框本身就贴着画面底部，
     // 实测城镇对白帧 edge=4（其中还包含我们自己浮窗的文字），会把对白误判成 UI。
@@ -1454,60 +1482,6 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             block.lineBoxes = mapped;
         }
     }
-}
-
-- (NSString *)recognizeTextInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment error:(NSError **)error {
-    __block NSString *recognizedText = @"";
-    __block NSError *requestError = nil;
-
-    VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *innerError) {
-        if (innerError) {
-            requestError = innerError;
-            return;
-        }
-
-        NSMutableArray<NSString *> *lines = [NSMutableArray array];
-        for (VNRecognizedTextObservation *observation in request.results) {
-            VNRecognizedText *candidate = [[observation topCandidates:1] firstObject];
-            NSString *line = candidate.string;
-            if (line.length > 0) {
-                [lines addObject:line];
-            }
-        }
-        recognizedText = [FYOCRManager textFromRecognizedLines:lines];
-    }];
-
-    request.recognitionLevel = fastOCR ? VNRequestTextRecognitionLevelFast : VNRequestTextRecognitionLevelAccurate;
-    request.usesLanguageCorrection = !fastOCR;
-    request.recognitionLanguages = languageSegment == 1 ? @[@"en-US"] : @[@"ja-JP"];
-    // minimumTextHeight 是**相对图像高度的比例**，所以固定值会在不同窗口尺寸下失效：
-    // 实测 2727×1536 截图时 0.02 正好，但运行时窗口是 1710×963（更小），
-    // 对白文字占到归一化 0.054 —— 0.02 就把它当“太小的字”漏掉了，表现为整句对白消失。
-    // 改成按“绝对像素”目标换算：至少要能读到约 28px 高的字，随图像高度自适应。
-    CGFloat imageHeight = (CGFloat)CGImageGetHeight(image);
-    // 实测：对白文字高 52px，但 minH 设成 28px 仍读不到，要设到 48px 才读到。
-    // Vision 的这个阈值不是“小于就丢弃”的线性开关，实际有效值比文字高度略低几像素。
-    CGFloat targetTextPixels = fastOCR ? 32.0 : 48.0;
-    CGFloat adaptiveMinH = imageHeight > 0 ? (targetTextPixels / imageHeight) : 0.02;
-    if (adaptiveMinH < 0.005) { adaptiveMinH = 0.005; }
-    if (adaptiveMinH > 0.10) { adaptiveMinH = 0.10; }
-    request.minimumTextHeight = adaptiveMinH;
-    if (self.configurationObserver) {
-        self.configurationObserver(fastOCR, languageSegment, CGImageGetWidth(image), CGImageGetHeight(image), adaptiveMinH);
-    }
-
-    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
-    BOOL ok = [handler performRequests:@[request] error:error];
-    if (!ok) {
-        if (error && !*error) {
-            *error = [NSError errorWithDomain:@"LiveCaptionTranslator"
-                                         code:900
-                                     userInfo:@{NSLocalizedDescriptionKey: @"OCR 引擎执行失败，已跳过这一轮。"}];
-        }
-        return @"";
-    }
-    if (requestError && error) { *error = requestError; }
-    return recognizedText ?: @"";
 }
 
 // 这两串是「译芽」自己画在屏幕上的状态栏文字（状态行 + 句数行）。
@@ -1803,7 +1777,7 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     // minimumTextHeight 是相对图像高度的比例，固定值会在不同窗口尺寸下失效：
     // 实测 2727×1536 截图时 0.02 正好，但运行时窗口 1710×963 里对白文字占 0.054，
     // 0.02 会把它当“太小的字”漏掉 → 整句对白凭空消失。
-    // 改成按绝对像素换算：目标至少读到约 28px 高的字，随图像高度自适应。
+    // 改成按绝对像素换算：准确模式目标为 48px，快速模式为 32px，随图像高度自适应。
     CGFloat imageHeight = (CGFloat)CGImageGetHeight(image);
     // 实测：对白文字高 52px，但 minH 设成 28px 仍读不到，要设到 48px 才读到。
     // Vision 的这个阈值不是“小于就丢弃”的线性开关，实际有效值比文字高度略低几像素。
@@ -1813,7 +1787,7 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     if (adaptiveMinH > 0.10) { adaptiveMinH = 0.10; }
     request.minimumTextHeight = adaptiveMinH;
     if (self.configurationObserver) {
-        self.configurationObserver(fastOCR, languageSegment, CGImageGetWidth(image), CGImageGetHeight(image), adaptiveMinH);
+        self.configurationObserver(fastOCR, languageSegment, CGImageGetWidth(image), CGImageGetHeight(image), request.minimumTextHeight);
     }
 
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];

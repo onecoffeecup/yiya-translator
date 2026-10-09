@@ -114,25 +114,28 @@ static void FYWritePrivateDiagnosticData(NSData *data, NSString *filename, BOOL 
 
 static void FuyiDiagLog(NSString *format, ...) {
     // 仅在显式启用时记录有限的数值诊断，文件仅对当前用户可读。
-    static NSInteger budget = -1;
-    if (budget < 0) {
-        budget = FuyiDiagEnabled() ? 2000 : 0;
-    }
-    if (budget <= 0) { return; }
-    budget -= 1;
+    if (!FuyiDiagEnabled()) { return; }
+    static NSInteger budget = 2000;
+    static NSObject *lock;
+    static NSDateFormatter *formatter;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        formatter = [[NSDateFormatter alloc] init];
+        formatter.dateFormat = @"HH:mm:ss.SSS";
+    });
 
     va_list args;
     va_start(args, format);
     NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
 
-    static NSDateFormatter *formatter = nil;
-    if (!formatter) {
-        formatter = [[NSDateFormatter alloc] init];
-        formatter.dateFormat = @"HH:mm:ss.SSS";
+    @synchronized (lock) {
+        if (!FuyiDiagEnabled() || budget <= 0) { return; }
+        budget -= 1;
+        NSString *line = [NSString stringWithFormat:@"%@ %@\n", [formatter stringFromDate:[NSDate date]], message];
+        FYWritePrivateDiagnosticData([line dataUsingEncoding:NSUTF8StringEncoding], @"yiya-diag.log", YES);
     }
-    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [formatter stringFromDate:[NSDate date]], message];
-    FYWritePrivateDiagnosticData([line dataUsingEncoding:NSUTF8StringEncoding], @"yiya-diag.log", YES);
 }
 static NSString *FYDiagTextLength(NSString *value) {
     return [NSString stringWithFormat:@"len:%lu", (unsigned long)value.length];
@@ -597,6 +600,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 @property(nonatomic, strong) FYWindowManager *windowManager;
 @property(nonatomic, strong) FYOCRManager *ocrManager;
+@property(nonatomic, strong) dispatch_queue_t captureQueue;
 @property(nonatomic, strong) NSMutableArray<WindowItem *> *windows;
 @property(nonatomic, strong) NSTextField *diagnosticStatusLabel;
 @property(nonatomic, strong) NSDate *lastDiagnosticCheckDate;
@@ -717,6 +721,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic) BOOL captionSuppressedForUIMode;
 @property(nonatomic) BOOL selectingCaptureRegion;
 @property(nonatomic, strong) NSTimer *overlayVisibilityTimer;
+@property(nonatomic, copy) NSArray<NSDictionary *> *overlayWindowSnapshot;
+@property(nonatomic, strong) NSNumber *overlayOwnerPIDSnapshot;
 @property(nonatomic, strong) NSButton *captionHideButton;
 @property(nonatomic, strong) NSSlider *regionXSlider;
 @property(nonatomic, strong) NSSlider *regionYSlider;
@@ -944,6 +950,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         _inlineManualOffsetAge = [NSMutableDictionary dictionary];
         _inlineStableBlockIDs = [NSMutableDictionary dictionary];
         self.inlineTranslationCache = [NSMutableDictionary dictionary];
+        _captureQueue = dispatch_queue_create("com.nanami.yiya.capture", DISPATCH_QUEUE_SERIAL);
+        // Create the shared recognizer before any background OCR can access it.
+        [self ocrManager];
     }
     return self;
 }
@@ -3362,6 +3371,16 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 #pragma mark - Actions
 
+- (void)advanceTranslationGeneration {
+    self.translationGeneration += 1;
+    [self.translationTaskOwner cancelActiveTask];
+    if ([self.serviceStatusLabel.stringValue isEqualToString:@"正在测试服务"]) {
+        self.serviceTestGeneration += 1;
+        self.serviceStatusLabel.stringValue = @"服务未测试";
+        self.serviceErrorLabel.stringValue = @"";
+    }
+}
+
 - (void)toggleRunning:(id)sender {
     self.running ? [self stop] : [self start];
 }
@@ -3408,7 +3427,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.captureUnavailable = NO;
     self.runButton.title = @"暂停翻译";
     [self updateRunState];
-    self.translationGeneration += 1;
+    [self advanceTranslationGeneration];
     [[self translationState] reset];
     [[self stabilityOwner] reset];
     [self setStatus:@"正在监测画面"];
@@ -3431,12 +3450,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.running = NO;
     self.captureUnavailable = NO;
     self.inFlight = NO;
-    self.translationGeneration += 1;
-    [self.translationTaskOwner cancelActiveTask];
-    if ([self.serviceStatusLabel.stringValue isEqualToString:@"正在测试服务"]) {
-        self.serviceTestGeneration += 1;
-        self.serviceStatusLabel.stringValue = @"服务未测试";
-    }
+    [self advanceTranslationGeneration];
     // 停止时把自己画在桌面上的东西收干净：贴译面板会留在屏幕上一直不走，
     // 因为它们由定时循环负责清理，循环一停就没人管了。
     [self clearInlineTranslationPanels];
@@ -3533,13 +3547,27 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 - (pid_t)selectedWindowOwnerPID {
     uint32_t windowID = [self selectedWindowID];
     if (!windowID) { return 0; }
-    NSArray *entries = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, windowID));
+    if (self.overlayOwnerPIDSnapshot) { return self.overlayOwnerPIDSnapshot.intValue; }
+    for (NSDictionary *entry in self.overlayWindowSnapshot) {
+        if ([entry[(id)kCGWindowNumber] unsignedIntValue] == windowID) {
+            return (pid_t)[entry[(id)kCGWindowOwnerPID] intValue];
+        }
+    }
+    NSArray *entries = [self windowInfosIncludingWindow:windowID];
     for (NSDictionary *entry in entries) {
         if ([entry[(id)kCGWindowNumber] unsignedIntValue] == windowID) {
             return (pid_t)[entry[(id)kCGWindowOwnerPID] intValue];
         }
     }
     return 0;
+}
+
+- (NSArray<NSDictionary *> *)windowInfosIncludingWindow:(uint32_t)windowID {
+    return CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, windowID));
+}
+
+- (NSArray<NSDictionary *> *)onScreenWindowInfos {
+    return CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
 }
 
 // 纯策略：什么时候该显示浮窗。
@@ -3566,7 +3594,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 // Visibility is independent of OCR completion: late replies cannot raise overlays above another app.
 - (BOOL)translationTargetIsForeground {
-    NSArray *visibleWindows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
+    if (![self selectedWindowID]) { return NO; }
+    NSArray *visibleWindows = self.overlayWindowSnapshot ?: [self onScreenWindowInfos];
     return [self translationTargetIsForegroundWithWindowList:visibleWindows];
 }
 
@@ -3595,6 +3624,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)refreshOverlayVisibility:(id)sender {
+    NSArray *previousWindows = self.overlayWindowSnapshot;
+    NSNumber *previousPID = self.overlayOwnerPIDSnapshot;
+    self.overlayWindowSnapshot = [self selectedWindowID] ? ([self onScreenWindowInfos] ?: @[]) : @[];
+    self.overlayOwnerPIDSnapshot = nil;
+    self.overlayOwnerPIDSnapshot = @([self selectedWindowOwnerPID]);
+    @try {
     // 0.5 秒一次的几何复核（内部还有 0.4 秒限流）：翻译在途时 OCR 循环不推进，
     // 这条轮询保证"切到全屏投影"能在一拍之内被发现，而不是等下次 OCR 回调。
     // 正在手动框选识别区域时不重排，避免和用户的操作抢面板。
@@ -3602,7 +3637,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     [self expireInlineOverflowEntryIfNeeded];
     // 仍然走可覆盖的 translationTargetIsForeground（测试沿用同一个接缝）。
     BOOL targetActive = !self.selectingCaptureRegion && [self translationTargetIsForeground];
-    NSArray *visibleWindows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
+    NSArray *visibleWindows = self.overlayWindowSnapshot;
     NSWindowLevel overlayLevel = [self overlayLevelForTargetPID:[self selectedWindowOwnerPID] inWindowList:visibleWindows];
     [[FYInlineLayoutDebug shared] refreshVisible:targetActive level:overlayLevel];
     BOOL showCaption = targetActive && self.captionPanelShownByUser && !self.captionSuppressedForUIMode;
@@ -3637,6 +3672,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         } else if (panel.isVisible) {
             [panel orderOut:nil];
         }
+    }
+    } @finally {
+        self.overlayWindowSnapshot = previousWindows;
+        self.overlayOwnerPIDSnapshot = previousPID;
     }
 }
 
@@ -3673,7 +3712,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (void)setCaptionPanelVisibleForUIMode:(BOOL)uiMode {
     self.captionSuppressedForUIMode = uiMode;
-    if (uiMode) { self.captionTextLabel.stringValue = @""; }
+    if (uiMode) { [self setCaptionDisplayText:@""]; }
     [self refreshOverlayVisibility:nil];
 }
 
@@ -3722,563 +3761,557 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 切源、停采、换设备、断连都会让它自增，迟到的结果据此被丢弃。
     NSUInteger inputEpoch = self.captureCardInput.sessionEpoch;
     uint64_t captureFrameIndex = 0;
-    CGImageRef fullImage = NULL;
     if (captureCard) {
-        // 采集卡模式：只用**新到的**帧。没有新帧就跳过本轮，
-        // 绝不把上一次（可能已被录制条遮住或已断开的）画面再送一遍 OCR。
-        uint64_t frameIndex = [self.captureCardInput latestFrameIndex];
-        if (!FYCaptureFrameNeedsRecognition(frameIndex, self.lastOCRedCaptureFrameIndex)) {
+        captureFrameIndex = [self.captureCardInput latestFrameIndex];
+        if (!FYCaptureFrameNeedsRecognition(captureFrameIndex, self.lastOCRedCaptureFrameIndex)) {
             FYTrace(trace, @"skip", @{@"reason": @"capture_card_no_new_frame", @"input_epoch": @(inputEpoch)});
             self.inFlight = NO;
             [self updateCaptureCardStatus];
-            if (self.captureCardInput.state == FYCaptureCardSessionStateRunning) {
-                [self setStatus:@"等待采集卡新画面"];
-            } else {
-                [self setStatus:self.captureCardInput.stateDetail];
-            }
-            return;
-        }
-        fullImage = [self.captureCardInput copyLatestFrame];
-        if (!fullImage) {
-            FYTrace(trace, @"capture", @{@"success": @NO, @"reason": @"capture_card_no_frame"});
-            FYTrace(trace, @"skip", @{@"reason": @"capture_card_no_frame", @"input_epoch": @(inputEpoch)});
-            self.inFlight = NO;
-            [self updateCaptureCardStatus];
-            [self setStatus:@"采集卡暂无画面"];
-            return;
-        }
-        self.lastOCRedCaptureFrameIndex = frameIndex;
-        captureFrameIndex = frameIndex;
-    } else {
-        // 自动判别需要看整窗（否则菜单/弹窗不在字幕区域内就判不出来）
-        // 这里曾经在截屏前 hide 掉自己的浮窗、截完再恢复。那是闪烁的来源：
-        // hide / orderFront 每轮都执行一次，窗口会被合成器移出再移入。
-        // 实际不需要：截屏用 CGWindowListCreateImage(IncludingWindow)，只取目标窗口自己的像素；
-        // 我们的浮窗是独立窗口且 layer=3/25，目标窗口是 layer=0，本来就不会进截屏。
-        fullImage = [self copyFullCapturedImageForWindow:windowID];
-        if (!fullImage) {
-            FYTrace(trace, @"capture", @{@"success": @NO, @"reason": @"capture_unavailable"});
-            [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(self.translationGeneration), @"success": @NO}];
-            FYTrace(trace, @"skip", @{@"reason": @"capture_unavailable"});
-            self.inFlight = NO;
-            if ([self recoverWindowSelectionIfRecreated]) { return; }
-            self.captureUnavailable = YES;
-            [self updateRunState];
-            [self setStatus:@"截取窗口失败"];
-            [self showPreviewUnavailable:@"无法截取目标窗口"];
+            [self setStatus:self.captureCardInput.state == FYCaptureCardSessionStateRunning ? @"等待采集卡新画面" : self.captureCardInput.stateDetail];
             return;
         }
     }
-
-    self.captureUnavailable = NO;
-    [self updateRunState];
-    trace = [[FYTranslationTrace shared] frameContextForCycle:trace index:captureFrameIndex];
-    FYTrace(trace, @"capture", @{@"success": @YES, @"width": @(CGImageGetWidth(fullImage)),
-                                @"height": @(CGImageGetHeight(fullImage))});
-    [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(self.translationGeneration), @"success": @YES}];
-    [self setStatus:@"正在 OCR"];
     NSInteger cycleGeneration = self.translationGeneration;
-    [self updatePreviewFromImage:fullImage generation:cycleGeneration];
-    BOOL fastOCR = self.fastOCRCheckbox.state == NSControlStateValueOn;
-    NSInteger languageSegment = self.languageControl.selectedSegment;
-    self.learningCoordinator.japaneseMode = (languageSegment == 0);
-
-    // 两种输入都不包含译芽浮窗：窗口截图只取 IncludingWindow，采集卡只取视频帧。
-    // 不能按屏幕浮窗位置遮掉这些干净源图，否则恢复模态过滤后会把真实正文误删。
-    NSArray<NSValue *> *exclusionSnapshot = @[];
-
-    CGRect ocrScope=[self selectedOCRScope];
-    NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:fullImage metadata:@{
-        @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
-        @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"frame_index":@(captureFrameIndex), @"scope":FYLayoutDebugRect(ocrScope)}];
-    FYTrace(trace, @"task", @{@"reason": @"ocr_scheduled"});
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-      FYInlineDebugTracePerform(trace, layoutDebug, ^{
-        FYTrace(trace, @"task", @{@"reason": @"ocr_started"});
-        NSDate *ocrStart = [NSDate date];
-        NSError *error = nil;
-        NSArray<OCRTextItem *> *ocrBlocks = @[];
-        // 诊断：把实际送去 OCR 的整窗图存一份（覆盖式，只留最新一帧），
-        // 用来看运行时画面和离线截图是否一致。
-        // 注意：这会把用户屏幕内容写入当前用户的私有临时目录，只能在实际排查时开启（FUYI_DIAG=1），
-        // 不能在正式分发版里无条件执行。
-        if (FuyiDiagEnabled()) {
-            NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:fullImage];
-            NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-            FYWritePrivateDiagnosticData(png, @"yiya-last-frame.png", NO);
-        }
-        NSString *ocrText;
-        if (CGRectEqualToRect(ocrScope,CGRectMake(0,0,1,1))) {
-            ocrText=[self recognizeTextBlocksInImage:fullImage fastOCR:fastOCR languageSegment:languageSegment blocks:&ocrBlocks error:&error];
-        } else {
-            NSArray *scoped=[FYOCRManager recognizeImage:fullImage topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
-                NSArray *raw = [self recognizeTextItemsInImage:cropped fastOCR:fastOCR languageSegment:languageSegment error:innerError];
-                FYTrace(trace, @"ocr", @{@"stage": @"vision_raw_crop", @"ocr_lines": FYTraceOCRLines(raw),
-                                        @"blocks": @(raw.count), @"error_code": @((*innerError).code)});
-                return raw;
-            } error:&error];
-            ocrText=[FYOCRManager sourceTextForItems:scoped blocks:&ocrBlocks];
-        }
-        [[FYInlineLayoutDebug shared] recordItems:ocrBlocks stage:@"mapped_pass1" context:layoutDebug];
-        NSTimeInterval pass1Duration = [[NSDate date] timeIntervalSinceDate:ocrStart];
-        [[FYRuntimeDiagnostics shared] recordEvent:@"ocr" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"blocks": @(ocrBlocks.count), @"error_code": @(error.code), @"elapsed_ms": @(pass1Duration * 1000), @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage))}];
-        FYTrace(trace, @"ocr", @{@"stage": @"pass1_filtered", @"ocr_lines": FYTraceOCRLines(ocrBlocks),
-                                @"blocks": @(ocrBlocks.count), @"fast_ocr": @(fastOCR), @"language": @(languageSegment),
-                                @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage)),
-                                @"frame_index": @(captureFrameIndex), @"elapsed_ms": @(pass1Duration * 1000)});
-
-        // 自动贴合文字：第一遍先整窗定位文字在哪，然后把那一小块裁出来**放大再识别**。
-        // 好处：① 不用用户预先框选固定区域，文字上移/下移都能跟上；
-        //      ② 小字放大后识别率明显更好，也更容易扛住被控件切掉一点的情况。
-        // 注意挡在文字上的不透明控件是物理遮挡，放大也读不到 —— 那部分救不回来。
-        __block NSTimeInterval pass2Duration = 0;
-        BOOL autoFit = self.autoFitRegionCheckbox == nil || self.autoFitRegionCheckbox.state == NSControlStateValueOn;
-        // 第二遍 OCR 会让每轮耗时翻倍。只在“文字区域本身不大”时才值得放大识别：
-        // 区域已经很大时，放大既没有精度收益，又白白多花一整个 OCR 周期。
-        FYApplyOCRRefinement(ocrBlocks, autoFit,
-            ^NSString *(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error) {
-                CGRect visionScope=CGRectMake(ocrScope.origin.x,1-CGRectGetMaxY(ocrScope),ocrScope.size.width,ocrScope.size.height);
-                region=CGRectIntersection(region,visionScope);
-                if (CGRectIsNull(region) || CGRectIsEmpty(region)) return nil;
-                return [self recognizeEnlargedRegionOfImage:fullImage
-                    regionX:region.origin.x regionY:region.origin.y
-                    regionWidth:region.size.width regionHeight:region.size.height
-                    fastOCR:fastOCR languageSegment:languageSegment blocks:blocks error:error];
-            }, ^{ pass2Duration = [[NSDate date] timeIntervalSinceDate:ocrStart] - pass1Duration; },
-            &ocrText, &ocrBlocks);
-        FuyiDiagLog(@"  OCR pass1=%.2fs pass2=%.2fs total=%.2fs blocks=%lu",
-                    pass1Duration, pass2Duration,
-                    [[NSDate date] timeIntervalSinceDate:ocrStart], (unsigned long)ocrBlocks.count);
-
-        // 必须在 CGImageRelease 之前、同一个线程上做完像素分析：
-        // 主队列回调里 fullImage 已经被释放，之前把这段放在回调里是一个 use-after-free。
-        NSDate *modalStart = [NSDate date];
-        NSArray<OCRTextItem *> *modalScopedBlocks = [self blocksInsideModalIfPresent:ocrBlocks
-                                                                            inImage:fullImage
-                                                               normalizedExclusions:exclusionSnapshot];
-        FuyiDiagLog(@"  MODAL %lu -> %lu blocks in %.3fs",
-                    (unsigned long)ocrBlocks.count, (unsigned long)modalScopedBlocks.count,
-                    [[NSDate date] timeIntervalSinceDate:modalStart]);
-
-        FYTrace(trace, @"ocr", @{@"stage": @"merged", @"ocr_lines": FYTraceOCRLines(ocrBlocks), @"blocks": @(ocrBlocks.count)});
-        FYTrace(trace, @"ocr", @{@"stage": @"modal_scoped", @"ocr_lines": FYTraceOCRLines(modalScopedBlocks), @"blocks": @(modalScopedBlocks.count)});
-        NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
-        CGImageRelease(fullImage);
-        FYTrace(trace, @"task", @{@"reason": @"ocr_finished", @"error_code": @(error.code)});
-
+    NSDictionary *captureTrace = trace;
+    dispatch_async(self.captureQueue, ^{
+        // Window pixels and capture-card image conversion must not block AppKit.
+        CGImageRef fullImage = captureCard ? [self.captureCardInput copyLatestFrame] : [self copyFullCapturedImageForWindow:windowID];
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
+            if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
                 inputEpoch != self.captureCardInput.sessionEpoch) {
-                NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
-                    : (!self.running ? @"stopped"
-                       : (windowID != [self displayTargetWindowID] ? @"window_changed" : @"input_session_changed"));
-                FYTrace(trace, @"skip", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
-                self.inFlight = NO;
+                if (fullImage) { CGImageRelease(fullImage); }
+                if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
+                FYTrace(captureTrace, @"skip", @{@"reason": @"capture_input_changed"});
                 return;
             }
-            self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
-            if (error) {
-                FYTrace(trace, @"skip", @{@"reason": @"ocr_error", @"error_code": @(error.code)});
-                [self showError:error.localizedDescription];
-                [self setStatus:@"OCR 出错"];
+            NSDictionary *trace = captureTrace;
+            if (!fullImage) {
+                FYTrace(trace, @"capture", @{@"success": @NO, @"reason": captureCard ? @"capture_card_no_frame" : @"capture_unavailable"});
+                FYTrace(trace, @"skip", @{@"reason": captureCard ? @"capture_card_no_frame" : @"capture_unavailable", @"input_epoch": @(inputEpoch)});
                 self.inFlight = NO;
-                return;
-            }
-
-            NSString *normalized = NormalizeForComparison(ocrText);
-            if (normalized.length < 2) {
-                if ([self effectiveModeSegment] == ContentModeUI) { [self.inlineFrameStabilizer observeItems:@[]]; }
-                [[self stabilityOwner] reset];
-                FYTrace(trace, @"skip", @{@"reason": @"ocr_empty"});
-                [self setStatus:[NSString stringWithFormat:@"等待识别字幕 · OCR %.1fs", ocrDuration]];
-                self.inFlight = NO;
-                return;
-            }
-
-            // 自动判别必须在这里、也就是**所有去重闸门之前**跑。
-            // 之前它被放在闸门后面，而闸门一命中就 return —— 结果模式永远提交不了，
-            // 一直卡在初始的「对白」，整屏新闻条目就被塞进字幕窗。
-            // 判别本来就是用来决定“该不该翻译、走哪条路”的，不能依赖“这一帧要不要翻译”。
-            NSInteger tracePreviousMode = self.detectedModeSegment;
-            {
-                NSInteger previousMode = self.detectedModeSegment;
-                // Keep the user's chooser/reading card alive during OCR dropouts.
-                NSInteger committedMode = (self.inlineOverflowChoicePanel || self.inlineExpandedReadingPanel)
-                    ? previousMode : [self stableContentModeForBlocks:ocrBlocks];
-                if (previousMode != committedMode) {
-                    // Follow the new mode's cadence without creating a timer
-                    // in headless/manual single-frame callers.
-                    if (self.timer) { [self restartTimerIfRunning]; }
-                    FYTrace(trace, @"caption_drop", @{@"reason": @"mode_changed", @"previous_mode": @(previousMode), @"mode": @(committedMode)});
-                    NSString *switched = committedMode == ContentModeUI ? @"自动判别：功能界面 → 切换为贴译" : @"自动判别：剧情对白 → 切换为字幕";
-                    [self setStatus:switched];
-                    // 模式切换会改变译文的呈现方式（字幕窗 ↔ 贴译面板），必须清掉旧模式的产物，
-                    // 并让当前文本重新翻一次。实测漏了这一步的后果：
-                    // 从界面切到对白时，前一帧已经把整段对白贴成了 INLINE 面板；
-                    // 切过来后对白分支因为“文本已翻译过”而跳过，面板又没人清 —— 屏幕上一直挂着那张贴译。
-                    [self clearInlineTranslationPanels];
-                    self.lastTranslatedNormalizedText = nil;
-                    self.lastSubmittedNormalizedText = nil;
-                    [[self stabilityOwner] reset];
-                    self.latestTranslationLabel.stringValue = @"等待译文";
-                    self.latestSourceLabel.stringValue = @"";
-                }
-            }
-
-            FYTrace(trace, @"mode", @{@"auto_mode": @YES, @"previous_mode": @(tracePreviousMode),
-                                     @"mode": @([self effectiveModeSegment]), @"candidate_mode": @(self.candidateModeSegment),
-                                     @"candidate_hits": @(self.candidateModeHits)});
-            NSInteger currentFrameMode = [self effectiveModeSegment];
-            NSArray<OCRTextItem *> *observedUIItems = currentFrameMode == ContentModeUI
-                ? [self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:modalScopedBlocks] strict:NO]
-                : nil;
-            NSArray<OCRTextItem *> *currentUIItems = nil;
-            if (currentFrameMode == ContentModeUI) {
-                FYTrace(trace, @"ocr", @{@"stage": @"inline_grouped", @"ocr_lines": FYTraceOCRLines(observedUIItems),
-                                         @"blocks": @(observedUIItems.count)});
-                [[FYInlineLayoutDebug shared] recordItems:observedUIItems stage:@"inline_grouped" context:layoutDebug];
-                currentUIItems = [self.inlineFrameStabilizer observeItems:observedUIItems];
-                [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
-                if (!self.inlineFrameStabilizer.ready) {
-                    FYTrace(trace, @"stable", @{@"reason": @"inline_frame_confirming", @"stable_count": @1});
-                    [self setStatus:@"正在确认界面文字"];
-                    self.inFlight = NO;
-                    return;
-                }
-                FYTrace(trace, @"ocr", @{@"stage": @"inline_stable", @"ocr_lines": FYTraceOCRLines(currentUIItems),
-                                         @"blocks": @(currentUIItems.count)});
-                normalized = NormalizeForComparison([[currentUIItems valueForKey:@"text"] componentsJoinedByString:@"\n"]);
-            }
-            double translatedSimilarity = SimilarityRatio(normalized, self.lastTranslatedNormalizedText ?: @"");
-            double submittedSimilarity = SimilarityRatio(normalized, self.lastSubmittedNormalizedText ?: @"");
-
-            // 「文本相同」只能跳过**网络翻译**，不能跳过窗口边界/映射复核和贴译重排。
-            // 实际显示目标（OBS 编辑器 ↔ 全屏投影）换过、而渲染还是按旧目标做的时候，
-            // 必须继续往下走：走的是缓存命中路径（translateInlineTextItems 直接命中缓存），
-            // 不会重新请求翻译，但会用**这一帧**的原文块把贴译排到新位置上。
-            BOOL sameTextAsRendered = currentFrameMode == ContentModeUI
-                ? [normalized isEqualToString:(self.lastTranslatedNormalizedText ?: @"")]
-                : [self isSameSubtitleText:normalized comparedTo:self.lastTranslatedNormalizedText];
-            BOOL geometryChangedSinceRender = currentFrameMode == ContentModeUI &&
-                ![(self.lastInlineRenderGeometryToken ?: @"") isEqualToString:(self.lastDisplayGeometryToken ?: @"")];
-            if (currentFrameMode == ContentModeUI && currentUIItems.count == self.lastInlineRenderedItems.count) {
-                for (NSUInteger index = 0; index < currentUIItems.count; index++) {
-                    CGRect old = self.lastInlineRenderedItems[index].boundingBox;
-                    CGRect now = currentUIItems[index].boundingBox;
-                    if (MAX(MAX(fabs(NSMinX(old)-NSMinX(now)), fabs(NSMinY(old)-NSMinY(now))),
-                            MAX(fabs(NSWidth(old)-NSWidth(now)), fabs(NSHeight(old)-NSHeight(now)))) >= 0.010) {
-                        geometryChangedSinceRender = YES;
-                        break;
-                    }
-                }
-            }
-            BOOL groupingChangedSinceRender = NO;
-            if (currentFrameMode == ContentModeUI && currentUIItems.count > 0 && self.lastInlineRenderedItems.count > 0) {
-                NSArray<NSString *> *currentTexts = [currentUIItems valueForKey:@"text"];
-                NSArray<NSString *> *renderedTexts = [self.lastInlineRenderedItems valueForKey:@"text"];
-                if (![currentTexts isEqualToArray:renderedTexts]) {
-                    if ([currentTexts isEqualToArray:self.inlinePendingGroupedTexts]) { self.inlinePendingGroupedCount += 1; }
-                    else { self.inlinePendingGroupedTexts = currentTexts; self.inlinePendingGroupedCount = 1; }
-                    groupingChangedSinceRender = self.inlinePendingGroupedCount >= 2;
+                if (captureCard) {
+                    [self updateCaptureCardStatus]; [self setStatus:@"采集卡暂无画面"];
                 } else {
-                    self.inlinePendingGroupedTexts = nil;
-                    self.inlinePendingGroupedCount = 0;
+                    [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"success": @NO}];
+                    if ([self recoverWindowSelectionIfRecreated]) { return; }
+                    self.captureUnavailable = YES; [self updateRunState];
+                    [self setStatus:@"截取窗口失败"]; [self showPreviewUnavailable:@"无法截取目标窗口"];
                 }
-            }
-
-            if (sameTextAsRendered && !geometryChangedSinceRender && !groupingChangedSinceRender) {
-                self.inlineOCRPendingText = nil;
-                self.inlineOCRPendingCount = 0;
-                // A restored frame interrupts a candidate correction. Without
-                // this reset, intermittent OCR noise can accumulate two hits.
-                [[self stabilityOwner] reset];
-                FYLayoutDebugPerform(layoutDebug, ^{
-                    [self recordInlineLayoutDebug:self.lastInlineLayoutResult previous:self.lastInlineLayoutResult
-                        viewport:self.lastInlineLayoutDebugViewport reason:@"cache_same_as_last_translated"];
-                });
-                // 文本没变时不再走渲染路径，展开态记账要在这里补一次：
-                // 否则"这一块已从页面消失"会停在第一帧，阅读卡一直留在画面上。
-            [self advanceExpandedReadingState];
-                FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated"});
-                [self setStatus:[NSString stringWithFormat:@"文本未变化 · 相似 %.0f%% · OCR %.1fs", translatedSimilarity * 100, ocrDuration]];
-                self.inFlight = NO;
                 return;
             }
-            if (sameTextAsRendered) {
-                FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated_geometry_changed"});
-                [self setStatus:[NSString stringWithFormat:@"画面位置变化 · 用已有译文重排 · OCR %.1fs", ocrDuration]];
-            }
-            // UI OCR changes have already been confirmed per on-screen block by
-            // inlineFrameStabilizer. A second whole-page text gate would make a
-            // real edit wait indefinitely when unrelated background text jitters.
+            if (captureCard) { self.lastOCRedCaptureFrameIndex = captureFrameIndex; }
+            self.captureUnavailable = NO;
+            [self updateRunState];
+            trace = [[FYTranslationTrace shared] frameContextForCycle:trace index:captureFrameIndex];
+            FYTrace(trace, @"capture", @{@"success": @YES, @"width": @(CGImageGetWidth(fullImage)),
+                                        @"height": @(CGImageGetHeight(fullImage))});
+            [[FYRuntimeDiagnostics shared] recordEvent:@"capture" fields:@{@"window_id": @(windowID), @"generation": @(self.translationGeneration), @"success": @YES}];
+            [self setStatus:@"正在 OCR"];
+            [self updatePreviewFromImage:fullImage generation:cycleGeneration];
+            BOOL fastOCR = self.fastOCRCheckbox.state == NSControlStateValueOn;
+            BOOL autoFit = self.autoFitRegionCheckbox == nil || self.autoFitRegionCheckbox.state == NSControlStateValueOn;
+            NSInteger languageSegment = self.languageControl.selectedSegment;
+            self.learningCoordinator.japaneseMode = (languageSegment == 0);
 
-            // 节流阈值按模式分开：
-            //   对白模式 4 秒 —— 防 OCR 抖动、防同一句台词反复请求
-            //   界面模式 1.2 秒 —— 界面是**用户自己在动**（滑动、翻页），
-            //                      让它等满 4 秒没道理，实测会变成“过了 5 秒才翻出来”
-            NSTimeInterval attemptThrottle = [self translationAttemptThrottleForMode:currentFrameMode];
+            // 两种输入都不包含译芽浮窗：窗口截图只取 IncludingWindow，采集卡只取视频帧。
+            // 不能按屏幕浮窗位置遮掉这些干净源图，否则恢复模态过滤后会把真实正文误删。
+            NSArray<NSValue *> *exclusionSnapshot = @[];
 
-            if (!groupingChangedSinceRender && [[self translationState] shouldThrottleText:normalized geometryChanged:geometryChangedSinceRender interval:attemptThrottle
-                equivalent:^BOOL(NSString *current, NSString *previous) { return [self isSameSubtitleText:current comparedTo:previous]; }
-                now:^NSDate *{ return [self translationProcessingDate]; }]) {
-            [self advanceExpandedReadingState];
-                FYTrace(trace, @"skip", @{@"reason": @"submission_throttle"});
-                [self setStatus:[NSString stringWithFormat:@"等待翻译返回 · 相似 %.0f%% · OCR %.1fs", submittedSimilarity * 100, ocrDuration]];
-                self.inFlight = NO;
-                return;
-            }
-
-            BOOL shouldWaitForStableText = self.stableTextCheckbox.state == NSControlStateValueOn || fastOCR;
-            // 界面模式不等稳定：用户滑完就希望立刻看到译文，多等一帧就多一分延迟
-            if (currentFrameMode == ContentModeUI) { shouldWaitForStableText = NO; }
-            if (shouldWaitForStableText && ![self isStableText:normalized]) {
-                FYTrace(trace, @"stable", @{@"reason": @"waiting", @"stable_required": @YES, @"stable_count": @(self.stableCandidateCount)});
-                [self setStatus:[NSString stringWithFormat:@"等待文本稳定 · OCR %.1fs", ocrDuration]];
-                self.inFlight = NO;
-                return;
-            }
-
-            FYTrace(trace, @"stable", @{@"reason": shouldWaitForStableText ? @"accepted" : @"not_required",
-                                       @"stable_required": @(shouldWaitForStableText), @"stable_count": @(self.stableCandidateCount)});
-            self.lastSubmittedNormalizedText = normalized;
-            self.lastTranslationAttemptDate = [self translationProcessingDate];
-
-            {
-                NSUInteger tokens = UITokenHitCount(ocrBlocks);
-                NSUInteger substantial = 0;
-                for (OCRTextItem *b in ocrBlocks) {
-                    NSString *n = NormalizeForComparison(b.text);
-                    if (n.length == 0) { continue; }
-                    if (b.boundingBox.size.width >= 0.15) { substantial += 1; continue; }
-                    if (n.length >= 8 && b.boundingBox.size.width >= 0.13 && b.boundingBox.size.height >= 0.030) { substantial += 1; }
+            CGRect ocrScope=[self selectedOCRScope];
+            NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:fullImage metadata:@{
+                @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
+                @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"frame_index":@(captureFrameIndex), @"scope":FYLayoutDebugRect(ocrScope)}];
+            FYTrace(trace, @"task", @{@"reason": @"ocr_scheduled"});
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+              FYInlineDebugTracePerform(trace, layoutDebug, ^{
+                FYTrace(trace, @"task", @{@"reason": @"ocr_started"});
+                NSDate *ocrStart = [NSDate date];
+                NSError *error = nil;
+                NSArray<OCRTextItem *> *ocrBlocks = @[];
+                // 诊断：把实际送去 OCR 的整窗图存一份（覆盖式，只留最新一帧），
+                // 用来看运行时画面和离线截图是否一致。
+                // 注意：这会把用户屏幕内容写入当前用户的私有临时目录，只能在实际排查时开启（FUYI_DIAG=1），
+                // 不能在正式分发版里无条件执行。
+                if (FuyiDiagEnabled()) {
+                    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:fullImage];
+                    NSData *png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+                    FYWritePrivateDiagnosticData(png, @"yiya-last-frame.png", NO);
                 }
-                NSArray<OCRTextItem *> *dbgBand = SubtitleBandItemsFromBlocks(ocrBlocks);
-                FuyiDiagLog(@"CYCLE auto=%d blocks=%lu tokens=%lu substantial=%lu looksUI=%d band=%lu detected=%ld text=<%@>",
-                            YES,
-                            (unsigned long)ocrBlocks.count, (unsigned long)tokens, (unsigned long)substantial,
-                            LooksLikeUIFrame(ocrBlocks), (unsigned long)dbgBand.count,
-                            (long)self.detectedModeSegment, FYDiagTextLength(ocrText));
-            }
-
-            NSInteger frameMode = [self effectiveModeSegment];
-
-            if (frameMode == ContentModeUI) {
-                [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
-                NSMutableArray<OCRTextItem *> *uiItems = [currentUIItems mutableCopy];
-                if (uiItems.count == 0) {
-                    FYTrace(trace, @"skip", @{@"reason": @"ui_no_translatable_items", @"route": @"ui"});
-                    if (captureCard) {
-                        // 采集卡模式本来就没有贴译面板；字幕窗保留上一条，只更新状态。
-                        [self setCaptionPanelVisibleForUIMode:NO];
-                        [self setStatus:[NSString stringWithFormat:@"采集卡模式：界面暂无可译文字 · OCR %.1fs", ocrDuration]];
-                        self.inFlight = NO;
-                        return;
-                    }
-                    // 读不到文字（例如被 QuickTime 录制控件挡住）时，**保留上一帧的贴译面板**。
-                    // 之前这里会 clearInlineTranslationPanels，于是控件一出现译文就消失、
-                    // 控件淡出又重新贴出来 —— 看起来就是“闪/消失”。译文并没有变，不该清掉。
-                    [self setCaptionPanelVisibleForUIMode:YES];
-                    [self setStatus:[NSString stringWithFormat:@"自动判别：界面（暂无可译文字） · OCR %.1fs", ocrDuration]];
-                    self.inFlight = NO;
-                    return;
+                NSString *ocrText;
+                if (CGRectEqualToRect(ocrScope,CGRectMake(0,0,1,1))) {
+                    ocrText=[self recognizeTextBlocksInImage:fullImage fastOCR:fastOCR languageSegment:languageSegment blocks:&ocrBlocks error:&error];
+                } else {
+                    NSArray *scoped=[FYOCRManager recognizeImage:fullImage topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
+                        NSArray *raw = [self recognizeTextItemsInImage:cropped fastOCR:fastOCR languageSegment:languageSegment error:innerError];
+                        FYTrace(trace, @"ocr", @{@"stage": @"vision_raw_crop", @"ocr_lines": FYTraceOCRLines(raw),
+                                                @"blocks": @(raw.count), @"error_code": @((*innerError).code)});
+                        return raw;
+                    } error:&error];
+                    ocrText=[FYOCRManager sourceTextForItems:scoped blocks:&ocrBlocks];
                 }
+                [[FYInlineLayoutDebug shared] recordItems:ocrBlocks stage:@"mapped_pass1" context:layoutDebug];
+                NSTimeInterval pass1Duration = [[NSDate date] timeIntervalSinceDate:ocrStart];
+                [[FYRuntimeDiagnostics shared] recordEvent:@"ocr" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"blocks": @(ocrBlocks.count), @"error_code": @(error.code), @"elapsed_ms": @(pass1Duration * 1000), @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage))}];
+                FYTrace(trace, @"ocr", @{@"stage": @"pass1_filtered", @"ocr_lines": FYTraceOCRLines(ocrBlocks),
+                                        @"blocks": @(ocrBlocks.count), @"fast_ocr": @(fastOCR), @"language": @(languageSegment),
+                                        @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage)),
+                                        @"frame_index": @(captureFrameIndex), @"elapsed_ms": @(pass1Duration * 1000)});
 
-                FuyiDiagLog(@"  -> ROUTE INLINE(UI) items=%lu", (unsigned long)uiItems.count);
-                NSString *uiStatus = [NSString stringWithFormat:@"翻译界面 · OCR %.1fs", ocrDuration];
-                [self setStatus:uiStatus];
-                NSArray<OCRTextItem *> *uiItemsForRender = [uiItems copy];
-                NSDate *uiTranslateStart = [NSDate date];
-                NSArray<FYRequestIdentity *> *uiIdentities = [self.learningCoordinator recordItems:[self textsFromItems:uiItemsForRender] kind:FYSentenceKindUI];
-                [self refreshLearningSource];
-                [self refreshLearningStatus];
-                NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
-                FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-                [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
-                    if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
-                        inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeUI) {
-                        NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
-                            : (!self.running ? @"stopped"
-                               : (windowID != [self displayTargetWindowID] ? @"window_changed"
-                                  : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
-                        FYTrace(uiTrace, @"inline_drop", @{@"reason": reason, @"route": @"ui", @"input_epoch": @(inputEpoch)});
-                        self.inFlight = NO;
-                        return;
-                    }
-                    self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:uiTranslateStart]];
-                    FuyiDiagLog(@"  TRANSLATE(items=%lu) took %.2fs err=<%@>",
-                                (unsigned long)uiItemsForRender.count,
-                                [[NSDate date] timeIntervalSinceDate:uiTranslateStart],
-                                [NSString stringWithFormat:@"code:%ld", (long)translationError.code]);
-                    [self bindTranslations:translations toIdentities:uiIdentities];
-                    [self refreshLearningSource];
-                    [self refreshLearningStatus];
-                    if (captureCard) {
-                        // 采集卡与窗口截图走同一条界面贴译流程：
-                        // 先建立"视频画面 → 显示区域"的坐标映射（inlinePlacementRect:）；
-                        // 有映射就原位贴译，没有映射由 handleInlineTranslationResult 给出明确提示，
-                        // 绝不静默把界面译文当成对白塞进字幕窗。
-                        [self setCaptionPanelVisibleForUIMode:YES];
-                        FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-                            [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"采集卡：界面翻译出错" successPrefix:@"采集卡界面译文已更新"];
-                        });
-                        if (!translationError) {
-                            self.lastTranslatedNormalizedText = normalized;
-                            self.translationCount += 1;
-                            [self updateTranslationCount];
-                        }
-                        self.inFlight = NO;
-                        return;
-                    }
-                    FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-                        [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
-                    });
-                    if (!translationError) {
-                        self.lastTranslatedNormalizedText = normalized;
-                        self.translationCount += 1;
-                        [self updateTranslationCount];
-                    }
-                    // 界面模式下字幕窗默认收起；映射不可用时由提示逻辑重新显示它。
-                    [self setCaptionPanelVisibleForUIMode:YES];
-                    self.inFlight = NO;
-                }];
-                });
-                return;
-            }
+                // 自动贴合文字：第一遍先整窗定位文字在哪，然后把那一小块裁出来**放大再识别**。
+                // 好处：① 不用用户预先框选固定区域，文字上移/下移都能跟上；
+                //      ② 小字放大后识别率明显更好，也更容易扛住被控件切掉一点的情况。
+                // 注意挡在文字上的不透明控件是物理遮挡，放大也读不到 —— 那部分救不回来。
+                __block NSTimeInterval pass2Duration = 0;
+                // 第二遍 OCR 会让每轮耗时翻倍。只在“文字区域本身不大”时才值得放大识别：
+                // 区域已经很大时，放大既没有精度收益，又白白多花一整个 OCR 周期。
+                FYApplyOCRRefinement(ocrBlocks, autoFit,
+                    ^NSString *(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error) {
+                        CGRect visionScope=CGRectMake(ocrScope.origin.x,1-CGRectGetMaxY(ocrScope),ocrScope.size.width,ocrScope.size.height);
+                        region=CGRectIntersection(region,visionScope);
+                        if (CGRectIsNull(region) || CGRectIsEmpty(region)) return nil;
+                        return [self recognizeEnlargedRegionOfImage:fullImage
+                            regionX:region.origin.x regionY:region.origin.y
+                            regionWidth:region.size.width regionHeight:region.size.height
+                            fastOCR:fastOCR languageSegment:languageSegment blocks:blocks error:error];
+                    }, ^{ pass2Duration = [[NSDate date] timeIntervalSinceDate:ocrStart] - pass1Duration; },
+                    &ocrText, &ocrBlocks);
+                FuyiDiagLog(@"  OCR pass1=%.2fs pass2=%.2fs total=%.2fs blocks=%lu",
+                            pass1Duration, pass2Duration,
+                            [[NSDate date] timeIntervalSinceDate:ocrStart], (unsigned long)ocrBlocks.count);
 
-            FYTrace(trace, @"dialogue", @{@"stage": @"route", @"route": @"dialogue"});
-            [self setCaptionPanelVisibleForUIMode:NO];
-            // 对白模式：对白框照常进悬浮字幕窗，上方的选项单独贴到原选项旁边。
-            // 街景招牌、公告牌这类环境文本不会进 band，所以不会被翻译。
-            FuyiDiagLog(@"  -> ROUTE DIALOGUE(caption)");
-            // Both capture paths contain only source pixels. Matching an existing
-            // translation does not make an original date/name/kanji an overlay.
-            NSArray<OCRTextItem *> *dialogueSource = ocrBlocks;
+                // 必须在 CGImageRelease 之前、同一个线程上做完像素分析：
+                // 主队列回调里 fullImage 已经被释放，之前把这段放在回调里是一个 use-after-free。
+                NSDate *modalStart = [NSDate date];
+                NSArray<OCRTextItem *> *modalScopedBlocks = [self blocksInsideModalIfPresent:ocrBlocks
+                                                                                    inImage:fullImage
+                                                                       normalizedExclusions:exclusionSnapshot];
+                FuyiDiagLog(@"  MODAL %lu -> %lu blocks in %.3fs",
+                            (unsigned long)ocrBlocks.count, (unsigned long)modalScopedBlocks.count,
+                            [[NSDate date] timeIntervalSinceDate:modalStart]);
 
-            NSArray<OCRTextItem *> *bandItems = SubtitleBandItemsFromBlocks(dialogueSource);
-            NSMutableArray<OCRTextItem *> *dialogueItems = [NSMutableArray array];
-            NSMutableArray<OCRTextItem *> *optionItems = [NSMutableArray array];
-            // 对白字幕与界面贴译是两条独立路径：
-            //   窗口截图，或采集卡已建立坐标映射 → 选项照常贴到原选项旁边；
-            //   采集卡映射不可用 → 不做原位贴译，对白照常进字幕窗（选项不单独贴）。
-            BOOL optionsCanPasteInline = ![self captureCardInputEnabled] || [self inlinePlacementRect:NULL reason:NULL];
-            if (optionsCanPasteInline) {
-                SplitDialogueAndOptionsFromItems(bandItems, dialogueSource, dialogueItems, optionItems);
-                if (optionItems.count == 0) { [self clearInlineTranslationPanels]; }
-            } else {
-                [dialogueItems addObjectsFromArray:bandItems];
-            }
+                FYTrace(trace, @"ocr", @{@"stage": @"merged", @"ocr_lines": FYTraceOCRLines(ocrBlocks), @"blocks": @(ocrBlocks.count)});
+                FYTrace(trace, @"ocr", @{@"stage": @"modal_scoped", @"ocr_lines": FYTraceOCRLines(modalScopedBlocks), @"blocks": @(modalScopedBlocks.count)});
+                NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
+                CGImageRelease(fullImage);
+                FYTrace(trace, @"task", @{@"reason": @"ocr_finished", @"error_code": @(error.code)});
 
-            BOOL speakerLabelOnlyFrame = NO;
-            NSString *dialogueText = [self dialogueTextFromItems:dialogueItems.count > 0 ? dialogueItems : dialogueSource
-                                              speakerLabelOnly:&speakerLabelOnlyFrame];
-
-            // 选项：走贴译路线，贴在原选项文字旁边；有缓存时不会重复请求
-            if (optionItems.count > 0) {
-                NSArray<OCRTextItem *> *optionsToRender = [optionItems copy];
-                NSArray<FYRequestIdentity *> *optionIdentities = [self.learningCoordinator recordItems:[self textsFromItems:optionsToRender] kind:FYSentenceKindOption];
-                [self refreshLearningSource];
-                [self refreshLearningStatus];
-                NSDictionary *optionTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
-                FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
-                [self translateInlineTextItems:optionsToRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
-                    if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
-                        inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
-                        NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
-                            : (!self.running ? @"stopped"
-                               : (windowID != [self displayTargetWindowID] ? @"window_changed"
-                                  : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
-                        FYTrace(optionTrace, @"inline_drop", @{@"reason": reason, @"route": @"option", @"input_epoch": @(inputEpoch)});
-                        return;
-                    }
-                    [self bindTranslations:translations toIdentities:optionIdentities];
-                    [self refreshLearningSource];
-                    [self refreshLearningStatus];
-                    FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
-                        [self handleInlineTranslationResult:translations forItems:optionsToRender error:translationError failureStatus:@"选项翻译出错" successPrefix:@"选项已贴译"];
-                    });
-                }];
-                });
-            }
-
-            FYTrace(trace, @"dialogue", @{@"stage": @"extracted", @"source": dialogueText ?: @""});
-            if (NormalizeForComparison(dialogueText).length < 2) {
-                FYTrace(trace, @"skip", @{@"reason": @"dialogue_empty"});
-                [self setStatus:@"对白框暂无可译文字"];
-                self.inFlight = NO;
-                return;
-            }
-
-            NSString *translatingStatus = [NSString stringWithFormat:@"翻译对白 · 自动判别 · OCR %.1fs", ocrDuration];
-            [self setStatus:translatingStatus];
-            NSDate *translationStart = [NSDate date];
-            FYRequestIdentity *dialogueIdentity = speakerLabelOnlyFrame ? nil : [self.learningCoordinator recordText:dialogueText kind:FYSentenceKindDialogue];
-            // Reused identities retain the complete source. Never overwrite its
-            // translation with one generated from a degraded OCR frame.
-            if (dialogueIdentity.sourceText.length) { dialogueText = dialogueIdentity.sourceText; }
-            [self refreshLearningSource];
-            [self refreshLearningStatus];
-            NSDictionary *dialogueTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
-            FYTrace(dialogueTrace, @"dialogue", @{@"stage": @"identity_source", @"source": dialogueText ?: @"",
-                                                @"sentence_id": dialogueIdentity.sentenceID ?: @"", @"version": @(dialogueIdentity.version),
-                                                @"identity_request_id": dialogueIdentity.requestID ?: @""});
-            FYInlineDebugTracePerform(dialogueTrace, layoutDebug, ^{
-            [self translateDialogueText:dialogueText identity:dialogueIdentity systemPrompt:[self systemPrompt] completion:^(NSString *translated, NSError *translationError) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
-                        inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
+                        inputEpoch != self.captureCardInput.sessionEpoch) {
                         NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
                             : (!self.running ? @"stopped"
-                               : (windowID != [self displayTargetWindowID] ? @"window_changed"
-                                  : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
-                        FYTrace(dialogueTrace, @"caption_drop", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
+                               : (windowID != [self displayTargetWindowID] ? @"window_changed" : @"input_session_changed"));
+                        FYTrace(trace, @"skip", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
                         self.inFlight = NO;
                         return;
                     }
-                    NSTimeInterval translationDuration = [[NSDate date] timeIntervalSinceDate:translationStart];
-                    self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", translationDuration];
-                    NSTimeInterval totalDuration = [[NSDate date] timeIntervalSinceDate:cycleStart];
-                    if (translationError) {
-                        NSString *errorText = translationError.localizedDescription ?: @"未知错误";
-                        [self showError:errorText];
-                        NSString *status = [NSString stringWithFormat:@"翻译出错 · OCR %.1fs 翻译 %.1fs", ocrDuration, translationDuration];
-                        [self setStatus:status];
-                        [self updateCaptionWindowWithText:[NSString stringWithFormat:@"翻译失败：%@", Shorten(errorText, 110)] status:status];
-                        FYTrace(dialogueTrace, @"caption_apply", @{@"reason": @"translation_error", @"error_code": @(translationError.code), @"success": @NO});
-                    } else {
-                        [self.learningCoordinator setTranslation:translated forIdentity:dialogueIdentity];
+                    self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
+                    if (error) {
+                        FYTrace(trace, @"skip", @{@"reason": @"ocr_error", @"error_code": @(error.code)});
+                        [self showError:error.localizedDescription];
+                        [self setStatus:@"OCR 出错"];
+                        self.inFlight = NO;
+                        return;
+                    }
+
+                    NSString *normalized = NormalizeForComparison(ocrText);
+                    if (normalized.length < 2) {
+                        if ([self effectiveModeSegment] == ContentModeUI) { [self.inlineFrameStabilizer observeItems:@[]]; }
+                        [[self stabilityOwner] reset];
+                        FYTrace(trace, @"skip", @{@"reason": @"ocr_empty"});
+                        [self setStatus:[NSString stringWithFormat:@"等待识别字幕 · OCR %.1fs", ocrDuration]];
+                        self.inFlight = NO;
+                        return;
+                    }
+
+                    // 自动判别必须在这里、也就是**所有去重闸门之前**跑。
+                    // 之前它被放在闸门后面，而闸门一命中就 return —— 结果模式永远提交不了，
+                    // 一直卡在初始的「对白」，整屏新闻条目就被塞进字幕窗。
+                    // 判别本来就是用来决定“该不该翻译、走哪条路”的，不能依赖“这一帧要不要翻译”。
+                    NSInteger tracePreviousMode = self.detectedModeSegment;
+                    {
+                        NSInteger previousMode = self.detectedModeSegment;
+                        // Keep the user's chooser/reading card alive during OCR dropouts.
+                        NSInteger committedMode = (self.inlineOverflowChoicePanel || self.inlineExpandedReadingPanel)
+                            ? previousMode : [self stableContentModeForBlocks:ocrBlocks];
+                        if (previousMode != committedMode) {
+                            // Follow the new mode's cadence without creating a timer
+                            // in headless/manual single-frame callers.
+                            if (self.timer) { [self restartTimerIfRunning]; }
+                            FYTrace(trace, @"caption_drop", @{@"reason": @"mode_changed", @"previous_mode": @(previousMode), @"mode": @(committedMode)});
+                            NSString *switched = committedMode == ContentModeUI ? @"自动判别：功能界面 → 切换为贴译" : @"自动判别：剧情对白 → 切换为字幕";
+                            [self setStatus:switched];
+                            // 模式切换会改变译文的呈现方式（字幕窗 ↔ 贴译面板），必须清掉旧模式的产物，
+                            // 并让当前文本重新翻一次。实测漏了这一步的后果：
+                            // 从界面切到对白时，前一帧已经把整段对白贴成了 INLINE 面板；
+                            // 切过来后对白分支因为“文本已翻译过”而跳过，面板又没人清 —— 屏幕上一直挂着那张贴译。
+                            [self clearInlineTranslationPanels];
+                            self.lastTranslatedNormalizedText = nil;
+                            self.lastSubmittedNormalizedText = nil;
+                            [[self stabilityOwner] reset];
+                            self.latestTranslationLabel.stringValue = @"等待译文";
+                            self.latestSourceLabel.stringValue = @"";
+                        }
+                    }
+
+                    FYTrace(trace, @"mode", @{@"auto_mode": @YES, @"previous_mode": @(tracePreviousMode),
+                                             @"mode": @([self effectiveModeSegment]), @"candidate_mode": @(self.candidateModeSegment),
+                                             @"candidate_hits": @(self.candidateModeHits)});
+                    NSInteger currentFrameMode = [self effectiveModeSegment];
+                    NSArray<OCRTextItem *> *observedUIItems = currentFrameMode == ContentModeUI
+                        ? [self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:modalScopedBlocks] strict:NO]
+                        : nil;
+                    NSArray<OCRTextItem *> *currentUIItems = nil;
+                    if (currentFrameMode == ContentModeUI) {
+                        FYTrace(trace, @"ocr", @{@"stage": @"inline_grouped", @"ocr_lines": FYTraceOCRLines(observedUIItems),
+                                                 @"blocks": @(observedUIItems.count)});
+                        [[FYInlineLayoutDebug shared] recordItems:observedUIItems stage:@"inline_grouped" context:layoutDebug];
+                        currentUIItems = [self.inlineFrameStabilizer observeItems:observedUIItems];
+                        [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
+                        if (!self.inlineFrameStabilizer.ready) {
+                            FYTrace(trace, @"stable", @{@"reason": @"inline_frame_confirming", @"stable_count": @1});
+                            [self setStatus:@"正在确认界面文字"];
+                            self.inFlight = NO;
+                            return;
+                        }
+                        FYTrace(trace, @"ocr", @{@"stage": @"inline_stable", @"ocr_lines": FYTraceOCRLines(currentUIItems),
+                                                 @"blocks": @(currentUIItems.count)});
+                        normalized = NormalizeForComparison([[currentUIItems valueForKey:@"text"] componentsJoinedByString:@"\n"]);
+                    }
+                    double translatedSimilarity = SimilarityRatio(normalized, self.lastTranslatedNormalizedText ?: @"");
+                    double submittedSimilarity = SimilarityRatio(normalized, self.lastSubmittedNormalizedText ?: @"");
+
+                    // 「文本相同」只能跳过**网络翻译**，不能跳过窗口边界/映射复核和贴译重排。
+                    // 实际显示目标（OBS 编辑器 ↔ 全屏投影）换过、而渲染还是按旧目标做的时候，
+                    // 必须继续往下走：走的是缓存命中路径（translateInlineTextItems 直接命中缓存），
+                    // 不会重新请求翻译，但会用**这一帧**的原文块把贴译排到新位置上。
+                    BOOL sameTextAsRendered = currentFrameMode == ContentModeUI
+                        ? [normalized isEqualToString:(self.lastTranslatedNormalizedText ?: @"")]
+                        : [self isSameSubtitleText:normalized comparedTo:self.lastTranslatedNormalizedText];
+                    BOOL geometryChangedSinceRender = currentFrameMode == ContentModeUI &&
+                        ![(self.lastInlineRenderGeometryToken ?: @"") isEqualToString:(self.lastDisplayGeometryToken ?: @"")];
+                    if (currentFrameMode == ContentModeUI && currentUIItems.count == self.lastInlineRenderedItems.count) {
+                        for (NSUInteger index = 0; index < currentUIItems.count; index++) {
+                            CGRect old = self.lastInlineRenderedItems[index].boundingBox;
+                            CGRect now = currentUIItems[index].boundingBox;
+                            if (MAX(MAX(fabs(NSMinX(old)-NSMinX(now)), fabs(NSMinY(old)-NSMinY(now))),
+                                    MAX(fabs(NSWidth(old)-NSWidth(now)), fabs(NSHeight(old)-NSHeight(now)))) >= 0.010) {
+                                geometryChangedSinceRender = YES;
+                                break;
+                            }
+                        }
+                    }
+                    BOOL groupingChangedSinceRender = NO;
+                    if (currentFrameMode == ContentModeUI && currentUIItems.count > 0 && self.lastInlineRenderedItems.count > 0) {
+                        NSArray<NSString *> *currentTexts = [currentUIItems valueForKey:@"text"];
+                        NSArray<NSString *> *renderedTexts = [self.lastInlineRenderedItems valueForKey:@"text"];
+                        if (![currentTexts isEqualToArray:renderedTexts]) {
+                            if ([currentTexts isEqualToArray:self.inlinePendingGroupedTexts]) { self.inlinePendingGroupedCount += 1; }
+                            else { self.inlinePendingGroupedTexts = currentTexts; self.inlinePendingGroupedCount = 1; }
+                            groupingChangedSinceRender = self.inlinePendingGroupedCount >= 2;
+                        } else {
+                            self.inlinePendingGroupedTexts = nil;
+                            self.inlinePendingGroupedCount = 0;
+                        }
+                    }
+
+                    if (sameTextAsRendered && !geometryChangedSinceRender && !groupingChangedSinceRender) {
+                        self.inlineOCRPendingText = nil;
+                        self.inlineOCRPendingCount = 0;
+                        // A restored frame interrupts a candidate correction. Without
+                        // this reset, intermittent OCR noise can accumulate two hits.
+                        [[self stabilityOwner] reset];
+                        FYLayoutDebugPerform(layoutDebug, ^{
+                            [self recordInlineLayoutDebug:self.lastInlineLayoutResult previous:self.lastInlineLayoutResult
+                                viewport:self.lastInlineLayoutDebugViewport reason:@"cache_same_as_last_translated"];
+                        });
+                        // 文本没变时不再走渲染路径，展开态记账要在这里补一次：
+                        // 否则"这一块已从页面消失"会停在第一帧，阅读卡一直留在画面上。
+                    [self advanceExpandedReadingState];
+                        FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated"});
+                        [self setStatus:[NSString stringWithFormat:@"文本未变化 · 相似 %.0f%% · OCR %.1fs", translatedSimilarity * 100, ocrDuration]];
+                        self.inFlight = NO;
+                        return;
+                    }
+                    if (sameTextAsRendered) {
+                        FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated_geometry_changed"});
+                        [self setStatus:[NSString stringWithFormat:@"画面位置变化 · 用已有译文重排 · OCR %.1fs", ocrDuration]];
+                    }
+                    // UI OCR changes have already been confirmed per on-screen block by
+                    // inlineFrameStabilizer. A second whole-page text gate would make a
+                    // real edit wait indefinitely when unrelated background text jitters.
+
+                    // 节流阈值按模式分开：
+                    //   对白模式 4 秒 —— 防 OCR 抖动、防同一句台词反复请求
+                    //   界面模式 1.2 秒 —— 界面是**用户自己在动**（滑动、翻页），
+                    //                      让它等满 4 秒没道理，实测会变成“过了 5 秒才翻出来”
+                    NSTimeInterval attemptThrottle = [self translationAttemptThrottleForMode:currentFrameMode];
+
+                    if (!groupingChangedSinceRender && [[self translationState] shouldThrottleText:normalized geometryChanged:geometryChangedSinceRender interval:attemptThrottle
+                        equivalent:^BOOL(NSString *current, NSString *previous) { return [self isSameSubtitleText:current comparedTo:previous]; }
+                        now:^NSDate *{ return [self translationProcessingDate]; }]) {
+                    [self advanceExpandedReadingState];
+                        FYTrace(trace, @"skip", @{@"reason": @"submission_throttle"});
+                        [self setStatus:[NSString stringWithFormat:@"等待翻译返回 · 相似 %.0f%% · OCR %.1fs", submittedSimilarity * 100, ocrDuration]];
+                        self.inFlight = NO;
+                        return;
+                    }
+
+                    BOOL shouldWaitForStableText = self.stableTextCheckbox.state == NSControlStateValueOn || fastOCR;
+                    // 界面模式不等稳定：用户滑完就希望立刻看到译文，多等一帧就多一分延迟
+                    if (currentFrameMode == ContentModeUI) { shouldWaitForStableText = NO; }
+                    if (shouldWaitForStableText && ![self isStableText:normalized]) {
+                        FYTrace(trace, @"stable", @{@"reason": @"waiting", @"stable_required": @YES, @"stable_count": @(self.stableCandidateCount)});
+                        [self setStatus:[NSString stringWithFormat:@"等待文本稳定 · OCR %.1fs", ocrDuration]];
+                        self.inFlight = NO;
+                        return;
+                    }
+
+                    FYTrace(trace, @"stable", @{@"reason": shouldWaitForStableText ? @"accepted" : @"not_required",
+                                               @"stable_required": @(shouldWaitForStableText), @"stable_count": @(self.stableCandidateCount)});
+                    self.lastSubmittedNormalizedText = normalized;
+                    self.lastTranslationAttemptDate = [self translationProcessingDate];
+
+                    {
+                        NSUInteger tokens = UITokenHitCount(ocrBlocks);
+                        NSUInteger substantial = 0;
+                        for (OCRTextItem *b in ocrBlocks) {
+                            NSString *n = NormalizeForComparison(b.text);
+                            if (n.length == 0) { continue; }
+                            if (b.boundingBox.size.width >= 0.15) { substantial += 1; continue; }
+                            if (n.length >= 8 && b.boundingBox.size.width >= 0.13 && b.boundingBox.size.height >= 0.030) { substantial += 1; }
+                        }
+                        NSArray<OCRTextItem *> *dbgBand = SubtitleBandItemsFromBlocks(ocrBlocks);
+                        FuyiDiagLog(@"CYCLE auto=%d blocks=%lu tokens=%lu substantial=%lu looksUI=%d band=%lu detected=%ld text=<%@>",
+                                    YES,
+                                    (unsigned long)ocrBlocks.count, (unsigned long)tokens, (unsigned long)substantial,
+                                    LooksLikeUIFrame(ocrBlocks), (unsigned long)dbgBand.count,
+                                    (long)self.detectedModeSegment, FYDiagTextLength(ocrText));
+                    }
+
+                    NSInteger frameMode = [self effectiveModeSegment];
+
+                    if (frameMode == ContentModeUI) {
+                        [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
+                        NSMutableArray<OCRTextItem *> *uiItems = [currentUIItems mutableCopy];
+                        if (uiItems.count == 0) {
+                            FYTrace(trace, @"skip", @{@"reason": @"ui_no_translatable_items", @"route": @"ui"});
+                            if (captureCard) {
+                                // 采集卡模式本来就没有贴译面板；字幕窗保留上一条，只更新状态。
+                                [self setCaptionPanelVisibleForUIMode:NO];
+                                [self setStatus:[NSString stringWithFormat:@"采集卡模式：界面暂无可译文字 · OCR %.1fs", ocrDuration]];
+                                self.inFlight = NO;
+                                return;
+                            }
+                            // 读不到文字（例如被 QuickTime 录制控件挡住）时，**保留上一帧的贴译面板**。
+                            // 之前这里会 clearInlineTranslationPanels，于是控件一出现译文就消失、
+                            // 控件淡出又重新贴出来 —— 看起来就是“闪/消失”。译文并没有变，不该清掉。
+                            [self setCaptionPanelVisibleForUIMode:YES];
+                            [self setStatus:[NSString stringWithFormat:@"自动判别：界面（暂无可译文字） · OCR %.1fs", ocrDuration]];
+                            self.inFlight = NO;
+                            return;
+                        }
+
+                        FuyiDiagLog(@"  -> ROUTE INLINE(UI) items=%lu", (unsigned long)uiItems.count);
+                        NSString *uiStatus = [NSString stringWithFormat:@"翻译界面 · OCR %.1fs", ocrDuration];
+                        [self setStatus:uiStatus];
+                        NSArray<OCRTextItem *> *uiItemsForRender = [uiItems copy];
+                        NSDate *uiTranslateStart = [NSDate date];
+                        NSArray<FYRequestIdentity *> *uiIdentities = [self.learningCoordinator recordItems:[self textsFromItems:uiItemsForRender] kind:FYSentenceKindUI];
                         [self refreshLearningSource];
                         [self refreshLearningStatus];
-                        self.lastTranslatedNormalizedText = normalized;
-                        self.lastSubmittedNormalizedText = normalized;
-                        self.translationCount += 1;
-                        [self showError:@""];
-                        NSString *status = [NSString stringWithFormat:@"译文已更新 · OCR %.1fs 翻译 %.1fs 总 %.1fs", ocrDuration, translationDuration, totalDuration];
-                        [self setStatus:status];
-                        NSString *display = [self displayableTranslation:translated sourceText:dialogueText];
-                        [self updateCaptionWindowWithText:display status:status];
-                        [[FYRuntimeDiagnostics shared] recordEvent:@"caption" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"success": @YES, @"visible": @(self.captionPanel.isVisible)}];
-                        FYTrace(dialogueTrace, @"caption_apply", @{@"reason": @"translated", @"source": dialogueText ?: @"", @"translation": display ?: @"", @"success": @YES, @"visible": @(self.captionPanel.isVisible)});
-                        self.latestTranslationLabel.stringValue = display;
-                        self.latestSourceLabel.stringValue = dialogueText;
-                        [self updateTranslationCount];
+                        NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
+                        FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
+                        [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
+                            if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
+                                inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeUI) {
+                                NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
+                                    : (!self.running ? @"stopped"
+                                       : (windowID != [self displayTargetWindowID] ? @"window_changed"
+                                          : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
+                                FYTrace(uiTrace, @"inline_drop", @{@"reason": reason, @"route": @"ui", @"input_epoch": @(inputEpoch)});
+                                self.inFlight = NO;
+                                return;
+                            }
+                            self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:uiTranslateStart]];
+                            FuyiDiagLog(@"  TRANSLATE(items=%lu) took %.2fs err=<%@>",
+                                        (unsigned long)uiItemsForRender.count,
+                                        [[NSDate date] timeIntervalSinceDate:uiTranslateStart],
+                                        [NSString stringWithFormat:@"code:%ld", (long)translationError.code]);
+                            [self bindTranslations:translations toIdentities:uiIdentities];
+                            [self refreshLearningSource];
+                            [self refreshLearningStatus];
+                            if (captureCard) {
+                                // 采集卡与窗口截图走同一条界面贴译流程：
+                                // 先建立"视频画面 → 显示区域"的坐标映射（inlinePlacementRect:）；
+                                // 有映射就原位贴译，没有映射由 handleInlineTranslationResult 给出明确提示，
+                                // 绝不静默把界面译文当成对白塞进字幕窗。
+                                [self setCaptionPanelVisibleForUIMode:YES];
+                                FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
+                                    [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"采集卡：界面翻译出错" successPrefix:@"采集卡界面译文已更新"];
+                                });
+                                if (!translationError) {
+                                    self.lastTranslatedNormalizedText = normalized;
+                                    self.translationCount += 1;
+                                    [self updateTranslationCount];
+                                }
+                                self.inFlight = NO;
+                                return;
+                            }
+                            FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
+                                [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
+                            });
+                            if (!translationError) {
+                                self.lastTranslatedNormalizedText = normalized;
+                                self.translationCount += 1;
+                                [self updateTranslationCount];
+                            }
+                            // 界面模式下字幕窗默认收起；映射不可用时由提示逻辑重新显示它。
+                            [self setCaptionPanelVisibleForUIMode:YES];
+                            self.inFlight = NO;
+                        }];
+                        });
+                        return;
                     }
-                    self.inFlight = NO;
+
+                    FYTrace(trace, @"dialogue", @{@"stage": @"route", @"route": @"dialogue"});
+                    [self setCaptionPanelVisibleForUIMode:NO];
+                    // 对白模式：对白框照常进悬浮字幕窗，上方的选项单独贴到原选项旁边。
+                    // 街景招牌、公告牌这类环境文本不会进 band，所以不会被翻译。
+                    FuyiDiagLog(@"  -> ROUTE DIALOGUE(caption)");
+                    // Both capture paths contain only source pixels. Matching an existing
+                    // translation does not make an original date/name/kanji an overlay.
+                    NSArray<OCRTextItem *> *dialogueSource = ocrBlocks;
+
+                    NSArray<OCRTextItem *> *bandItems = SubtitleBandItemsFromBlocks(dialogueSource);
+                    NSMutableArray<OCRTextItem *> *dialogueItems = [NSMutableArray array];
+                    NSMutableArray<OCRTextItem *> *optionItems = [NSMutableArray array];
+                    // 对白字幕与界面贴译是两条独立路径：
+                    //   窗口截图，或采集卡已建立坐标映射 → 选项照常贴到原选项旁边；
+                    //   采集卡映射不可用 → 不做原位贴译，对白照常进字幕窗（选项不单独贴）。
+                    BOOL optionsCanPasteInline = ![self captureCardInputEnabled] || [self inlinePlacementRect:NULL reason:NULL];
+                    if (optionsCanPasteInline) {
+                        SplitDialogueAndOptionsFromItems(bandItems, dialogueSource, dialogueItems, optionItems);
+                        if (optionItems.count == 0) { [self clearInlineTranslationPanels]; }
+                    } else {
+                        [dialogueItems addObjectsFromArray:bandItems];
+                    }
+
+                    BOOL speakerLabelOnlyFrame = NO;
+                    NSString *dialogueText = [self dialogueTextFromItems:dialogueItems.count > 0 ? dialogueItems : dialogueSource
+                                                      speakerLabelOnly:&speakerLabelOnlyFrame];
+
+                    // 选项：走贴译路线，贴在原选项文字旁边；有缓存时不会重复请求
+                    if (optionItems.count > 0) {
+                        NSArray<OCRTextItem *> *optionsToRender = [optionItems copy];
+                        NSArray<FYRequestIdentity *> *optionIdentities = [self.learningCoordinator recordItems:[self textsFromItems:optionsToRender] kind:FYSentenceKindOption];
+                        [self refreshLearningSource];
+                        [self refreshLearningStatus];
+                        NSDictionary *optionTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
+                        FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
+                        [self translateInlineTextItems:optionsToRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
+                            if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
+                                inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
+                                NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
+                                    : (!self.running ? @"stopped"
+                                       : (windowID != [self displayTargetWindowID] ? @"window_changed"
+                                          : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
+                                FYTrace(optionTrace, @"inline_drop", @{@"reason": reason, @"route": @"option", @"input_epoch": @(inputEpoch)});
+                                return;
+                            }
+                            [self bindTranslations:translations toIdentities:optionIdentities];
+                            [self refreshLearningSource];
+                            [self refreshLearningStatus];
+                            FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
+                                [self handleInlineTranslationResult:translations forItems:optionsToRender error:translationError failureStatus:@"选项翻译出错" successPrefix:@"选项已贴译"];
+                            });
+                        }];
+                        });
+                    }
+
+                    FYTrace(trace, @"dialogue", @{@"stage": @"extracted", @"source": dialogueText ?: @""});
+                    if (NormalizeForComparison(dialogueText).length < 2) {
+                        FYTrace(trace, @"skip", @{@"reason": @"dialogue_empty"});
+                        [self setStatus:@"对白框暂无可译文字"];
+                        self.inFlight = NO;
+                        return;
+                    }
+
+                    NSString *translatingStatus = [NSString stringWithFormat:@"翻译对白 · 自动判别 · OCR %.1fs", ocrDuration];
+                    [self setStatus:translatingStatus];
+                    NSDate *translationStart = [NSDate date];
+                    FYRequestIdentity *dialogueIdentity = speakerLabelOnlyFrame ? nil : [self.learningCoordinator recordText:dialogueText kind:FYSentenceKindDialogue];
+                    // Reused identities retain the complete source. Never overwrite its
+                    // translation with one generated from a degraded OCR frame.
+                    if (dialogueIdentity.sourceText.length) { dialogueText = dialogueIdentity.sourceText; }
+                    [self refreshLearningSource];
+                    [self refreshLearningStatus];
+                    NSDictionary *dialogueTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
+                    FYTrace(dialogueTrace, @"dialogue", @{@"stage": @"identity_source", @"source": dialogueText ?: @"",
+                                                        @"sentence_id": dialogueIdentity.sentenceID ?: @"", @"version": @(dialogueIdentity.version),
+                                                        @"identity_request_id": dialogueIdentity.requestID ?: @""});
+                    FYInlineDebugTracePerform(dialogueTrace, layoutDebug, ^{
+                    [self translateDialogueText:dialogueText identity:dialogueIdentity systemPrompt:[self systemPrompt] completion:^(NSString *translated, NSError *translationError) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
+                                inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
+                                NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
+                                    : (!self.running ? @"stopped"
+                                       : (windowID != [self displayTargetWindowID] ? @"window_changed"
+                                          : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
+                                FYTrace(dialogueTrace, @"caption_drop", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
+                                self.inFlight = NO;
+                                return;
+                            }
+                            NSTimeInterval translationDuration = [[NSDate date] timeIntervalSinceDate:translationStart];
+                            self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", translationDuration];
+                            NSTimeInterval totalDuration = [[NSDate date] timeIntervalSinceDate:cycleStart];
+                            if (translationError) {
+                                NSString *errorText = translationError.localizedDescription ?: @"未知错误";
+                                [self showError:errorText];
+                                NSString *status = [NSString stringWithFormat:@"翻译出错 · OCR %.1fs 翻译 %.1fs", ocrDuration, translationDuration];
+                                [self setStatus:status];
+                                [self updateCaptionWindowWithText:[NSString stringWithFormat:@"翻译失败：%@", Shorten(errorText, 110)] status:status];
+                                FYTrace(dialogueTrace, @"caption_apply", @{@"reason": @"translation_error", @"error_code": @(translationError.code), @"success": @NO});
+                            } else {
+                                [self.learningCoordinator setTranslation:translated forIdentity:dialogueIdentity];
+                                [self refreshLearningSource];
+                                [self refreshLearningStatus];
+                                self.lastTranslatedNormalizedText = normalized;
+                                self.lastSubmittedNormalizedText = normalized;
+                                self.translationCount += 1;
+                                [self showError:@""];
+                                NSString *status = [NSString stringWithFormat:@"译文已更新 · OCR %.1fs 翻译 %.1fs 总 %.1fs", ocrDuration, translationDuration, totalDuration];
+                                [self setStatus:status];
+                                NSString *display = [self displayableTranslation:translated sourceText:dialogueText];
+                                [self updateCaptionWindowWithText:display status:status];
+                                [[FYRuntimeDiagnostics shared] recordEvent:@"caption" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"success": @YES, @"visible": @(self.captionPanel.isVisible)}];
+                                FYTrace(dialogueTrace, @"caption_apply", @{@"reason": @"translated", @"source": dialogueText ?: @"", @"translation": display ?: @"", @"success": @YES, @"visible": @(self.captionPanel.isVisible)});
+                                self.latestTranslationLabel.stringValue = display;
+                                self.latestSourceLabel.stringValue = dialogueText;
+                                [self updateTranslationCount];
+                            }
+                            self.inFlight = NO;
+                        });
+                    }];
+                    });
                 });
-            }];
+              });
             });
         });
-      });
     });
 }
 
 - (FYOCRManager *)ocrManager {
-    if (!_ocrManager) {
-        _ocrManager = [FYOCRManager new];
-        _ocrManager.configurationObserver = ^(BOOL fast, NSInteger segment, size_t width, size_t height, CGFloat minimum) {
-            FuyiDiagLog(@"  OCRCFG seg=%ld fast=%d imgW=%zu imgH=%zu minH=%.4f", (long)segment, fast, width, height, minimum);
-        };
+    @synchronized (self) {
+        if (!_ocrManager) {
+            _ocrManager = [FYOCRManager new];
+            _ocrManager.configurationObserver = ^(BOOL fast, NSInteger segment, size_t width, size_t height, CGFloat minimum) {
+                FuyiDiagLog(@"  OCRCFG seg=%ld fast=%d imgW=%zu imgH=%zu minH=%.4f", (long)segment, fast, width, height, minimum);
+            };
+        }
+        return _ocrManager;
     }
-    return _ocrManager;
 }
 
 - (FYWindowManager *)windowManager {
@@ -4470,8 +4503,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)resetForSelectedWindowChange {
-    self.translationGeneration += 1;
-    [self.translationTaskOwner cancelActiveTask];
+    [self advanceTranslationGeneration];
     self.inFlight = NO;
     self.captureUnavailable = NO;
     self.lastWindowRecoveryAttemptDate = nil;
@@ -4519,7 +4551,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     }
     self.lastDisplayTargetProbeDate = now;
 
-    NSArray *windowList = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
+    NSArray *windowList = self.overlayWindowSnapshot ?: [self onScreenWindowInfos];
     BOOL ambiguous = NO;
     NSString *note = nil;
     uint32_t resolved = [self resolveDisplayTargetWindowIDInWindowList:windowList ambiguous:&ambiguous note:&note];
@@ -4816,8 +4848,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.displayTargetAmbiguous = NO;
     self.resolvedDisplayTargetID = 0;
     self.lastDisplayGeometryToken = nil;
-    self.translationGeneration += 1;
-    [self.translationTaskOwner cancelActiveTask];
+    [self advanceTranslationGeneration];
     self.inFlight = NO;
     self.captureUnavailable = NO;
     [[self translationState] reset];
@@ -4920,8 +4951,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         return;
     }
     if (sender && (sender==self.manualOCRScopeCheckbox || sender==self.regionXSlider || sender==self.regionYSlider || sender==self.regionWidthSlider || sender==self.regionHeightSlider)) {
-        self.translationGeneration+=1;
-        [self.translationTaskOwner cancelActiveTask];
+        [self advanceTranslationGeneration];
         [[self translationState] reset];
         [[self stabilityOwner] reset];
         self.inFlight=NO;
@@ -5213,89 +5243,99 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.ocrDisplayTargetWindowID = windowID;
     self.ocrGeometryGeneration = self.geometryGeneration;
     NSUInteger inputEpoch = self.captureCardInput.sessionEpoch;
-    CGImageRef image = captureCard ? [self.captureCardInput copyLatestFrame] : [self copyFullCapturedImageForWindow:windowID];
-    if (!image) {
-        self.inFlight = NO;
-        if (!captureCard && [self recoverWindowSelectionIfRecreated]) {
-            if (!self.running) { [self translateCurrentInterface:sender]; }
-            return;
-        }
-        NSString *message = captureCard ? @"采集卡暂无可用画面，请等画面恢复后再翻译当前界面。"
-                                        : @"无法截取目标窗口";
-        [self showPreviewUnavailable:message];
-        [self setStatus:message];
-        return;
-    }
-    [self updatePreviewFromImage:image generation:cycleGeneration];
-
-    NSInteger languageSegment = self.languageControl.selectedSegment;
-    self.learningCoordinator.japaneseMode = (languageSegment == 0);
-    [self setStatus:@"正在识别当前界面"];
-    CGRect ocrScope=[self selectedOCRScope];
-    NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:image metadata:@{
-        @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
-        @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"scope":FYLayoutDebugRect(ocrScope)}];
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSDate *ocrStart = [NSDate date];
-        __block NSError *error = nil;
-        __block NSArray<OCRTextItem *> *blocks;
-        FYLayoutDebugPerform(layoutDebug, ^{ blocks = [FYOCRManager recognizeImage:image topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
-            return [self recognizeTextItemsInImage:cropped fastOCR:NO languageSegment:languageSegment error:innerError];
-        } error:&error]; });
-        [[FYInlineLayoutDebug shared] recordItems:blocks stage:@"mapped_pass1" context:layoutDebug];
-        blocks = [self blocksInsideModalIfPresent:blocks inImage:image normalizedExclusions:@[]];
-        NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
-        CGImageRelease(image);
-
+    dispatch_async(self.captureQueue, ^{
+        CGImageRef image = captureCard ? [self.captureCardInput copyLatestFrame] : [self copyFullCapturedImageForWindow:windowID];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
                 inputEpoch != self.captureCardInput.sessionEpoch) {
-                self.inFlight = NO;
+                if (image) { CGImageRelease(image); }
+                if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                 return;
             }
-            self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
-            if (error) {
-                [self showError:error.localizedDescription];
-                [self setStatus:@"当前界面 OCR 出错"];
+            if (!image) {
                 self.inFlight = NO;
-                return;
-            }
-
-            // 「翻译当前界面」与实时界面路径同源：分块 → 过滤 → 贴译（长短卡 + 映射）。
-            NSMutableArray<OCRTextItem *> *uiItems = [[self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:blocks] strict:NO] mutableCopy];
-            [[FYInlineLayoutDebug shared] recordItems:uiItems stage:@"inline_grouped" context:layoutDebug];
-            if (uiItems.count == 0) {
-                [self setStatus:[NSString stringWithFormat:@"当前界面没有识别到可译文字 · OCR %.1fs", ocrDuration]];
-                self.inFlight = NO;
-                return;
-            }
-            NSArray<OCRTextItem *> *uiItemsForRender = [uiItems copy];
-            NSArray<FYRequestIdentity *> *uiIdentities = [self.learningCoordinator recordItems:[self textsFromItems:uiItemsForRender] kind:FYSentenceKindUI];
-            [self refreshLearningSource];
-            [self refreshLearningStatus];
-            NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:FYCurrentTrace()];
-            NSDate *translationStart = [NSDate date];
-            [self setStatus:[NSString stringWithFormat:@"正在翻译当前界面 · OCR %.1fs", ocrDuration]];
-            FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-            [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
-                if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
-                    inputEpoch != self.captureCardInput.sessionEpoch) {
-                    self.inFlight = NO;
+                if (!captureCard && [self recoverWindowSelectionIfRecreated]) {
+                    if (!self.running) { [self translateCurrentInterface:sender]; }
                     return;
                 }
-                self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:translationStart]];
-                [self bindTranslations:translations toIdentities:uiIdentities];
-                [self refreshLearningSource];
-                [self refreshLearningStatus];
-                FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-                    [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
+                NSString *message = captureCard ? @"采集卡暂无可用画面，请等画面恢复后再翻译当前界面。"
+                                                : @"无法截取目标窗口";
+                [self showPreviewUnavailable:message];
+                [self setStatus:message];
+                return;
+            }
+            [self updatePreviewFromImage:image generation:cycleGeneration];
+
+            NSInteger languageSegment = self.languageControl.selectedSegment;
+            self.learningCoordinator.japaneseMode = (languageSegment == 0);
+            [self setStatus:@"正在识别当前界面"];
+            CGRect ocrScope=[self selectedOCRScope];
+            NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:image metadata:@{
+                @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
+                @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"scope":FYLayoutDebugRect(ocrScope)}];
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+                NSDate *ocrStart = [NSDate date];
+                __block NSError *error = nil;
+                __block NSArray<OCRTextItem *> *blocks;
+                FYLayoutDebugPerform(layoutDebug, ^{ blocks = [FYOCRManager recognizeImage:image topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
+                    return [self recognizeTextItemsInImage:cropped fastOCR:NO languageSegment:languageSegment error:innerError];
+                } error:&error]; });
+                [[FYInlineLayoutDebug shared] recordItems:blocks stage:@"mapped_pass1" context:layoutDebug];
+                blocks = [self blocksInsideModalIfPresent:blocks inImage:image normalizedExclusions:@[]];
+                NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
+                CGImageRelease(image);
+
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
+                        inputEpoch != self.captureCardInput.sessionEpoch) {
+                        self.inFlight = NO;
+                        return;
+                    }
+                    self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
+                    if (error) {
+                        [self showError:error.localizedDescription];
+                        [self setStatus:@"当前界面 OCR 出错"];
+                        self.inFlight = NO;
+                        return;
+                    }
+
+                    // 「翻译当前界面」与实时界面路径同源：分块 → 过滤 → 贴译（长短卡 + 映射）。
+                    NSMutableArray<OCRTextItem *> *uiItems = [[self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:blocks] strict:NO] mutableCopy];
+                    [[FYInlineLayoutDebug shared] recordItems:uiItems stage:@"inline_grouped" context:layoutDebug];
+                    if (uiItems.count == 0) {
+                        [self setStatus:[NSString stringWithFormat:@"当前界面没有识别到可译文字 · OCR %.1fs", ocrDuration]];
+                        self.inFlight = NO;
+                        return;
+                    }
+                    NSArray<OCRTextItem *> *uiItemsForRender = [uiItems copy];
+                    NSArray<FYRequestIdentity *> *uiIdentities = [self.learningCoordinator recordItems:[self textsFromItems:uiItemsForRender] kind:FYSentenceKindUI];
+                    [self refreshLearningSource];
+                    [self refreshLearningStatus];
+                    NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:FYCurrentTrace()];
+                    NSDate *translationStart = [NSDate date];
+                    [self setStatus:[NSString stringWithFormat:@"正在翻译当前界面 · OCR %.1fs", ocrDuration]];
+                    FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
+                    [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
+                        if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
+                            inputEpoch != self.captureCardInput.sessionEpoch) {
+                            self.inFlight = NO;
+                            return;
+                        }
+                        self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:translationStart]];
+                        [self bindTranslations:translations toIdentities:uiIdentities];
+                        [self refreshLearningSource];
+                        [self refreshLearningStatus];
+                        FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
+                            [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
+                        });
+                        if (!translationError) {
+                            self.translationCount += 1;
+                            [self updateTranslationCount];
+                        }
+                        self.inFlight = NO;
+                    }];
+                    });
                 });
-                if (!translationError) {
-                    self.translationCount += 1;
-                    [self updateTranslationCount];
-                }
-                self.inFlight = NO;
-            }];
             });
         });
     });
@@ -8515,14 +8555,6 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     return YES;
 }
 
-- (CGImageRef)copyCapturedImageForWindow:(uint32_t)windowID {
-    return [self copyCapturedImageForWindow:windowID
-                                    regionX:self.regionXSlider.doubleValue
-                                    regionY:self.regionYSlider.doubleValue
-                                regionWidth:self.regionWidthSlider.doubleValue
-                               regionHeight:self.regionHeightSlider.doubleValue];
-}
-
 - (CGImageRef)copyFullCapturedImageForWindow:(uint32_t)windowID {
     return [self copyCapturedImageForWindow:windowID regionX:0 regionY:0 regionWidth:1 regionHeight:1];
 }
@@ -8539,10 +8571,6 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     CGImageRef cropped = FYCopyCapturedRegion(image, CGRectMake(x, y, width, height));
     CGImageRelease(image);
     return cropped;
-}
-
-- (NSString *)recognizeTextInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment error:(NSError **)error {
-    return [[self ocrManager] recognizeTextInImage:image fastOCR:fastOCR languageSegment:languageSegment error:error];
 }
 
 // 对白模式需要整段文本，界面模式需要每块的坐标；这里一次请求同时给出两者
@@ -8689,11 +8717,16 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     }
     NSInteger generation = self.translationGeneration;
     uint32_t diagnosticWindowID = [self displayTargetWindowID];
+    __block __weak NSURLSessionDataTask *submittedTask = nil;
     void (^deliver)(NSString *, NSError *) = ^(NSString *translated, NSError *error) {
         [[FYRuntimeDiagnostics shared] recordEvent:@"translation" fields:@{@"window_id": @(diagnosticWindowID), @"generation": @(generation), @"success": @(!error), @"error_code": @(error.code)}];
         FYTrace(trace, @"request_complete", @{@"success": @(!error), @"error_code": @(error.code), @"translation": error ? @"" : (translated ?: @"")});
         FYDeliverTranslationOnMain(generation, ^NSInteger { return self.translationGeneration; },
-            translated, error, completion, ^{
+            translated, error, ^(NSString *value, NSError *failure) {
+                [self.translationTaskOwner finishTask:submittedTask];
+                completion(value, failure);
+            }, ^{
+                [self.translationTaskOwner finishTask:submittedTask];
                 FYTrace(trace, @"caption_drop", @{@"reason": @"generation_changed_before_delivery"});
             });
     };
@@ -8706,6 +8739,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         FYTrace(trace, @"http_complete", @{@"http_status": @([(NSHTTPURLResponse *)response statusCode]), @"elapsed_ms": @([[NSDate date] timeIntervalSinceDate:httpStart] * 1000), @"error_code": @(error.code)});
     } completion:deliver];
     self.activeTranslationTask = task;
+    submittedTask = task;
     FYTrace(trace, @"request_submit", @{@"source": Trim(text), @"generation": @(generation)});
     [task resume];
 }
@@ -9001,8 +9035,17 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     }
     // 游戏悬浮窗只显示译文；运行状态在主窗口中显示。
     if (!textChanged) { return; }
-    self.captionTextLabel.stringValue = cleanText;
+    [self setCaptionDisplayText:cleanText];
     [self updateCaptionAppearance];
+}
+
+- (void)setCaptionDisplayText:(NSString *)text {
+    // AppKit keeps the shared field editor alive even after a panel is hidden.
+    // Replacing its text then selects the entire new value, leaving an inactive
+    // highlight on the next caption without another click. End only this
+    // label's edit/selection session; native selection remains available.
+    if (self.captionTextLabel.currentEditor) { [self.captionPanel endEditingFor:self.captionTextLabel]; }
+    self.captionTextLabel.stringValue = text ?: @"";
 }
 
 - (void)updateCaptionAppearance {

@@ -41,3 +41,6 @@ ed25519.key
 
 # Opt-in runtime dialogue logs belong only in private local evidence.
 *.jsonl
+
+# Internal acceptance notes stay in the local workspace.
+/docs/重复修复候选验收清单-20261005.md

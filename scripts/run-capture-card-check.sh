@@ -8,22 +8,20 @@
 #   scripts/run-capture-card-check.sh authorize     触发一次相机权限申请（会弹系统提示）
 #   scripts/run-capture-card-check.sh capture <设备显示名> [帧数]
 set -euo pipefail
+umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
 
 OUT="$ROOT_DIR/.build/capture-card-check"
 MODULE_CACHE="$ROOT_DIR/.build/capture-card-check-module-cache"
 mkdir -p "$OUT" "$MODULE_CACHE"
+chmod 700 "$OUT"
 
 # 工具源码自己 #import 了 LiveCaptionTranslator.m，这里只补链接其余实现文件，
 # 否则会出现重复符号。
-LINK_SOURCES=(
-  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m"
-  "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
-  "$ROOT_DIR/objc/FYCaptureCardInput.m"
-  "$ROOT_DIR"/objc/learning/*.m
-)
+LINK_SOURCES=("${FY_APP_LINK_SOURCES[@]}")
 FRAMEWORKS=(
   -framework Cocoa -framework Security -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision
   -framework Carbon -framework NaturalLanguage
@@ -51,11 +49,18 @@ bundle_tool() { # bundle_tool <工具源文件> <可执行名> <bundle 名> <bun
   local source="$1" exe="$2" name="$3" identifier="$4" camera_note="$5"
   local bundle="$OUT/$name.app"
   local binary="$bundle/Contents/MacOS/$exe"
+  # Serialize rebuilding/signing the same tool. FD 9 is inherited by Python;
+  # its flock remains held by this command-substitution shell until FD closes.
+  exec 9>"$OUT/$exe.lock"
+  python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'
   # 复用已签名的 bundle：ad-hoc 签名重编后 cdhash 变化会让相机权限授权失效，
-  # 因此只有工具源码变了（或显式 FY_CAPTURE_CARD_FORCE_REBUILD=1）才重建。
+  # 工具/生产源码、头文件、inc 或构建清单变更时重建；也可显式强制重建。
   if [ -x "$binary" ] && [ -z "${FY_CAPTURE_CARD_FORCE_REBUILD:-}" ] &&
-     [ -z "$(find "$ROOT_DIR/tools" "$ROOT_DIR/objc" -name '*.m' -newer "$binary" -print -quit 2>/dev/null)" ]; then
+     [ "$ROOT_DIR/scripts/run-capture-card-check.sh" -ot "$binary" ] &&
+     [ "$ROOT_DIR/scripts/lib-sources.sh" -ot "$binary" ] &&
+     [ -z "$(find "$ROOT_DIR/tools" "$ROOT_DIR/objc" \( -name '*.m' -o -name '*.h' -o -name '*.inc' \) -newer "$binary" -print -quit 2>/dev/null)" ]; then
     xattr -cr "$bundle" 2>/dev/null || true
+    exec 9>&-
     echo "$bundle"
     return 0
   fi
@@ -85,6 +90,7 @@ PLIST
   # ad-hoc 签名每次重编 cdhash 都变，只有基于标识的需求才能让相机权限授权跨重编保留。
   codesign --force --deep --sign - --identifier "$identifier" \
     --requirements "=designated => identifier \"$identifier\"" "$bundle" >/dev/null
+  exec 9>&-
   echo "$bundle"
 }
 
@@ -92,29 +98,21 @@ MODE="${1:-offline}"
 
 if [ "$MODE" = "offline" ]; then
   FRAME="${2:-$ROOT_DIR/.build/clean-video-probe/capture-20261005T110436.662741Z/frame-02.png}"
-  if [ "$#" -ge 4 ]; then REQUIRED="$4"; elif [ "$#" -ge 2 ]; then REQUIRED=""; else REQUIRED="ミヨは占いに凝ってんの。"; fi
+  if [ "$#" -ge 2 ]; then REQUIRED="${3:-}"; else REQUIRED="ミヨは占いに凝ってんの。"; fi
   if [ ! -f "$FRAME" ]; then
     echo "找不到已验证的采集帧 $FRAME" >&2
     echo "它来自独立验证程序 .build/clean-video-probe/CleanVideoProbe.m；没有它就不能核对采集卡输入。" >&2
     exit 1
   fi
   CHECK_APP="$(bundle_tool "$ROOT_DIR/tools/CaptureCardOcrCheck.m" CaptureCardOcrCheck 译芽采集卡离线核对 "$FY_CAPTURE_CARD_BUNDLE_ID" "离线核对工具不访问相机。")"
-  REPORT="$OUT/offline-ocr-check.log"
+  REPORT_DIR="$(mktemp -d "$OUT/offline-ocr-XXXXXX")"
+  REPORT="$REPORT_DIR/report.log"
   # 经 LaunchServices 启动：Accurate 识别要求调用方是有 bundle 身份的签名应用。
-  rm -rf /tmp/yiya-capture-card-check
-  mkdir -p /tmp/yiya-capture-card-check
-  chmod 700 /tmp/yiya-capture-card-check
-  # 同一句对白：录制条遮挡时现场读到的是残句「ミヨは、」，采集卡帧必须读到完整句。
-  python3 -c 'import json, sys
-print(json.dumps({
-    "image": sys.argv[1],
-    "require_line": sys.argv[2],
-    "dialogue_contains": sys.argv[3],
-    "fast": sys.argv[4] == "1",
-    "report": sys.argv[5],
-}))' "$FRAME" "$REQUIRED" "$REQUIRED" "${FY_CAPTURE_CARD_FAST_OCR:+1}0" "$REPORT" > /tmp/yiya-capture-card-check/request.json
-  rm -f "$REPORT"
-  open -W -n "$CHECK_APP"
+  # Each process receives its own arguments/report, so a manual check and CI
+  # cannot overwrite a shared request.json or read each other's OCR results.
+  OCR_ARGS=("$FRAME" "$REQUIRED" --dialogue-must-contain "$REQUIRED" --report "$REPORT")
+  if [ "${FY_CAPTURE_CARD_FAST_OCR:-0}" = "1" ]; then OCR_ARGS+=(--fast); fi
+  open -W -n "$CHECK_APP" --args "${OCR_ARGS[@]}"
   cat "$REPORT" 2>/dev/null || echo "离线核对没有生成报告"
   grep -q "^PASS" "$REPORT" 2>/dev/null || { echo "离线核对失败" >&2; exit 1; }
   echo "离线核对通过：真实画面经生产 OCR／对白提取完成（报告 ${REPORT}）。"

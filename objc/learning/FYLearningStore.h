@@ -92,8 +92,8 @@ FOUNDATION_EXPORT const NSUInteger FYRecentSentenceLimit;
                          version:(NSInteger)version
                       completion:(void (^)(FYAnalysisResult *_Nullable result, NSString *_Nullable modelConfig, NSError *_Nullable error))completion;
 
-- (void)toggleSentenceBookmark:(FYRequestIdentity *)identity completion:(void (^)(BOOL saved, NSError *_Nullable error))completion;
-- (void)fetchSentenceBookmarks:(void (^)(NSArray<FYRequestIdentity *> *identities, NSError *_Nullable error))completion;
+- (void)toggleSentenceBookmark:(FYRequestIdentity *)identity completion:(void (^_Nullable)(BOOL saved, NSError *_Nullable error))completion;
+- (void)fetchSentenceBookmarks:(void (^_Nullable)(NSArray<FYRequestIdentity *> *identities, NSError *_Nullable error))completion;
 
 // 语法收藏
 - (void)addGrammarBookmark:(FYGrammarBookmark *)bookmark

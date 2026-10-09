@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
 
 python3 "$ROOT_DIR/scripts/reference-data.py" check
@@ -16,28 +17,7 @@ BUILD_DIR="$ROOT_DIR/.build/release"
 MODULE_CACHE="$ROOT_DIR/.build/modulecache"
 mkdir -p "$BUILD_DIR" "$MODULE_CACHE"
 
-SOURCES=(
-  "$ROOT_DIR/objc/LiveCaptionTranslator.m"
-  "$ROOT_DIR/objc/FYAppUpdater.m"
-  "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
-  "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m"
-  "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m"
-  "$ROOT_DIR/objc/FYCaptureCardInput.m"
-  "$ROOT_DIR/objc/learning/FYLearningModels.m"
-  "$ROOT_DIR/objc/learning/FYLearningStore.m"
-  "$ROOT_DIR/objc/learning/FYLearningAnalyzer.m"
-  "$ROOT_DIR/objc/learning/FYJapaneseTokenizer.m"
-  "$ROOT_DIR/objc/learning/FYGrammarCatalog.m"
-  "$ROOT_DIR/objc/learning/FYLearningCoordinator.m"
-  "$ROOT_DIR/objc/learning/FYLearningViews.m"
-  "$ROOT_DIR/objc/learning/FYStudyChatView.m"
-  "$ROOT_DIR/objc/learning/FYStudyChatSession.m"
-  "$ROOT_DIR/objc/learning/FYGlobalShortcuts.m"
-  "$ROOT_DIR/objc/learning/FYStudyOverlayPanel.m"
-  "$ROOT_DIR/objc/learning/FYReferenceDictionary.m"
-  "$ROOT_DIR/objc/learning/FYSavedWordReferenceView.m"
-)
-
+SOURCES=("${FY_APP_SOURCES[@]}")
 FRAMEWORKS=(
   -F "$SPARKLE_DIR" -framework Sparkle
   -Wl,-rpath,@executable_path/../Frameworks
@@ -56,17 +36,21 @@ built_slices=()
 for arch in $ARCHS; do
   echo "==> 编译 $arch"
   slice="$BUILD_DIR/LiveCaptionTranslator.$arch"
-  clang \
-    -fobjc-arc \
-    -DFY_ENABLE_UPDATES=1 \
-    -fmodules \
-    -fmodules-cache-path="$MODULE_CACHE" \
-    -arch "$arch" \
-    -mmacosx-version-min="$MIN_MACOS" \
-    -Wall \
-    "${SOURCES[@]}" \
-    -o "$slice" \
-    "${FRAMEWORKS[@]}"
+  objects_dir="$BUILD_DIR/objects/$arch"
+  mkdir -p "$objects_dir"
+  objects=()
+  # Keep compilation objects until dsymutil has collected both architectures.
+  # Direct compile-and-link commands discard the temporary DWARF objects.
+  for source in "${SOURCES[@]}"; do
+    object="$objects_dir/$(basename "${source%.m}").o"
+    clang -c -O2 -g -fobjc-arc -DFY_ENABLE_UPDATES=1 -fmodules \
+      -fmodules-cache-path="$MODULE_CACHE" -F "$SPARKLE_DIR" \
+      -arch "$arch" -mmacosx-version-min="$MIN_MACOS" -Wall \
+      "$source" -o "$object"
+    objects+=("$object")
+  done
+  clang -g -arch "$arch" -mmacosx-version-min="$MIN_MACOS" \
+    "${objects[@]}" -o "$slice" "${FRAMEWORKS[@]}"
   built_slices+=("$slice")
 done
 
@@ -76,8 +60,14 @@ else
   lipo -create "${built_slices[@]}" -output "$BUILD_DIR/LiveCaptionTranslator"
 fi
 
+DSYM="$BUILD_DIR/LiveCaptionTranslator.dSYM"
+dsymutil "$BUILD_DIR/LiveCaptionTranslator" -o "$DSYM"
+diff <(dwarfdump --uuid "$BUILD_DIR/LiveCaptionTranslator" | awk '{print $2, $3}' | sort) \
+     <(dwarfdump --uuid "$DSYM" | awk '{print $2, $3}' | sort)
+
 for arch in $ARCHS; do
   rm -f "$BUILD_DIR/LiveCaptionTranslator.$arch"
 done
 
 echo "Built $BUILD_DIR/LiveCaptionTranslator ($(lipo -archs "$BUILD_DIR/LiveCaptionTranslator"))"
+echo "Debug symbols: $DSYM (UUIDs verified)"

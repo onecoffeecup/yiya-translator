@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
 source "$ROOT_DIR/scripts/lib-test.sh"
 
@@ -18,13 +19,7 @@ clang \
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
   "$ROOT_DIR/tests/LearningTests.m" \
   "$ROOT_DIR/tests/FYTestIsolation.m" \
-  "$ROOT_DIR/objc/learning/FYLearningModels.m" \
-  "$ROOT_DIR/objc/learning/FYLearningStore.m" \
-  "$ROOT_DIR/objc/learning/FYLearningAnalyzer.m" \
-  "$ROOT_DIR/objc/FYTranslationManager.m" \
-  "$ROOT_DIR/objc/learning/FYJapaneseTokenizer.m" \
-  "$ROOT_DIR/objc/learning/FYGrammarCatalog.m" \
-  "$ROOT_DIR/objc/learning/FYLearningCoordinator.m" \
+  "${FY_LEARNING_CORE_SOURCES[@]}" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -o "$BIN" \
   -framework Foundation -framework CoreGraphics \
   -framework Carbon -framework NaturalLanguage \
