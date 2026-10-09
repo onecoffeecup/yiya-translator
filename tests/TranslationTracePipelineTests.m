@@ -134,6 +134,29 @@ static void (^PendingResponse)(void);
 - (NSArray<OCRTextItem *> *)blocksInsideModalIfPresent:(NSArray<OCRTextItem *> *)b inImage:(CGImageRef)i normalizedExclusions:(NSArray<NSValue *> *)e { return b; }
 @end
 
+// Hold only the OCR service boundary. All capture, cancellation, generation
+// checks and busy-state delivery continue through the production AppDelegate.
+@interface TraceHeldOCRApp : TracePipelineApp
+@property NSArray *ocrEntered, *ocrReleaseGates;
+@property BOOL observeGenerationReads;
+@property NSUInteger observedGenerationReads;
+@end
+@implementation TraceHeldOCRApp
+- (NSInteger)translationGeneration {
+    if (NSThread.isMainThread && self.observeGenerationReads) { self.observedGenerationReads++; }
+    return [super translationGeneration];
+}
+- (NSArray *)recognizeTextItemsInImage:(CGImageRef)i fastOCR:(BOOL)f languageSegment:(NSInteger)l error:(NSError **)e {
+    NSUInteger slot;
+    @synchronized(self) { slot = self.ocrCalls++; }
+    Require(slot < self.ocrEntered.count, @"unexpected overlapping OCR");
+    dispatch_semaphore_signal(self.ocrEntered[slot]);
+    Require(dispatch_semaphore_wait(self.ocrReleaseGates[slot], dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0,
+            @"held synthetic OCR must be released");
+    return @[];
+}
+@end
+
 @interface TraceVisibilityProbe : AppDelegate
 @property uint32_t fixtureWindowID;
 @property NSArray *fixtureWindows;
@@ -175,8 +198,8 @@ static void CheckVisibilitySnapshots(void) {
 }
 
 static TraceControl *TextControl(NSString *text) { TraceControl *c = [TraceControl new]; c.stringValue = text; return c; }
-static TracePipelineApp *TraceApp(void) {
-    TracePipelineApp *a = [TracePipelineApp new]; a.running = YES; a.fixtureWindowID = 42;
+static TracePipelineApp *TraceAppOfClass(Class appClass) {
+    TracePipelineApp *a = [appClass new]; a.running = YES; a.fixtureWindowID = 42;
     a.captions = [NSMutableArray new]; a.inlineTranslationCache = [NSMutableDictionary new];
     TraceControl *stable = [TraceControl new]; stable.state = NSControlStateValueOn;
     TraceControl *fit = [TraceControl new]; fit.state = NSControlStateValueOff; fit.requiresMainThread = YES;
@@ -190,6 +213,7 @@ static TracePipelineApp *TraceApp(void) {
     a.learningCoordinator = [[FYLearningCoordinator alloc] initWithStore:nil analyzer:nil tokenizer:nil catalog:nil];
     return a;
 }
+static TracePipelineApp *TraceApp(void) { return TraceAppOfClass(TracePipelineApp.class); }
 static NSArray *Fixture(NSString *text, CGFloat width) {
     OCRTextItem *item = [OCRTextItem new]; item.text = text; item.boundingBox = CGRectMake(.2, .2, width, .055);
     return @[item];
@@ -249,6 +273,43 @@ static void CheckLateCaptureCancellation(void) {
         TraceCycle(a, @[]);
         Require(a.ocrCalls > 0, @"a fresh capture still completes after cancellation");
     }
+}
+static void CheckLateOCRRestartOwnership(void) {
+    for (NSUInteger oldRoute = 0; oldRoute < 2; oldRoute++) {
+        for (NSUInteger newRoute = 0; newRoute < 2; newRoute++) {
+            TraceHeldOCRApp *a = (id)TraceAppOfClass(TraceHeldOCRApp.class);
+            a.ocrEntered = @[dispatch_semaphore_create(0), dispatch_semaphore_create(0), dispatch_semaphore_create(0)];
+            a.ocrReleaseGates = @[dispatch_semaphore_create(0), dispatch_semaphore_create(0), dispatch_semaphore_create(0)];
+            NSUInteger requestsBefore = MockRequests;
+            if (oldRoute) { [a translateCurrentInterface:nil]; } else { [a timerFired:nil]; }
+            __block BOOL entered = NO;
+            Pump(^BOOL { return entered || (entered = dispatch_semaphore_wait(a.ocrEntered[0], DISPATCH_TIME_NOW) == 0); });
+            [a stop];
+            if (newRoute) { [a translateCurrentInterface:nil]; }
+            else { [a start]; [a.timer invalidate]; a.timer = nil; }
+            entered = NO;
+            Pump(^BOOL { return entered || (entered = dispatch_semaphore_wait(a.ocrEntered[1], DISPATCH_TIME_NOW) == 0); });
+            Require(a.inFlight, @"the restarted cycle owns the busy flag while its OCR is held");
+            // Observing the production generation read acknowledges the stale
+            // main-queue callback without sleeps or a simulated delivery guard.
+            a.observeGenerationReads = YES;
+            dispatch_semaphore_signal(a.ocrReleaseGates[0]);
+            Pump(^BOOL { return a.observedGenerationReads > 0; });
+            a.observeGenerationReads = NO;
+            Require(a.inFlight, @"stale OCR must not release a restarted cycle's busy flag");
+            [a timerFired:nil]; [a translateCurrentInterface:nil];
+            Require(a.ocrCalls == 2 && a.inFlight, @"busy timer/manual entry points cannot start a third OCR");
+            dispatch_semaphore_signal(a.ocrReleaseGates[1]);
+            Pump(^BOOL { return !a.inFlight; });
+            Require(a.captions.count == 0 && a.inlineApplies == 0 && MockRequests == requestsBefore,
+                    @"cancelled empty OCR cannot reach translation or display");
+            dispatch_semaphore_signal(a.ocrReleaseGates[2]);
+            a.running = YES; TraceCycle(a, @[]);
+            Require(a.ocrCalls == 3, @"the current cycle releases busy ownership and allows a fresh OCR");
+            [a stop];
+        }
+    }
+    puts("PASS late OCR restart ownership: 4 realtime/manual combinations; no overlapping cycle or stale display");
 }
 static void CheckDialogueLatencyPolicies(void) {
     // Exercise the actual scheduled timer and serialized HTTP request. Only
@@ -326,6 +387,7 @@ int main(void) { @autoreleasepool {
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
     CheckServiceTestCancellation();
     CheckLateCaptureCancellation();
+    CheckLateOCRRestartOwnership();
     CheckVisibilitySnapshots();
     CheckDialogueLatencyPolicies();
     NSString *log = [root stringByAppendingPathComponent:@"events.jsonl"];

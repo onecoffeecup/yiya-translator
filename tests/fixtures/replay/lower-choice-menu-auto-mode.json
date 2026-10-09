@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "name": "lower-choice-menu-auto-mode",
+  "mode": "dialogue",
+  "source": "window",
+  "auto_mode": true,
+  "responses": [
+    {
+      "translation": "1. 和他交谈。\n2. 和她交谈。\n3. 什么也不做。\n4. 离开。"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0, "action": "frame",
+      "blocks": [
+        {"text": "彼と話す。", "box": [0.30, 0.27, 0.14, 0.032]},
+        {"text": "彼女と話す。", "box": [0.30, 0.207, 0.14, 0.032]},
+        {"text": "何もしない。", "box": [0.30, 0.144, 0.14, 0.032]},
+        {"text": "立ち去る。", "box": [0.30, 0.081, 0.14, 0.032]}
+      ],
+      "expect": {"mode": 0, "requests": 0, "captions": [], "inline": [], "in_flight": false}
+    },
+    {
+      "at_ms": 500, "action": "frame",
+      "blocks": [
+        {"text": "彼と話す。", "box": [0.30, 0.27, 0.14, 0.032]},
+        {"text": "彼女と話す。", "box": [0.30, 0.207, 0.14, 0.032]},
+        {"text": "何もしない。", "box": [0.30, 0.144, 0.14, 0.032]},
+        {"text": "立ち去る。", "box": [0.30, 0.081, 0.14, 0.032]}
+      ],
+      "expect": {"mode": 1, "requests": 0, "captions": [], "inline": [], "in_flight": false}
+    },
+    {
+      "at_ms": 1000, "action": "frame",
+      "blocks": [
+        {"text": "彼と話す。", "box": [0.30, 0.27, 0.14, 0.032]},
+        {"text": "彼女と話す。", "box": [0.30, 0.207, 0.14, 0.032]},
+        {"text": "何もしない。", "box": [0.30, 0.144, 0.14, 0.032]},
+        {"text": "立ち去る。", "box": [0.30, 0.081, 0.14, 0.032]}
+      ],
+      "expect": {
+        "mode": 1, "requests": 1, "captions": [], "in_flight": false,
+        "sources": ["1. 彼と話す。\n2. 彼女と話す。\n3. 何もしない。\n4. 立ち去る。"],
+        "inline": [{
+          "sources": ["彼と話す。", "彼女と話す。", "何もしない。", "立ち去る。"],
+          "translations": ["和他交谈。", "和她交谈。", "什么也不做。", "离开。"]
+        }]
+      }
+    },
+    {
+      "at_ms": 1500, "action": "frame",
+      "blocks": [
+        {"text": "彼と話す。", "box": [0.30, 0.27, 0.14, 0.032]},
+        {"text": "彼女と話す。", "box": [0.30, 0.207, 0.14, 0.032]},
+        {"text": "何もしない。", "box": [0.30, 0.144, 0.14, 0.032]},
+        {"text": "立ち去る。", "box": [0.30, 0.081, 0.14, 0.032]}
+      ],
+      "expect": {"mode": 1, "requests": 1, "captions": [], "in_flight": false}
+    }
+  ]
+}

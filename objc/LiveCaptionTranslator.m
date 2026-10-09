@@ -3902,7 +3902,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                             : (!self.running ? @"stopped"
                                : (windowID != [self displayTargetWindowID] ? @"window_changed" : @"input_session_changed"));
                         FYTrace(trace, @"skip", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
-                        self.inFlight = NO;
+                        // An old OCR may finish after stop/start acquired a new
+                        // cycle. It must not release that cycle's busy flag.
+                        if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                         return;
                     }
                     self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
@@ -4130,7 +4132,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                                        : (windowID != [self displayTargetWindowID] ? @"window_changed"
                                           : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
                                 FYTrace(uiTrace, @"inline_drop", @{@"reason": reason, @"route": @"ui", @"input_epoch": @(inputEpoch)});
-                                self.inFlight = NO;
+                                if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                                 return;
                             }
                             self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:uiTranslateStart]];
@@ -4260,7 +4262,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                                        : (windowID != [self displayTargetWindowID] ? @"window_changed"
                                           : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
                                 FYTrace(dialogueTrace, @"caption_drop", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
-                                self.inFlight = NO;
+                                if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                                 return;
                             }
                             NSTimeInterval translationDuration = [[NSDate date] timeIntervalSinceDate:translationStart];
@@ -5288,7 +5290,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
                         inputEpoch != self.captureCardInput.sessionEpoch) {
-                        self.inFlight = NO;
+                        if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                         return;
                     }
                     self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
@@ -5318,7 +5320,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                     [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
                         if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
                             inputEpoch != self.captureCardInput.sessionEpoch) {
-                            self.inFlight = NO;
+                            if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                             return;
                         }
                         self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:translationStart]];

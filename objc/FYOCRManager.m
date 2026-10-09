@@ -1331,12 +1331,16 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     if (tokenHitCount >= 1 && (smallBoxCount >= 2 || edgeCount >= 3)) { return YES; }
     if (smallBoxCount >= 4 || (blocks.count >= 5 && smallBoxCount >= 3)) {
         // A speaker label and several short dialogue lines are also small boxes.
-        // Exempt only a compact, aligned lower-screen band with actual spoken
-        // text; explicit UI tokens and substantial-line density still win.
+        // Exempt wrapped speech with a leading speaker label. Aligned choices
+        // can also contain kana and punctuation, including below a name heading.
+        // A continuation fragment distinguishes the supported short-dialogue
+        // case from a list of independently completed sentences.
         NSArray<OCRTextItem *> *band = [self subtitleBandItems:blocks];
         NSUInteger kanaLines = 0, bandSmallBoxes = 0;
-        BOOL compact = band.count >= 3, punctuated = NO;
+        BOOL compact = band.count >= 3, punctuated = NO, hasContinuation = NO;
+        BOOL hasSpeakerLabel = band.count > 0 && [self isSpeakerLabelItem:band.firstObject inPool:band];
         NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…・、"];
+        NSCharacterSet *sentenceEnders = [NSCharacterSet characterSetWithCharactersInString:@"。．.！!？?…‥"];
         OCRTextItem *previous = nil;
         for (OCRTextItem *item in band) {
             CGRect box = item.boundingBox;
@@ -1351,12 +1355,15 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             if (text.length >= 3 && [self containsJapaneseKana:text]) {
                 kanaLines++;
                 if ([enders characterIsMember:[text characterAtIndex:text.length - 1]]) { punctuated = YES; }
+                if (![self looksLikeSpeakerName:text] &&
+                    ![sentenceEnders characterIsMember:[text characterAtIndex:text.length - 1]]) { hasContinuation = YES; }
             }
             if (text.length <= 8 && box.size.height < 0.036 && box.size.width < 0.20 &&
                 ![self isFurigana:item nearLargerLineInItems:blocks]) { bandSmallBoxes++; }
             previous = item;
         }
-        NSUInteger menuBoxes = compact && kanaLines >= 2 && punctuated ? smallBoxCount - bandSmallBoxes : smallBoxCount;
+        BOOL wrappedSpeech = compact && hasSpeakerLabel && hasContinuation && kanaLines >= 2 && punctuated;
+        NSUInteger menuBoxes = wrappedSpeech ? smallBoxCount - bandSmallBoxes : smallBoxCount;
         if (menuBoxes >= 4 || (blocks.count >= 5 && menuBoxes >= 3)) { return YES; }
     }
     // 贴边文字很多、且完全没有宽行 —— 但这必须**同时**带上 UI 按钮词才算数。

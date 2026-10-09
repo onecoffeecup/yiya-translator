@@ -250,6 +250,17 @@ int main(void) {
             Item(@"青木悠",.30,.14,.11,.032), Item(@"ですけど……",.30,.08,.14,.032)];
         Expect(![FYOCRManager looksLikeUIFrame:shortDialogue] && [FYOCRManager contentModeForItems:shortDialogue fallback:1]==0,
                @"speaker plus short spoken lines is dialogue, not four menu boxes");
+        NSArray *lowerChoices=@[Item(@"彼と話す。",.30,.27,.14,.032), Item(@"彼女と話す。",.30,.207,.14,.032),
+            Item(@"何もしない。",.30,.144,.14,.032), Item(@"立ち去る。",.30,.081,.14,.032)];
+        Expect([FYOCRManager looksLikeUIFrame:lowerChoices] && [FYOCRManager contentModeForItems:lowerChoices fallback:0]==1,
+               @"aligned lower-screen choices retain UI mode despite kana and sentence punctuation");
+        NSArray *headedChoices=[@[Item(@"青木",.30,.333,.05,.032)] arrayByAddingObjectsFromArray:lowerChoices];
+        Expect([FYOCRManager looksLikeUIFrame:headedChoices],
+               @"a name-like heading cannot turn complete choice sentences into wrapped dialogue");
+        NSArray *wrappedDialogue=@[Item(@"ルード",.30,.27,.07,.032), Item(@"あの、",.30,.207,.07,.032),
+            Item(@"君のこと",.30,.144,.11,.032), Item(@"なんだけど……",.30,.081,.14,.032)];
+        Expect(![FYOCRManager looksLikeUIFrame:wrappedDialogue],
+               @"speaker and unfinished speech fragments retain the short wrapped-dialogue exemption");
         Expect([FYOCRManager looksLikeUIFrame:[shortDialogue arrayByAddingObjectsFromArray:@[back,menu]]],
                @"explicit menu controls still override a compact dialogue-shaped band");
         NSMutableArray *upperShort=[NSMutableArray new], *lowerLabels=[NSMutableArray new];
