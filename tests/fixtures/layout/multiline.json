@@ -1,0 +1,69 @@
+{
+  "lines": [
+    {
+      "text": "新しい季節のイベントが始まります。",
+      "box": [
+        0.34,
+        0.75,
+        0.52,
+        0.04
+      ],
+      "translation": "新一季活动即将开始。"
+    },
+    {
+      "text": "期間中は限定の衣装も登場します。",
+      "box": [
+        0.34,
+        0.7,
+        0.52,
+        0.04
+      ],
+      "translation": "期间还会推出限定服装。"
+    },
+    {
+      "text": "ぜひお見逃しなく。",
+      "box": [
+        0.34,
+        0.65,
+        0.32,
+        0.04
+      ],
+      "translation": "请不要错过。"
+    },
+    {
+      "text": "戻る",
+      "box": [
+        0.1,
+        0.18,
+        0.12,
+        0.035
+      ],
+      "translation": "返回"
+    },
+    {
+      "text": "詳細",
+      "box": [
+        0.28,
+        0.18,
+        0.12,
+        0.035
+      ],
+      "translation": "详情"
+    }
+  ],
+  "expected_blocks": 3,
+  "schema_version": 1,
+  "name": "multiline",
+  "synthetic": true,
+  "image_size": [
+    1600,
+    1200
+  ],
+  "viewport": [
+    -200,
+    120,
+    800,
+    600
+  ],
+  "image": "assets/multiline.png"
+}

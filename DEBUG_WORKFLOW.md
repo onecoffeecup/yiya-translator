@@ -92,6 +92,31 @@ python3 scripts/translation-trace.py stop
 
 本轮源码的诊断扩充没有自动进入已安装应用。现场取新日志前需按 README 构建 / 安装，再核对运行二进制 UUID；版本号和 build 相同也不能替代二进制核对。
 
+## 界面布局诊断
+
+布局排查先读 [布局诊断与回归报告](docs/inline-layout-diagnosis.md)。固定截图与 OCR 的 P0 → P3 使用生产坐标、分组、跟踪、布局和正文渲染代码；阶段失败立即停止，不靠偏移或平滑消除失败。
+
+```bash
+python3 scripts/layout-debug.py check --through P0
+python3 scripts/layout-debug.py check --through P1
+python3 scripts/layout-debug.py check
+```
+
+`debug.py check` 已包含这套检查和 102 帧界面抖动 Replay。六类固定合成截图与 OCR 存在 `tests/fixtures/layout/`。无真实窗口的 NSCell / 正文视图测量不等于桌面浮窗、真实采集映射或游戏验收。
+
+先构建包含新诊断代码的应用，并在明确安排的桌面时段由用户启用后，才保存画面和文字证据：
+
+```bash
+python3 scripts/layout-debug.py start --seconds 120
+python3 scripts/layout-debug.py status
+python3 scripts/layout-debug.py stop
+python3 scripts/layout-debug.py compare /absolute/private/before.json /absolute/private/after.json
+```
+
+默认关闭。`start` 明确允许保存原始截图、OCR 和译文；不会启动应用、采集设备或请求翻译。`--no-overlay` 只导出。目录 `/tmp/yiya-layout-debug-<UID>/` 权限 0700，文件 0600；每次会话最多 300 秒、120 帧、300 条布局/决策记录、64 MiB。停止、过期或换会话后，旧回调不得继续写入。诊断文件不进入 Git、发布附件或普通反馈包。
+
+绿色为完整 Vision 观察经实际裁剪回映后的边界，黄色为显示区域中的锚点，蓝色为避让前首选框，红色为最终框；连线显示偏移。PNG 合成原始采集图与当前原生面板的绘制结果，不代表桌面合成器截图。JSON 记录候选、碰撞对象、更新/缓存原因、每块允许的位移范围、预测尺寸和实际 NSCell / 正文尺寸。P0 隔离不调用避让或历史评分；没有新布局的帧明确记 0 次布局。
+
 ## Replay 夹具
 
 测试专用驱动 `tests/ReplayTests.m` 调用生产 `timerFired:`。输入图像、Vision 观察和 HTTP 会话可替换；其后的后处理、字段分组、稳定、身份、缓存、请求构造、解码、主队列代次判断及交付都由生产代码执行。它不创建 NSApplication、真实窗口或硬件会话，不加载用户设置 / Key / 数据库。未 mock 的网络会由 `FYTestIsolation` 阻断。

@@ -212,6 +212,11 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 @property (nonatomic) NSInteger readingOrder;
 @property (nonatomic) CGRect sourceFrame;           // 显示坐标
 @property (nonatomic) CGRect translationFrame;      // 面板 frame（显示坐标）
+/// Diagnostic evidence from the production candidate generator, before collision avoidance.
+@property (nonatomic) CGRect initialTranslationFrame;
+@property (nonatomic, copy) NSArray<NSDictionary *> *candidateDiagnostics;
+/// Finite automatic-origin envelope, in screen points. Manual placements are exempt.
+@property (nonatomic) CGRect automaticOriginBounds;
 @property (nonatomic) FYInlineDisplayMode mode;
 @property (nonatomic) FYInlineAnchor anchor;
 /// 这一块的位置来自用户手动拖动（布局器只做了可见区域夹取）。
@@ -227,7 +232,7 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 @property (nonatomic, strong) NSFont *font;
 @property (nonatomic, strong) NSParagraphStyle *paragraphStyle;
 @property (nonatomic) CGFloat panelPadding;
-@property (nonatomic) CGFloat titleBandHeight;      // 长卡标题带（短贴片为 0）
+@property (nonatomic) CGFloat titleBandHeight;      // 展开阅读卡的标题带；普通贴译为 0
 @property (nonatomic) CGFloat cornerRadius;
 /// 短贴片：正文标签在面板内的相对矩形（AppKit 坐标，y 向上）。
 @property (nonatomic) CGRect labelFrame;
@@ -247,8 +252,8 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 @property (nonatomic, copy) NSString *entryAction;
 /// YES = 放不下的实际原因是周围空间拥挤（不是文本过长），提示文案不同。
 @property (nonatomic) BOOL entryReasonCrowded;
-/// YES = 这张卡是"点入口展开出来的阅读卡"：顶部显示块标题（而不是固定的「中文译文」）。
-/// 普通贴译长卡保持原有「中文译文」标题不变。
+/// YES = 这张卡是"点入口展开出来的阅读卡"：顶部显示块标题。
+/// 普通贴译长卡只显示译文，不预留标题带。
 @property (nonatomic) BOOL expandedReading;
 /// 这一块试过的长卡候选组合（宽/字号/内边距/标题带/结果/冲突块），用于诊断：
 /// 区分"文字太长"、"可用空间不足"和"重复块造成假冲突"。
@@ -272,6 +277,7 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 /// 与上一帧相比是否有变化（位置/尺寸/模式/译文任一变化）。
 @property (nonatomic) BOOL changedFromPrevious;
 @property (nonatomic) NSUInteger revision;
+@property (nonatomic) NSUInteger layoutPassCount;
 - (nullable FYInlinePlacement *)placementForBlockID:(NSString *)blockID;
 @end
 
@@ -279,6 +285,10 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 
 @interface FYInlineLayoutEngine : NSObject
 + (instancetype)defaultEngine;
+/// Opt-in structured candidate evidence. Does not alter scoring or placement.
+@property (nonatomic) BOOL collectsLayoutDiagnostics;
+/// P0 only: measure and return the first production candidate, without avoidance/history.
+- (FYInlinePlacement *)initialPlacementForRequest:(FYInlineLayoutRequest *)request viewport:(CGRect)viewport;
 
 // —— 字号与排版（测量与绘制共用） ——
 @property (nonatomic) CGFloat shortFontSize;        // 16
@@ -354,7 +364,7 @@ typedef NS_ENUM(NSInteger, FYInlineAnchor) {
 - (CGFloat)measuredBodyHeight:(NSString *)translation
                      placement:(FYInlinePlacement *)placement
                          width:(CGFloat)width;
-/// 长文滚动卡的最小可读高度（内边距 + 标题 + N 行正文）；短译文不强制此高度。
+/// 普通长文滚动卡的最小可读高度（内边距 + N 行正文）；短译文不强制此高度。
 - (CGFloat)minimumCardHeight;
 @end
 

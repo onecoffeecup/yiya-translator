@@ -1,0 +1,49 @@
+{
+  "lines": [
+    {
+      "text": "設定",
+      "box": [
+        0.1,
+        0.8,
+        0.18,
+        0.036
+      ],
+      "translation": "设置"
+    },
+    {
+      "text": "音声",
+      "box": [
+        0.1,
+        0.6,
+        0.18,
+        0.036
+      ],
+      "translation": "音量"
+    },
+    {
+      "text": "戻る",
+      "box": [
+        0.1,
+        0.4,
+        0.18,
+        0.036
+      ],
+      "translation": "返回"
+    }
+  ],
+  "expected_blocks": 3,
+  "schema_version": 1,
+  "name": "sparse-menu",
+  "synthetic": true,
+  "image_size": [
+    1600,
+    1200
+  ],
+  "viewport": [
+    -200,
+    120,
+    800,
+    600
+  ],
+  "image": "assets/sparse-menu.png"
+}

@@ -14,7 +14,7 @@ clang "${COMMON[@]}" tests/GrammarCoverageTests.m tests/FYTestIsolation.m \
   -framework Foundation -framework CoreGraphics -framework NaturalLanguage -lsqlite3 -o "$OUT/GrammarCoverageTests"
 "$OUT/GrammarCoverageTests"
 clang "${COMMON[@]}" tests/DialogueDriftDiagnosticTests.m tests/FYTestIsolation.m tests/FYTestCaptureCardInput.m \
-  objc/FYTranslationTrace.m objc/FYRuntimeDiagnostics.m objc/FYInlineLayout.m objc/FYWindowManager.m \
+  objc/FYTranslationTrace.m objc/FYRuntimeDiagnostics.m objc/FYInlineLayout.m objc/FYInlineLayoutDebug.m objc/FYWindowManager.m \
   objc/FYOCRManager.m objc/FYGeometryManager.m objc/FYTranslationManager.m objc/FYCaptureCardInput.m objc/learning/*.m \
   -framework Cocoa -framework Security -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore \
   -framework Vision -framework Carbon -framework NaturalLanguage -framework AVFoundation -framework CoreImage \

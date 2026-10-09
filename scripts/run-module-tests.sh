@@ -13,17 +13,17 @@ fi
 mkdir -p "$OUT"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
-  "$ROOT_DIR/tests/GeometryManagerTests.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYOCRManager.m" \
+  "$ROOT_DIR/tests/GeometryManagerTests.m" "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" \
   -framework Cocoa -framework Vision -o "$OUT/GeometryManagerTests"
 "$OUT/GeometryManagerTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
-  "$ROOT_DIR/tests/OCRPostprocessingTests.m" "$ROOT_DIR/objc/FYOCRManager.m" \
+  "$ROOT_DIR/tests/OCRPostprocessingTests.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" \
   -framework Cocoa -framework Vision -o "$OUT/OCRPostprocessingTests"
 "$OUT/OCRPostprocessingTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
-  "$ROOT_DIR/tests/InlineOCRFrameStabilizerTests.m" "$ROOT_DIR/objc/FYOCRManager.m" \
+  "$ROOT_DIR/tests/InlineOCRFrameStabilizerTests.m" "$ROOT_DIR/objc/FYOCRManager.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/FYInlineLayoutDebug.m" \
   -framework Cocoa -framework Vision -o "$OUT/InlineOCRFrameStabilizerTests"
 "$OUT/InlineOCRFrameStabilizerTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \

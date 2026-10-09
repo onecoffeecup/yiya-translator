@@ -27,6 +27,7 @@
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "FYCaptureCardInput.h"
 #import "FYInlineLayout.h"
+#import "FYInlineLayoutDebug.h"
 #import "FYWindowManager.h"
 #import "FYOCRManager.h"
 #import "FYGeometryManager.h"
@@ -35,6 +36,10 @@
 #import "learning/FYStudyChatView.h"
 #import "learning/FYStudyOverlayPanel.h"
 #import "learning/FYGlobalShortcuts.h"
+
+static void FYInlineDebugTracePerform(NSDictionary *trace, NSDictionary *layout, void (^work)(void)) {
+    FYLayoutDebugPerform(layout, ^{ FYTracePerform(trace, work); });
+}
 
 static NSString *const SettingsKey = @"LiveCaptionTranslator.settings.v1";
 static NSString *FYAppearanceColorHex(NSColor *color) {
@@ -798,6 +803,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 @property(nonatomic, strong) FYInlineGrouper *inlineGrouper;
 @property(nonatomic, strong) FYInlineLayoutEngine *inlineLayoutEngine;
 @property(nonatomic, strong) FYInlineLayoutResult *lastInlineLayoutResult;
+@property(nonatomic, copy) NSDictionary *lastInlineLayoutDebugContext;
+@property(nonatomic) NSRect lastInlineLayoutDebugViewport;
 @property(nonatomic, strong) NSMutableDictionary<NSString *, NSPanel *> *inlinePanelsByBlockID;
 // 最近一帧的降级统计（状态区提示用，不写字幕框）。
 @property(nonatomic) NSUInteger lastInlineUnplaceableCount;
@@ -3443,6 +3450,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
 - (void)handleInlineTranslationResult:(NSArray<NSString *> *)translations forItems:(NSArray<OCRTextItem *> *)items error:(NSError *)translationError failureStatus:(NSString *)failureStatus successPrefix:(NSString *)successPrefix {
     NSDictionary *trace = FYCurrentTrace();
+    NSDictionary *layoutDebug = FYCurrentLayoutDebug();
     NSInteger generation = self.translationGeneration;
     NSInteger mode = [self effectiveModeSegment];
     NSUInteger inputEpoch = self.captureCardInput.sessionEpoch;
@@ -3460,6 +3468,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             (generation == self.translationGeneration && inputEpoch == self.captureCardInput.sessionEpoch && self.running) ? [self effectiveModeSegment] : mode);
         if (reason) {
             FYTrace(trace, @"inline_drop", @{@"reason": reason});
+            [[FYInlineLayoutDebug shared] recordDecision:reason context:layoutDebug];
             return;
         }
         if (FYGeometryDeliveryIsStale(cycleGeometry, self.geometryGeneration, cycleTarget,
@@ -3468,9 +3477,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             // 不在这里动面板 —— 几何复核（refreshDisplayGeometryIfNeeded:）已经把它们
             // 按新几何重排到正确位置，或者在新位置定不下来时收起来了；
             // 再 hide 一次会把刚排好的正确贴译也一起藏掉。
-            self.lastInlineTranslationKey = nil;
-            self.lastInlineLayoutResult = nil;
             FYTrace(trace, @"inline_drop", @{@"reason": @"geometry_changed"});
+            [[FYInlineLayoutDebug shared] recordDecision:@"drop_stale_geometry" context:layoutDebug];
             return;
         }
         if (translationError) {
@@ -3487,7 +3495,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             return;
         }
         [self showError:@""];
-        [self showInlineTranslations:translations forItems:items placementRect:placement];
+        FYLayoutDebugPerform(layoutDebug, ^{ [self showInlineTranslations:translations forItems:items placementRect:placement]; });
         FYTrace(trace, @"inline_apply", @{@"source": [[items valueForKey:@"text"] componentsJoinedByString:@"\n"] ?: @"", @"translation": [translations componentsJoinedByString:@"\n"] ?: @"", @"blocks": @(items.count)});
         // 集中查看走实时页的「界面译文」列表（refreshInlineTranslationList，在 showInlineTranslations 里刷新），
         // 不再写 latestTranslationLabel/latestSourceLabel —— 那两个控件从未创建，用户根本看不到。
@@ -3596,6 +3604,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     BOOL targetActive = !self.selectingCaptureRegion && [self translationTargetIsForeground];
     NSArray *visibleWindows = CFBridgingRelease(CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID));
     NSWindowLevel overlayLevel = [self overlayLevelForTargetPID:[self selectedWindowOwnerPID] inWindowList:visibleWindows];
+    [[FYInlineLayoutDebug shared] refreshVisible:targetActive level:overlayLevel];
     BOOL showCaption = targetActive && self.captionPanelShownByUser && !self.captionSuppressedForUIMode;
     self.captionPanel.level = showCaption ? overlayLevel : NSNormalWindowLevel;
     if (showCaption) {
@@ -3779,9 +3788,12 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     NSArray<NSValue *> *exclusionSnapshot = @[];
 
     CGRect ocrScope=[self selectedOCRScope];
+    NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:fullImage metadata:@{
+        @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
+        @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"frame_index":@(captureFrameIndex), @"scope":FYLayoutDebugRect(ocrScope)}];
     FYTrace(trace, @"task", @{@"reason": @"ocr_scheduled"});
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-      FYTracePerform(trace, ^{
+      FYInlineDebugTracePerform(trace, layoutDebug, ^{
         FYTrace(trace, @"task", @{@"reason": @"ocr_started"});
         NSDate *ocrStart = [NSDate date];
         NSError *error = nil;
@@ -3807,6 +3819,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             } error:&error];
             ocrText=[FYOCRManager sourceTextForItems:scoped blocks:&ocrBlocks];
         }
+        [[FYInlineLayoutDebug shared] recordItems:ocrBlocks stage:@"mapped_pass1" context:layoutDebug];
         NSTimeInterval pass1Duration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         [[FYRuntimeDiagnostics shared] recordEvent:@"ocr" fields:@{@"window_id": @(windowID), @"generation": @(cycleGeneration), @"blocks": @(ocrBlocks.count), @"error_code": @(error.code), @"elapsed_ms": @(pass1Duration * 1000), @"width": @(CGImageGetWidth(fullImage)), @"height": @(CGImageGetHeight(fullImage))}];
         FYTrace(trace, @"ocr", @{@"stage": @"pass1_filtered", @"ocr_lines": FYTraceOCRLines(ocrBlocks),
@@ -3923,7 +3936,9 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             if (currentFrameMode == ContentModeUI) {
                 FYTrace(trace, @"ocr", @{@"stage": @"inline_grouped", @"ocr_lines": FYTraceOCRLines(observedUIItems),
                                          @"blocks": @(observedUIItems.count)});
+                [[FYInlineLayoutDebug shared] recordItems:observedUIItems stage:@"inline_grouped" context:layoutDebug];
                 currentUIItems = [self.inlineFrameStabilizer observeItems:observedUIItems];
+                [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
                 if (!self.inlineFrameStabilizer.ready) {
                     FYTrace(trace, @"stable", @{@"reason": @"inline_frame_confirming", @"stable_count": @1});
                     [self setStatus:@"正在确认界面文字"];
@@ -3977,6 +3992,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 // A restored frame interrupts a candidate correction. Without
                 // this reset, intermittent OCR noise can accumulate two hits.
                 [[self stabilityOwner] reset];
+                FYLayoutDebugPerform(layoutDebug, ^{
+                    [self recordInlineLayoutDebug:self.lastInlineLayoutResult previous:self.lastInlineLayoutResult
+                        viewport:self.lastInlineLayoutDebugViewport reason:@"cache_same_as_last_translated"];
+                });
                 // 文本没变时不再走渲染路径，展开态记账要在这里补一次：
                 // 否则"这一块已从页面消失"会停在第一帧，阅读卡一直留在画面上。
             [self advanceExpandedReadingState];
@@ -4044,6 +4063,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             NSInteger frameMode = [self effectiveModeSegment];
 
             if (frameMode == ContentModeUI) {
+                [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
                 NSMutableArray<OCRTextItem *> *uiItems = [currentUIItems mutableCopy];
                 if (uiItems.count == 0) {
                     FYTrace(trace, @"skip", @{@"reason": @"ui_no_translatable_items", @"route": @"ui"});
@@ -4072,7 +4092,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 [self refreshLearningSource];
                 [self refreshLearningStatus];
                 NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
-                FYTracePerform(uiTrace, ^{
+                FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
                 [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
                     if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
                         inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeUI) {
@@ -4098,7 +4118,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                         // 有映射就原位贴译，没有映射由 handleInlineTranslationResult 给出明确提示，
                         // 绝不静默把界面译文当成对白塞进字幕窗。
                         [self setCaptionPanelVisibleForUIMode:YES];
-                        FYTracePerform(uiTrace, ^{
+                        FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
                             [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"采集卡：界面翻译出错" successPrefix:@"采集卡界面译文已更新"];
                         });
                         if (!translationError) {
@@ -4109,7 +4129,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                         self.inFlight = NO;
                         return;
                     }
-                    FYTracePerform(uiTrace, ^{
+                    FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
                         [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
                     });
                     if (!translationError) {
@@ -4159,7 +4179,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 [self refreshLearningSource];
                 [self refreshLearningStatus];
                 NSDictionary *optionTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
-                FYTracePerform(optionTrace, ^{
+                FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
                 [self translateInlineTextItems:optionsToRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
                     if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
                         inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
@@ -4173,7 +4193,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                     [self bindTranslations:translations toIdentities:optionIdentities];
                     [self refreshLearningSource];
                     [self refreshLearningStatus];
-                    FYTracePerform(optionTrace, ^{
+                    FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
                         [self handleInlineTranslationResult:translations forItems:optionsToRender error:translationError failureStatus:@"选项翻译出错" successPrefix:@"选项已贴译"];
                     });
                 }];
@@ -4201,7 +4221,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             FYTrace(dialogueTrace, @"dialogue", @{@"stage": @"identity_source", @"source": dialogueText ?: @"",
                                                 @"sentence_id": dialogueIdentity.sentenceID ?: @"", @"version": @(dialogueIdentity.version),
                                                 @"identity_request_id": dialogueIdentity.requestID ?: @""});
-            FYTracePerform(dialogueTrace, ^{
+            FYInlineDebugTracePerform(dialogueTrace, layoutDebug, ^{
             [self translateDialogueText:dialogueText identity:dialogueIdentity systemPrompt:[self systemPrompt] completion:^(NSString *translated, NSError *translationError) {
                 dispatch_async(dispatch_get_main_queue(), ^{
                     if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
@@ -4478,6 +4498,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 // 把贴译面板从旧位置收起来（不销毁）：实际显示目标/画面区域变了、或者定位暂时不可用时，
 // 绝不能把面板继续留在旧坐标上冒充"跟着走"。
 - (void)hideInlineTranslationPanelsForGeometryChange {
+    [[FYInlineLayoutDebug shared] refreshVisible:NO level:NSNormalWindowLevel];
     NSMutableArray<NSPanel *> *panels = [[self.inlineTranslationPanels arrayByAddingObjectsFromArray:self.inlineLongCardPanels] mutableCopy];
     if (self.inlineExpandedReadingPanel) { [panels addObject:self.inlineExpandedReadingPanel]; }
     for (NSPanel *panel in panels) {
@@ -5211,12 +5232,17 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.learningCoordinator.japaneseMode = (languageSegment == 0);
     [self setStatus:@"正在识别当前界面"];
     CGRect ocrScope=[self selectedOCRScope];
+    NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:image metadata:@{
+        @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
+        @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"scope":FYLayoutDebugRect(ocrScope)}];
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSDate *ocrStart = [NSDate date];
-        NSError *error = nil;
-        NSArray<OCRTextItem *> *blocks = [FYOCRManager recognizeImage:image topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
+        __block NSError *error = nil;
+        __block NSArray<OCRTextItem *> *blocks;
+        FYLayoutDebugPerform(layoutDebug, ^{ blocks = [FYOCRManager recognizeImage:image topLeftScope:ocrScope recognizer:^NSArray *(CGImageRef cropped,NSError **innerError) {
             return [self recognizeTextItemsInImage:cropped fastOCR:NO languageSegment:languageSegment error:innerError];
-        } error:&error];
+        } error:&error]; });
+        [[FYInlineLayoutDebug shared] recordItems:blocks stage:@"mapped_pass1" context:layoutDebug];
         blocks = [self blocksInsideModalIfPresent:blocks inImage:image normalizedExclusions:@[]];
         NSTimeInterval ocrDuration = [[NSDate date] timeIntervalSinceDate:ocrStart];
         CGImageRelease(image);
@@ -5237,6 +5263,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 
             // 「翻译当前界面」与实时界面路径同源：分块 → 过滤 → 贴译（长短卡 + 映射）。
             NSMutableArray<OCRTextItem *> *uiItems = [[self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:blocks] strict:NO] mutableCopy];
+            [[FYInlineLayoutDebug shared] recordItems:uiItems stage:@"inline_grouped" context:layoutDebug];
             if (uiItems.count == 0) {
                 [self setStatus:[NSString stringWithFormat:@"当前界面没有识别到可译文字 · OCR %.1fs", ocrDuration]];
                 self.inFlight = NO;
@@ -5249,6 +5276,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
             NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:FYCurrentTrace()];
             NSDate *translationStart = [NSDate date];
             [self setStatus:[NSString stringWithFormat:@"正在翻译当前界面 · OCR %.1fs", ocrDuration]];
+            FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
             [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
                 if (cycleGeneration != self.translationGeneration || windowID != [self displayTargetWindowID] ||
                     inputEpoch != self.captureCardInput.sessionEpoch) {
@@ -5259,7 +5287,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 [self bindTranslations:translations toIdentities:uiIdentities];
                 [self refreshLearningSource];
                 [self refreshLearningStatus];
-                FYTracePerform(uiTrace, ^{
+                FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
                     [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
                 });
                 if (!translationError) {
@@ -5268,6 +5296,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 }
                 self.inFlight = NO;
             }];
+            });
         });
     });
 }
@@ -5906,6 +5935,11 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         ^NSString *(NSUInteger index) { return [self inlineTranslationCacheKeyForItem:items[index]]; },
         ^(NSUInteger index, BOOL hit) {
             FYTrace(trace, @"cache", @{@"route": @"inline", @"source": items[index].text ?: @"", @"cache_hit": @(hit)});
+            if (FYCurrentLayoutDebug()) {
+                NSMutableDictionary *context=[FYCurrentLayoutDebug() mutableCopy];
+                context[@"block_id"]=[self inlineBlockIdentityForItem:items[index]];
+                [[FYInlineLayoutDebug shared] recordDecision:hit ? @"translation_cache_hit" : @"translation_cache_miss" context:context];
+            }
         }, translations, pendingIndexes, pendingKeys);
     for (NSNumber *index in pendingIndexes) { [pendingItems addObject:items[index.unsignedIntegerValue]]; }
 
@@ -5962,6 +5996,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 }
 
 - (void)clearInlineTranslationPanels {
+    [[FYInlineLayoutDebug shared] clearOverlay];
+    self.lastInlineLayoutDebugContext=nil;
     [self.batchAppearanceTimer invalidate];
     self.batchAppearanceTimer = nil;
     [self closeExpandedInlineReadingCard];
@@ -6063,6 +6099,47 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
 //      先剔除超出可见区域／遮挡其它原文块／与本帧其它译文冲突／离原文过远／低于可读下限的候选；
 //   ② 面板按**块身份**复用：位置或文字变了就地更新，只有模式切换才重建内容视图；
 //   ③ 没有合法位置的块不伪造位置，只统计降级数量（提示走主界面状态区，不写字幕框）。
+- (void)recordInlineLayoutDebug:(FYInlineLayoutResult *)result previous:(FYInlineLayoutResult *)previous viewport:(NSRect)viewport reason:(NSString *)reason {
+    FYInlineLayoutDebug *debug=[FYInlineLayoutDebug shared];
+    NSDictionary *context=FYCurrentLayoutDebug() ?: self.lastInlineLayoutDebugContext;
+    if (!context || !debug.isActive || !result || NSWidth(viewport)<2) return;
+    NSMutableDictionary *rendered=[NSMutableDictionary dictionary];
+    NSMutableDictionary *renderImages=[NSMutableDictionary dictionary];
+    for (FYInlinePlacement *p in result.visiblePlacements) {
+        NSPanel *panel=self.inlinePanelsByBlockID[p.blockID]; if(!panel) continue;
+        [panel.contentView layoutSubtreeIfNeeded];
+        NSBitmapImageRep *bitmap=[panel.contentView bitmapImageRepForCachingDisplayInRect:panel.contentView.bounds];
+        if (bitmap) {
+            [panel.contentView cacheDisplayInRect:panel.contentView.bounds toBitmapImageRep:bitmap];
+            NSData *png=[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+            if(png) renderImages[p.blockID]=png;
+        }
+        NSMutableDictionary *actual=[@{@"panel_frame":FYLayoutDebugRect(panel.frame),
+            @"content_size":@[@(NSWidth(panel.contentView.bounds)),@(NSHeight(panel.contentView.bounds))],
+            @"backing_scale":@(panel.backingScaleFactor), @"visible":@(panel.isVisible), @"pixels_captured":@(renderImages[p.blockID]!=nil)} mutableCopy];
+        for (NSView *child in panel.contentView.subviews) {
+            NSTextField *label=nil;
+            if ([child isKindOfClass:NSScrollView.class]) {
+                NSScrollView *scroll=(NSScrollView *)child;
+                actual[@"body_viewport"]=FYLayoutDebugRect(scroll.frame);
+                if ([scroll.documentView isKindOfClass:NSTextField.class]) label=(NSTextField *)scroll.documentView;
+            } else if ([child isKindOfClass:NSTextField.class] && p.mode==FYInlineDisplayModeShortLabel) label=(NSTextField *)child;
+            if(label) {
+                NSSize measured=[label.cell cellSizeForBounds:NSMakeRect(0,0,NSWidth(label.bounds),CGFLOAT_MAX)];
+                actual[@"label_frame"]=FYLayoutDebugRect(label.frame);
+                actual[@"cell_size"]=@[@(measured.width),@(measured.height)];
+                actual[@"font_size"]=@(label.font.pointSize);
+                actual[@"font_name"]=label.font.fontName ?: @"";
+            }
+        }
+        rendered[p.blockID]=actual;
+    }
+    NSMutableDictionary *snapshot=[FYLayoutDebugSnapshot(result,previous,viewport,rendered,reason) mutableCopy];
+    snapshot[@"layout_geometry_generation"]=@(self.geometryGeneration);
+    snapshot[@"layout_target_id"]=@([self displayTargetWindowID]);
+    [debug recordLayout:snapshot context:context renderedImages:renderImages];
+}
+
 - (void)showInlineTranslations:(NSArray<NSString *> *)translations forItems:(NSArray<OCRTextItem *> *)items placementRect:(NSRect)windowFrame {
     if (NSWidth(windowFrame) < 2 || NSHeight(windowFrame) < 2) { return; }
     // 正在拖动某一面板：这一帧先不重排，避免 OCR 循环把面板从用户手里拽回去。
@@ -6071,6 +6148,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 记住这一帧的内容：几何变化（窗口移动、OBS 编辑器↔全屏投影）时用它按新几何重排，
     // 不再重新请求翻译。译文没变也可以只更新位置。
     if (translations.count > 0 && translations.count == items.count) {
+        self.lastInlineLayoutDebugViewport=windowFrame;
+        if (FYCurrentLayoutDebug()) self.lastInlineLayoutDebugContext=FYCurrentLayoutDebug();
         self.lastInlineRenderedTranslations = [translations copy];
         self.lastInlineRenderedItems = [items copy];
     }
@@ -6078,6 +6157,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     // 否则贴译会停在旧坐标上、跟原文错位（手动拖动过的位置同样要重新夹到可见区域内）。
     // 实际显示目标也进指纹：OBS 编辑器↔全屏投影是**另一个窗口**，同一段文字必须重排。
     FYInlineLayoutEngine *engine = self.inlineLayoutEngine;
+    engine.collectsLayoutDiagnostics=[FYInlineLayoutDebug shared].isActive;
     NSString *geometryKey = [NSString stringWithFormat:@"|t=%u|vp=%.1f,%.1f,%.1f,%.1f|style=%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
                              [self displayTargetWindowID],
                              NSMinX(windowFrame), NSMinY(windowFrame), NSWidth(windowFrame), NSHeight(windowFrame),
@@ -6127,6 +6207,8 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
                 if (card) { card.showsSelectedBadge = [self.inlineBlockSnapshot.blockID isEqualToString:panel.identifier]; }
             }
         }
+        [self recordInlineLayoutDebug:self.lastInlineLayoutResult previous:self.lastInlineLayoutResult viewport:windowFrame
+            reason:minorOCRJitter ? @"cache_minor_ocr_jitter" : @"cache_identical_input"];
         // 内容没变也要推进展开态记账（上一帧的排版结果里还有没有这一块）。
         [self advanceExpandedReadingState];
         [self refreshOverlayVisibility:nil];
@@ -6152,6 +6234,10 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
         [requests addObject:request];
         itemsByBlockID[block.blockID] = item;
     }
+    FYInlineLayoutResult *previousLayout = self.lastInlineLayoutResult;
+    NSString *layoutUpdateReason = !previousLayout ? @"initial" :
+        (![self.lastInlineLayoutGeometryKey isEqual:geometryKey] ? @"geometry_or_style_changed" :
+        (![self.lastInlineLayoutContentKey isEqual:contentKey] ? @"content_changed" : @"ocr_geometry_changed"));
     FYInlineLayoutResult *result = [self.inlineLayoutEngine layoutRequests:requests
                                                                  viewport:windowFrame
                                                                  previous:self.lastInlineLayoutResult];
@@ -6259,6 +6345,7 @@ typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, 
     self.inlinePanelsByBlockID = [keptPanels mutableCopy];
     self.inlineTranslationPanels = shortPanels;
     self.inlineLongCardPanels = longPanels;
+    [self recordInlineLayoutDebug:result previous:previousLayout viewport:windowFrame reason:layoutUpdateReason];
     self.lastInlineLayoutResult = result;
     // 记录本帧「原始身份 → 稳定身份」，供选中判定/快照使用（缺字典时按需创建）。
     if (!self.inlineStableBlockIDs) { self.inlineStableBlockIDs = [NSMutableDictionary dictionary]; }
@@ -6803,7 +6890,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     NSFont *font = [self inlineLongCardBodyFont];
     return FYInlineLongCardLineHeight(font.ascender, font.descender, font.leading);
 }
-// 长卡最小可读高度：标题 + 内边距 + 三行正文。
+// 普通贴译长卡最小可读高度：内边距 + 三行正文。
 - (CGFloat)inlineLongCardMinimumHeight {
     return FYInlineLongCardMinimumHeight([self inlineLongCardBodyLineHeight]);
 }
@@ -6826,7 +6913,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
                              placement.paragraphStyle ?: [self inlineLongCardBodyStyle], [self inlinePanelTextColor]);
 }
 
-// 长阅读卡内容：顶部小标题「中文译文」+ 完整译文（奶油近实底、深棕圆体、浅棕细边、轻柔阴影）。
+// 普通贴译只显示正文；展开阅读卡保留标题（奶油底、深棕圆体、浅棕细边、轻柔阴影）。
 - (NSView *)inlineLongCardContentForTranslation:(NSString *)translation size:(NSSize)size selected:(BOOL)selected compact:(BOOL)compact {
     return [self inlineLongCardContentForTranslation:translation size:size selected:selected compact:compact placement:nil];
 }
@@ -6845,6 +6932,8 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     card.showsSelectedBadge = selected;
     card.compactEntry = compact;
+    // 内容创建时即按真实标题带划分拖动区；显式卡框入口也不能沿用旧的 55pt。
+    card.titleBarHeight = compact ? 0 : ((placement.panelPadding > 0 ? placement.panelPadding : 18) + placement.titleBandHeight);
     if (compact) {
         [self applyInlineCompactEntryChromeToContent:card cornerRadius:8];
     } else {
@@ -6876,21 +6965,15 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 
     // 内边距与标题带由布局引擎给出：与测量用的是同一组常量，避免“测出来”和“画出来”不一致。
     CGFloat padding = placement.panelPadding > 0 ? placement.panelPadding : 18;
-    // 紧凑修饰（布局为省空间去掉标题带）时不再画标题和分隔线，正文从 padding 开始 ——
-    // 否则标题会和正文叠在一起。
-    BOOL showsTitleBand = placement.titleBandHeight > 0.5;
+    // 普通贴译不画标题或分隔线，正文从 padding 开始；展开阅读保留标题带。
+    BOOL showsTitleBand = placement.expandedReading && placement.titleBandHeight > 0.5;
     CGFloat titleBand = 24;
     // 注意：FYInlineLongCardView 是 flipped（y=0 在顶部），所以标题在 padding 处、正文在标题下方。
     // 顶部小标题：未选中时不显示「已选中」，避免把预览状态写死。
-    // 普通贴译长卡仍是「中文译文」；只有"点入口展开出来的阅读卡"顶部换成这一块自己的标题
-    // （取不到可靠标题才用「这段译文」）—— 与折叠入口的标题口径一致。
-    NSString *cardTitle = @"中文译文";
-    if (placement.expandedReading) {
-        cardTitle = placement.entryTitle.length > 0 ? placement.entryTitle
+    if (showsTitleBand) {
+        NSString *cardTitle = placement.entryTitle.length > 0 ? placement.entryTitle
             : (placement.block ? ([FYInlineLayoutEngine shortTitleForBlockText:placement.block.text] ?: nil) : nil);
         if (cardTitle.length == 0) { cardTitle = self.inlineLayoutEngine.foldedEntryFallbackTitle ?: @"这段译文"; }
-    }
-    if (showsTitleBand) {
         NSTextField *title = [self label:cardTitle font:[self inlinePanelFontOfSize:14 weight:NSFontWeightSemibold] color:[self inlinePanelTitleColor]];
         NSTextField *badge = [self label:@"已选中" font:[self inlinePanelFontOfSize:13] color:[self inlinePanelTextColor]];
         FYInstallInlineLongCardHeader(card, cardWidth, padding, titleBand, selected, title, badge,
@@ -6917,18 +7000,23 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 // 显式给定卡框时补齐绘制参数（测试与「展开完整阅读卡」用）：
 // 字体/段落样式/内边距仍取自布局引擎，测量口径与 ShowInlineTranslations 完全一致。
 - (FYInlinePlacement *)inlinePlacementForLongCardFrame:(NSRect)frame translation:(NSString *)translation {
+    return [self inlinePlacementForLongCardFrame:frame translation:translation expandedReading:NO];
+}
+
+- (FYInlinePlacement *)inlinePlacementForLongCardFrame:(NSRect)frame translation:(NSString *)translation expandedReading:(BOOL)expandedReading {
     FYInlinePlacement *placement = [FYInlinePlacement new];
     placement.mode = FYInlineDisplayModeScrollingCard;
     placement.panelPadding = 18;
-    placement.titleBandHeight = 24 + 13;
+    placement.expandedReading = expandedReading;
+    placement.titleBandHeight = expandedReading ? (24 + 13) : 0;
     placement.cornerRadius = 12;
     placement.font = [self.inlineLayoutEngine longBodyFont];
     placement.paragraphStyle = [self.inlineLayoutEngine longBodyParagraphStyle];
     placement.translation = translation ?: @"";
     placement.translationFrame = frame;
-    placement.measuredContentHeight = [self.inlineLayoutEngine measuredBodyHeight:translation placement:placement width:NSWidth(frame)];
-    placement.bodyViewportHeight = [self inlineLongCardBodyViewportForHeight:NSHeight(frame)];
-    placement.bodyViewportFrame = NSMakeRect(18, 18 + 37, MAX((CGFloat)80, NSWidth(frame) - 36), placement.bodyViewportHeight);
+    placement.measuredContentHeight = [self.inlineLayoutEngine measuredBodyHeight:translation placement:placement width:NSWidth(frame)] + 4;
+    placement.bodyViewportFrame = FYInlineLongCardBodyFrame(NSWidth(frame), NSHeight(frame), placement.panelPadding, placement.titleBandHeight);
+    placement.bodyViewportHeight = NSHeight(placement.bodyViewportFrame);
     placement.scrollable = placement.measuredContentHeight > placement.bodyViewportHeight + 0.5;
     return placement;
 }
@@ -6975,6 +7063,13 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     if (!placement) { placement = [self inlinePlacementForLongCardFrame:frame translation:translation]; }
     if (!NSEqualRects(panel.frame, frame)) { [panel setFrame:frame display:NO]; }
     NSView *existing = panel.contentView;
+    NSScrollView *existingScroll = nil;
+    for (NSView *child in existing.subviews) {
+        if ([child isKindOfClass:NSScrollView.class]) { existingScroll = (NSScrollView *)child; break; }
+    }
+    CGFloat bodyPadding = placement.panelPadding > 0 ? placement.panelPadding : 18;
+    NSRect expectedBodyFrame = FYInlineLongCardBodyFrame(NSWidth(frame), NSHeight(frame), bodyPadding, placement.titleBandHeight);
+    BOOL bodyGeometryMatches = compact || (existingScroll && NSEqualRects(existingScroll.frame, expectedBodyFrame));
     BOOL selected = [self inlineBlockID:placement.blockID isSelectedForItem:item];
     BOOL compactCopyChanged = NO;
     if (compact && [existing isKindOfClass:FYInlineLongCardView.class]) {
@@ -6989,7 +7084,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
         compactCopyChanged = compactCopyChanged || ![title.font isEqual:[self.inlineLayoutEngine compactEntryFont]] ||
             (entryCard.foldedEntryHintLabel && ![entryCard.foldedEntryHintLabel.font isEqual:[self.inlineLayoutEngine foldedEntryHintFont]]);
     }
-    if (!compactCopyChanged && [existing isKindOfClass:FYInlineLongCardView.class] && NSEqualSizes(existing.frame.size, frame.size) &&
+    if (!compactCopyChanged && bodyGeometryMatches && [existing isKindOfClass:FYInlineLongCardView.class] && NSEqualSizes(existing.frame.size, frame.size) &&
         [(FYInlineLongCardView *)existing showsSelectedBadge] == selected &&
         [(FYInlineLongCardView *)existing compactEntry] == compact) {
         // 尺寸与选中态都没变：只换正文，保留滚动视图与点击目标，避免重建导致的闪烁与事件丢失。
@@ -6999,7 +7094,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
         if ([document isKindOfClass:NSTextField.class]) {
             NSTextField *label = (NSTextField *)document;
             // 用同一份字体/段落样式重新测量：卡片尺寸没变但文章更长时，文档必须跟着长高。
-            [self applyInlineLongCardBody:translation toLabel:label cardWidth:NSWidth(scroll.frame) + 36 placement:placement];
+            [self applyInlineLongCardBody:translation toLabel:label cardWidth:NSWidth(frame) placement:placement];
             NSPoint origin = scroll.contentView.bounds.origin;
             CGFloat maxY = MAX((CGFloat)0, NSHeight(label.frame) - NSHeight(scroll.contentView.bounds));
             if (origin.y > maxY) {
@@ -7139,8 +7234,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     x = MIN(MAX(x, minX), MAX(minX, maxX));
     y = MIN(MAX(y, minY), MAX(minY, maxY));
     FYInlinePlacement *cardPlacement = [self inlinePlacementForLongCardFrame:NSIntegralRect(NSMakeRect(x, y, width, height))
-                                                                 translation:translation];
-    cardPlacement.expandedReading = YES;
+                                                                 translation:translation expandedReading:YES];
     cardPlacement.entryTitle = [FYInlineLayoutEngine shortTitleForBlockText:item.text ?: @""]
         ?: (self.inlineLayoutEngine.foldedEntryFallbackTitle ?: @"这段译文");
     if (stableBlockID.length > 0) { cardPlacement.blockID = stableBlockID; }

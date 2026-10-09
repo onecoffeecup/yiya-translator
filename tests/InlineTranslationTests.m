@@ -173,7 +173,7 @@ int main(void) {
         Check(fabs(NSMinX(themedPanel.frame) - 70) < 2 && NSMaxY(themedPanel.frame) <= 401,
               @"a short patch must sit below its source line, left-aligned");
 
-        // —— 长阅读卡：奶油近实底 + 「中文译文」标题 + 正文滚动 ——
+        // —— 普通长贴译：奶油底 + 无重复标题 + 正文滚动 ——
         OCRTextItem *longItem = [OCRTextItem new];
         longItem.text = @"複数の段落からなる長い本文です。\n行が続きます。\nさらに続きます。";
         longItem.boundingBox = CGRectMake(0.2, 0.2, 0.5, 0.12);
@@ -189,7 +189,7 @@ int main(void) {
             if ([child isKindOfClass:NSScrollView.class]) { cardScroll = (NSScrollView *)child; }
             if ([child isKindOfClass:NSTextField.class] && [((NSTextField *)child).stringValue isEqualToString:@"中文译文"]) { cardTitle = (NSTextField *)child; }
         }
-        Check(cardTitle != nil, @"the long card must show the 中文译文 heading");
+        Check(cardTitle == nil, @"the ordinary inline card must not show the 中文译文 heading");
         Check(cardScroll != nil && [cardScroll.documentView isKindOfClass:NSTextField.class], @"the long card body must live in a scrollable area");
         Check(cardScroll.documentView.frame.size.height > cardScroll.contentView.bounds.size.height,
               @"a long translation must actually overflow its card so it can scroll");

@@ -7,9 +7,9 @@ Expect([FYInlineNormalizeTranslationParagraphs(@"一\n\n二") isEqual:@"一\n\n�
 Expect([FYInlineNormalizeTranslationParagraphs(@" \n一\n \n\n二\n ") isEqual:@"一\n\n二"],@"empty runs and edge whitespace collapse");
 Expect([FYInlineNormalizeTranslationParagraphs(@"hello world\nnext line") isEqual:@"hello worldnext line"],@"internal spaces unchanged, no invented separator");
 Expect(FYInlineLongCardLineHeight(14.2,-3.1,0)==26,@"ceil font metrics before adding line spacing");
-Expect(FYInlineLongCardMinimumHeight(26)==151,@"three readable lines plus header and padding");
-Expect(FYInlineLongCardBodyViewport(151)==78,@"minimum card body exposes three lines");
-Expect(FYInlineLongCardBodyViewport(50)==0,@"undersized card body viewport clamps to zero");
+Expect(FYInlineLongCardMinimumHeight(26)==114,@"three readable lines plus padding without a title band");
+Expect(FYInlineLongCardBodyViewport(114)==78,@"minimum headerless card body exposes three lines");
+Expect(FYInlineLongCardBodyViewport(30)==0,@"undersized card body viewport clamps to zero");
 Expect(NSEqualSizes(FYInlineLongCardSize(NSMakeSize(120,20),YES),NSMakeSize(120,28)),@"compact entry does not force expanded minimum width");
 Expect(NSEqualSizes(FYInlineLongCardSize(NSMakeSize(120,20),NO),NSMakeSize(160,34)),@"expanded card retains readable minimum width and height");
 Expect(NSEqualSizes(FYInlineLongCardSize(NSMakeSize(300,200),YES),NSMakeSize(300,200)),@"engine measured larger size unchanged");

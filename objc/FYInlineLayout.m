@@ -251,8 +251,8 @@ NSScrollView *FYCreateInlineLongCardBodyScroll(NSString *translation, NSRect vie
 
 
 CGFloat FYInlineLongCardLineHeight(CGFloat ascender, CGFloat descender, CGFloat leading) { return ceil(ascender - descender + leading) + 8; }
-CGFloat FYInlineLongCardMinimumHeight(CGFloat lineHeight) { return 18 * 2 + (24 + 13) + lineHeight * 3.0; }
-CGFloat FYInlineLongCardBodyViewport(CGFloat cardHeight) { return MAX(0, cardHeight - 18 * 2 - (24 + 13)); }
+CGFloat FYInlineLongCardMinimumHeight(CGFloat lineHeight) { return 18 * 2 + lineHeight * 3.0; }
+CGFloat FYInlineLongCardBodyViewport(CGFloat cardHeight) { return MAX(0, cardHeight - 18 * 2); }
 
 NSSize FYInlineLongCardSize(NSSize proposed, BOOL compact) {
     return NSMakeSize(compact ? MAX((CGFloat)60, proposed.width) : MAX((CGFloat)160, proposed.width),
@@ -1032,10 +1032,9 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
 
 - (CGFloat)minimumCardHeight {
     CGFloat padding = 18;
-    CGFloat titleBand = 24 + 13;
     NSFont *font = [self fontOfSize:self.longBodyFontSize weight:NSFontWeightRegular];
     CGFloat lineHeight = ceil(font.ascender - font.descender + font.leading) + self.longLineSpacing;
-    return padding * 2 + titleBand + lineHeight * MAX((CGFloat)1, (CGFloat)self.minimumBodyLines);
+    return padding * 2 + lineHeight * MAX((CGFloat)1, (CGFloat)self.minimumBodyLines);
 }
 
 - (NSFont *)shortBodyFontForCover:(BOOL)cover {
@@ -1347,8 +1346,16 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
         add(FYInlineAnchorAbove, anchorX, CGRectGetMaxY(source) + gap, rank++, @"原文上方");
     }
 
-    add(FYInlineAnchorRight, CGRectGetMaxX(source) + gap, CGRectGetMidY(source) - height / 2.0, rank++, @"原文右侧");
-    add(FYInlineAnchorLeft, CGRectGetMinX(source) - gap - width, CGRectGetMidY(source) - height / 2.0, rank++, @"原文左侧");
+    // 右侧出界时先向内收；仍由后续合法性检查避开其它原文与译文。
+    // 直接丢弃这个位置会让可读长卡被迫跨到原文左侧的其它栏。
+    CGFloat rightX = MIN(CGRectGetMaxX(source) + gap, maxX - width);
+    if (rightX >= minX) {
+        add(FYInlineAnchorRight, rightX, CGRectGetMidY(source) - height / 2.0, rank++, @"原文右侧");
+    }
+    CGFloat leftX = CGRectGetMinX(source) - gap - width;
+    if (leftX >= minX) {
+        add(FYInlineAnchorLeft, leftX, CGRectGetMidY(source) - height / 2.0, rank++, @"原文左侧");
+    }
     add(FYInlineAnchorOverlay, anchorX, CGRectGetMidY(source) - height / 2.0, rank, @"覆盖原文自身");
 
     return candidates;
@@ -1597,6 +1604,22 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 
 #pragma mark 评分
 
+- (void)recordCandidateAttempt:(FYInlineCandidate *)original resolved:(FYInlineCandidate *)resolved
+                     placement:(FYInlinePlacement *)placement placed:(NSArray<FYInlinePlacement *> *)placed
+                         score:(CGFloat)score {
+    if (!self.collectsLayoutDiagnostics) return;
+    NSMutableArray *collisions=[NSMutableArray array];
+    for(FYInlinePlacement *other in placed) {
+        if(CGRectIntersectsRect(original.frame,other.translationFrame)) [collisions addObject:other.blockID];
+    }
+    NSMutableArray *evidence=[placement.candidateDiagnostics mutableCopy] ?: [NSMutableArray array];
+    [evidence addObject:@{@"stage":@"placement_attempt",@"anchor":@(original.anchor),
+        @"translation_collisions":collisions,@"feasible":@(resolved!=nil),
+        @"resolved_frame":resolved ? @[@(NSMinX(resolved.frame)),@(NSMinY(resolved.frame)),@(NSWidth(resolved.frame)),@(NSHeight(resolved.frame))] : @[],
+        @"score":isfinite(score) ? @(score) : NSNull.null}];
+    placement.candidateDiagnostics=evidence;
+}
+
 - (CGFloat)scoreForCandidate:(FYInlineCandidate *)candidate
                    placement:(FYInlinePlacement *)placement
                     previous:(FYInlinePlacement *)previous
@@ -1621,6 +1644,28 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 }
 
 #pragma mark 主入口
+
+- (FYInlinePlacement *)initialPlacementForRequest:(FYInlineLayoutRequest *)request viewport:(CGRect)viewport {
+    FYInlinePlacement *placement = [self basePlacementForRequest:request stableID:request.block.blockID viewport:viewport];
+    BOOL compact = NO;
+    if (request.block.kind == FYInlineBlockKindLong) {
+        NSDictionary *variant = [self longCardVariantsForRequest:request viewport:viewport].firstObject;
+        compact = [self prepareLongPlacementForRequest:request placement:placement viewport:viewport variant:variant];
+    } else {
+        [self prepareShortPlacement:placement sourceText:request.block.text viewport:viewport];
+    }
+    FYInlineCandidate *candidate = [self candidatesForPlacement:placement viewport:viewport compactEntry:compact
+        widths:@[@(NSWidth(placement.translationFrame))]].firstObject;
+    placement.initialTranslationFrame = candidate.frame;
+    placement.automaticOriginBounds = CGRectMake(candidate.frame.origin.x,candidate.frame.origin.y,0,0);
+    placement.translationFrame = candidate.frame;
+    placement.anchor = candidate.anchor;
+    placement.mode = compact ? FYInlineDisplayModeCompactEntry :
+        (request.block.kind == FYInlineBlockKindShort ? FYInlineDisplayModeShortLabel :
+        (placement.scrollable ? FYInlineDisplayModeScrollingCard : FYInlineDisplayModeFullCard));
+    placement.reason = @"P0：首选候选，关闭避让、历史评分与动画";
+    return placement;
+}
 
 // 长卡候选组合要"先试正常排版、再逐档退让"：每一轮按当前候选算一遍完整布局，
 // 仍然是折叠/放不下的长块就把候选序号 +1 再算一遍（有限轮、只前进、不回退）。
@@ -1647,6 +1692,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     for (NSUInteger round = 0; round < maximumRounds; round++) {
         result = [self layoutRequestsOnce:requests viewport:viewport previous:previous
                            variantIndexes:variantIndexes attemptLog:attemptLog];
+        result.layoutPassCount = round + 1;
         BOOL progressed = NO;
         for (FYInlinePlacement *placement in result.placements) {
             if (placement.block.kind != FYInlineBlockKindLong) { continue; }
@@ -1669,6 +1715,12 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     }
     // 把候选尝试记录写回结果（诊断：每个候选的宽/字号/卡尺寸/失败原因/冲突块）。
     for (FYInlinePlacement *placement in result.placements) {
+        CGFloat gap = self.panelGap, verticalSlack = self.stabilityTolerance + 0.5;
+        CGRect source = placement.sourceFrame, label = placement.translationFrame;
+        placement.automaticOriginBounds = CGRectMake(NSMinX(source) - NSWidth(label) - gap,
+            NSMinY(source) - NSHeight(label) - gap - verticalSlack,
+            NSWidth(source) + NSWidth(label) + 2 * gap,
+            NSHeight(source) + NSHeight(label) + 2 * (gap + verticalSlack));
         if (placement.block.kind == FYInlineBlockKindLong &&
             (placement.mode == FYInlineDisplayModeFullCard || placement.mode == FYInlineDisplayModeScrollingCard)) {
             placement.stableBodyFontSize = placement.chosenBodyFontSize;
@@ -1773,6 +1825,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
                                            MAX(NSMinY(viewport) + self.viewportMargin,
                                                NSMaxY(viewport) - self.viewportMargin - NSHeight(frame)));
             placement.translationFrame = NSIntegralRect(frame);
+            placement.initialTranslationFrame = placement.translationFrame;
             placement.manuallyPlaced = YES;
             placement.anchor = FYInlineAnchorManual;
             placement.compactEntry = compact;
@@ -1794,10 +1847,27 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
         NSArray<FYInlineCandidate *> *candidates = [self candidatesForPlacement:placement viewport:viewport
                                                                    compactEntry:compact
                                                                          widths:@[@(NSWidth(placement.translationFrame))]];
+        placement.initialTranslationFrame = candidates.firstObject.frame;
         [self filterCandidates:candidates placement:placement viewport:viewport
                   otherSources:sourceFrames sourceIndices:sourceIndices
                     sourceTexts:sourceTexts selfIndex:requestIndex report:report];
         placement.rejectedCandidates = report;
+        if (self.collectsLayoutDiagnostics) {
+            NSMutableArray *evidence = [NSMutableArray array];
+            for (FYInlineCandidate *candidate in candidates) {
+                NSMutableArray *collisions = [NSMutableArray array];
+                for (NSUInteger other = 0; other < requests.count; other++) {
+                    if (other != requestIndex && CGRectIntersectsRect(candidate.frame, requests[other].sourceFrame)) {
+                        [collisions addObject:requests[other].block.blockID];
+                    }
+                }
+                [evidence addObject:@{@"anchor": @(candidate.anchor), @"rank": @(candidate.anchorRank),
+                    @"frame": @[@(NSMinX(candidate.frame)), @(NSMinY(candidate.frame)), @(NSWidth(candidate.frame)), @(NSHeight(candidate.frame))],
+                    @"source_collisions": collisions, @"rejection": candidate.rejection ?: @"",
+                    @"hard_rejection": @(candidate.hardRejection)}];
+            }
+            placement.candidateDiagnostics = evidence;
+        }
         [candidateLists addObject:candidates];
         [placements addObject:placement];
     }
@@ -1853,7 +1923,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
                 usable = [self candidate:candidate resolvingCollisionsWithin:self.stabilityTolerance
                                 viewport:viewport placement:placement
                             otherSources:sourceFrames sourceTexts:sourceTexts selfIndex:index placedFrames:placedFrames];
-                if (!usable) { continue; }
+                if (!usable) { [self recordCandidateAttempt:candidate resolved:nil placement:placement placed:placedPlacements score:NAN]; continue; }
             }
             BOOL conflict = NO;
             for (NSValue *value in placedFrames) {
@@ -1865,8 +1935,10 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
                 FYInlineCandidate *resolved = [self candidate:usable resolvingCollisionsWithin:self.stabilityTolerance
                                                      viewport:viewport placement:placement
                                                  otherSources:sourceFrames sourceTexts:sourceTexts selfIndex:index placedFrames:placedFrames];
-                if (resolved) { usable = resolved; } else { continue; }
+                if (resolved) { usable = resolved; } else { [self recordCandidateAttempt:candidate resolved:nil placement:placement placed:placedPlacements score:NAN]; continue; }
             }
+            [self recordCandidateAttempt:candidate resolved:usable placement:placement placed:placedPlacements
+                score:[self scoreForCandidate:usable placement:placement previous:previousPlacement columnAnchors:columnAnchors columnKey:columnKey]];
             if (!chosen || [self scoreForCandidate:usable placement:placement previous:previousPlacement
                                      columnAnchors:columnAnchors columnKey:columnKey] <
                            [self scoreForCandidate:chosen placement:placement previous:previousPlacement
@@ -1990,7 +2062,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
 }
 
 /// 长卡的有限候选组合：宽度 × 修饰（内边距/标题带）× 字号。
-/// 顺序按优先级：贴合原文宽度 → 减少标题与留白 → 逐档缩字（不低于 minimumLongBodyFontSize）。
+/// 普通贴译不显示标题；顺序为贴合原文宽度 → 减少留白 → 逐档缩字（不低于 minimumLongBodyFontSize）。
 /// 有可读正文空间而全文较长时允许卡内滚动，不因此折叠。
 - (NSArray<NSDictionary *> *)longCardVariantsForRequest:(FYInlineLayoutRequest *)request viewport:(CGRect)viewport {
     return [self longCardVariantsForRequest:request viewport:viewport bodyFontSize:0];
@@ -2013,7 +2085,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
     if (fontSizes.count == 0) { [fontSizes addObject:@(self.longBodyFontSize)]; }
     for (NSNumber *widthValue in widths) {
         // 每个宽度先试"完整修饰 + 原字号"，修饰压缩优先于缩字。
-        [variants addObject:@{@"width": widthValue, @"padding": @18, @"titleBand": @(24 + 13),
+        [variants addObject:@{@"width": widthValue, @"padding": @18, @"titleBand": @0,
                               @"fontSize": fontSizes.firstObject, @"chrome": @"完整"}];
         for (NSNumber *fontSize in fontSizes) {
             [variants addObject:@{@"width": widthValue, @"padding": @12, @"titleBand": @0,
@@ -2054,7 +2126,7 @@ static BOOL FYInlineSourceLooksDuplicated(NSString *selfText, NSString *otherTex
         placement.font = font;
         placement.paragraphStyle = [self paragraphStyleWithLineSpacing:self.longLineSpacing];
         placement.panelPadding = 18;
-        placement.titleBandHeight = 24 + 13;
+        placement.titleBandHeight = 0;
         placement.cornerRadius = 12;
         placement.chosenBodyFontSize = self.longBodyFontSize;
     }

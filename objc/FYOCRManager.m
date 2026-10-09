@@ -1,4 +1,5 @@
 #import "FYOCRManager.h"
+#import "FYInlineLayoutDebug.h"
 #import <Vision/Vision.h>
 
 @implementation FYContentModeStability
@@ -683,8 +684,14 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     CGRect crop=CGRectZero;
     CGImageRef scaled=[self copyEnlargedImage:image visionRegion:region pixelCrop:&crop];
     if (!scaled) return @"";
-    NSArray<OCRTextItem *> *localBlocks=nil;
-    NSString *text=recognizer(scaled,&localBlocks,error);
+    __block NSArray<OCRTextItem *> *localBlocks=nil;
+    __block NSString *text;
+    __block NSError *cropError=error ? *error : nil;
+    BOOL wantsError=error != NULL;
+    FYLayoutDebugPerformCrop(crop, CGSizeMake(CGImageGetWidth(image),CGImageGetHeight(image)), ^{
+        text=recognizer(scaled,&localBlocks,wantsError ? &cropError : NULL);
+    });
+    if (error) *error=cropError;
     [self remapItems:localBlocks fromPixelCrop:crop imageSize:CGSizeMake(CGImageGetWidth(image),CGImageGetHeight(image))];
     if (outBlocks) *outBlocks=localBlocks;
     CGImageRelease(scaled);
@@ -1726,7 +1733,11 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
         if (error) *error=[NSError errorWithDomain:@"LiveCaptionTranslator" code:901 userInfo:@{NSLocalizedDescriptionKey:@"无法读取手动识别区域。"}];
         return @[];
     }
-    NSArray<OCRTextItem *> *items=recognizer(cropped,error);
+    __block NSArray<OCRTextItem *> *items;
+    __block NSError *cropError=error ? *error : nil;
+    BOOL wantsError=error != NULL;
+    FYLayoutDebugPerformCrop(crop, size, ^{ items=recognizer(cropped,wantsError ? &cropError : NULL); });
+    if (error) *error=cropError;
     CGImageRelease(cropped);
     [self remapItems:items fromPixelCrop:crop imageSize:size];
     return items;
@@ -1735,6 +1746,9 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
 - (NSArray<OCRTextItem *> *)recognizeTextItemsInImage:(CGImageRef)image fastOCR:(BOOL)fastOCR languageSegment:(NSInteger)languageSegment error:(NSError **)error {
     __block NSMutableArray<OCRTextItem *> *items = [NSMutableArray array];
     __block NSError *requestError = nil;
+    NSMutableDictionary *localLayoutContext=[FYCurrentLayoutDebug() mutableCopy];
+    if (localLayoutContext) localLayoutContext[@"vision_image_size"]=@[@(CGImageGetWidth(image)),@(CGImageGetHeight(image))];
+    NSDictionary *layoutContext=[localLayoutContext copy];
 
     VNRecognizeTextRequest *request = [[VNRecognizeTextRequest alloc] initWithCompletionHandler:^(VNRequest *request, NSError *innerError) {
         if (innerError) {
@@ -1742,8 +1756,13 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             return;
         }
 
+        NSMutableArray *diagnosticRaw=layoutContext ? [NSMutableArray array] : nil;
         for (VNRecognizedTextObservation *observation in request.results) {
             VNRecognizedText *candidate = [[observation topCandidates:1] firstObject];
+            if (diagnosticRaw) {
+                OCRTextItem *raw=[OCRTextItem new]; raw.text=candidate.string ?: @""; raw.boundingBox=observation.boundingBox; raw.confidence=candidate.confidence;
+                [diagnosticRaw addObject:raw];
+            }
             NSString *line = [candidate.string stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
             if (line.length < 2) { continue; }
             if (observation.boundingBox.size.width < 0.010 || observation.boundingBox.size.height < 0.006) { continue; }
@@ -1775,6 +1794,7 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             item.confidence = candidate.confidence;
             [items addObject:item];
         }
+        if (layoutContext) [[FYInlineLayoutDebug shared] recordItems:diagnosticRaw stage:@"vision_raw" context:layoutContext];
     }];
 
     request.recognitionLevel = fastOCR ? VNRequestTextRecognitionLevelFast : VNRequestTextRecognitionLevelAccurate;

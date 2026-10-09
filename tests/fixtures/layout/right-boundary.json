@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "name": "right-boundary",
+  "synthetic": true,
+  "image_size": [900, 520],
+  "viewport": [0, 0, 900, 520],
+  "blocks": [
+    {
+      "text": "合成通知正文。\n仅用于边界排版验证。\n请查看活动安排。",
+      "translation": "活动报名已经开始。请在本周内选择参加时间，并检查集合地点，具体安排以通知为准。",
+      "source_frame": [500, 295, 230, 90],
+      "long_body": true
+    },
+    {
+      "text": "通知署名",
+      "translation": "活动组",
+      "source_frame": [500, 230, 60, 20],
+      "long_body": false
+    }
+  ]
+}

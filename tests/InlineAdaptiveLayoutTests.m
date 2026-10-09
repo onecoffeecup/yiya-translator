@@ -829,7 +829,7 @@ static void CheckAppPanelsDoNotCoverOtherSources(AppDelegate *app,
 
 static void TestAppCompactEntryOpensFullCard(void) {
     // 画面高度不足以放下可读的三行正文 → 紧凑入口；点击后打开完整阅读卡并保留块身份。
-    AppDelegate *app = InlineFixtureApp(CGRectMake(0, 0, 520, 170));
+    AppDelegate *app = InlineFixtureApp(CGRectMake(0, 0, 520, 110));
     OCRTextItem *item = AppItem(@"新しい季節のイベントが始まります。\n期間中は限定の衣装も登場します。\nぜひお見逃しなく。",
                                CGRectMake(0.06, 0.30, 0.60, 0.22), InlineBlockKindLong);
     [app showInlineTranslations:@[@"新的季节活动即将开始。活动期间还会推出限定服装，请千万不要错过。"]
@@ -885,6 +885,8 @@ static void TestAppScrollPositionSemantics(void) {
                                  "详情请查看官方网站。为了让这段译文超过卡片允许的最大高度、必须滚动才能读到结尾，这里补充大量说明文字："
                                  "活动期间每天登录还可以领取一份小礼物，累计登录七天可获得特别的纪念道具；参与限时任务还能获得额外的兑换券，"
                                  "兑换券可以在活动商店换取限定头像框与家具。活动结束后未使用的兑换券会按比例折算成普通金币。";
+    // 去掉标题后原样本可能完整放下；保留足够长的固定合成正文来验证真实溢出与滚动。
+    longTranslation = [longTranslation stringByAppendingString:longTranslation];
     [app showInlineTranslations:@[longTranslation] forItems:@[itemA]];
     Check(app.inlineLongCardPanels.count == 1, @"滚动语义：生成一张长卡");
     NSPanel *panel = app.inlineLongCardPanels.firstObject;
@@ -1304,14 +1306,14 @@ static void TestAppOptionDragModeAndCardHitZones(void) {
     [app clearInlineTranslationPanels];
     Check(app.inlineModifierTimer == nil, @"Option 拖动：面板清理后监听定时器停止");
 
-    // 长卡：标题栏拖动 / 正文点击，且拖动结束不误触学习
+    // 长贴译：顶部留白拖动 / 正文点击，且拖动结束不误触学习
     OCRTextItem *item = AppItem(@"新しい季節のイベントが始まります。\n期間中は限定の衣装も登場します。\nぜひお見逃しなく。",
                                 CGRectMake(0.50, 0.30, 0.36, 0.10), InlineBlockKindLong);
     NSPanel *card = [app inlineLongPanelForTranslation:@"新的季节活动即将开始，请千万不要错过。" item:item frame:NSMakeRect(200, 300, 420, 200)];
     FYInlineLongCardView *cardView = (FYInlineLongCardView *)card.contentView;
     Check([cardView isKindOfClass:FYInlineLongCardView.class], @"长卡：内容视图是卡片视图");
-    Check(cardView.titleBarHeight > 30 && [cardView pointIsInTitleBar:NSMakePoint(20, 10)],
-          @"长卡：顶部是标题栏拖动区");
+    Check(cardView.titleBarHeight == 18 && [cardView pointIsInTitleBar:NSMakePoint(20, 10)],
+          @"长卡：顶部留白保留拖动区，不占用正文");
     Check(![cardView pointIsInTitleBar:NSMakePoint(20, cardView.titleBarHeight + 40)],
           @"长卡：正文区域不算标题栏");
     cardView.windowDragEnabled = NO;   // 测试里不进入真实窗口拖动循环

@@ -210,6 +210,7 @@ def run(args):
                          ("TestIsolationTests", ["bash", "scripts/run-isolation-tests.sh"]),
                          ("RuntimeDiagnosticsTests", ["bash", "scripts/run-diagnostics-tests.sh"]),
                          ("ModuleTests", ["bash", "scripts/run-module-tests.sh"]),
+                         ("InlineLayoutDebugTests", [sys.executable, "scripts/layout-debug.py", "check", "--output", str(output / "layout-evidence")]),
                          ("TranslationTraceTests", ["bash", "scripts/run-translation-trace-tests.sh"]),
                          ("DialogueGrammarTests", ["bash", "scripts/run-dialogue-grammar-tests.sh"])]
                 for name, command in steps:

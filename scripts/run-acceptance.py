@@ -37,6 +37,7 @@ def source_hashes():
         paths.extend(p for p in (ROOT / folder).rglob("*") if p.is_file() and
                      p.suffix in {".h", ".m", ".inc", ".sh", ".py", ".json"})
     paths.extend(p for p in (ROOT / "tests/fixtures/replay/assets").glob("*") if p.is_file())
+    paths.extend(p for p in (ROOT / "tests/fixtures/layout/assets").glob("*") if p.is_file())
     paths.extend(ROOT / name for name in ("AGENTS.md", "DEBUG_WORKFLOW.md") if (ROOT / name).is_file())
     return {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(paths)}
 
