@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "name": "english-inline-period",
+  "mode": "ui",
+  "source": "window",
+  "language": "en",
+  "responses": [
+    {"source": "1. Welcome to the test garden.", "translation": "1. 欢迎来到测试花园"}
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {"text": "Welcome to the test garden.", "box": [0.2, 0.2, 0.6, 0.06]},
+        {"text": "......", "box": [0.2, 0.4, 0.3, 0.06]}
+      ],
+      "expect": {"requests": 0, "inline": []}
+    },
+    {
+      "at_ms": 1200,
+      "action": "frame",
+      "blocks": [
+        {"text": "Welcome to the test garden.", "box": [0.2, 0.2, 0.6, 0.06]},
+        {"text": "......", "box": [0.2, 0.4, 0.3, 0.06]}
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": ["1. Welcome to the test garden."],
+        "inline": [{"sources": ["Welcome to the test garden."], "translations": ["欢迎来到测试花园"]}],
+        "captions": [],
+        "in_flight": false
+      }
+    }
+  ],
+  "notes": "English period survives production UI filtering/grouping/stability/batch delivery while a neighbouring punctuation-only OCR block is excluded."
+}

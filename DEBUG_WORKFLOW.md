@@ -187,11 +187,11 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 | 窗口 / 模式过期 | 迟到结果有丢弃原因且不更新旧字幕 |
 | 界面 | 字段确认、缓存复用及长短批次乱序映射；真实布局由既有模块与 UI 套件验证 |
 
-`known-gaps/english-period.json` 以“应提交英文对白”为断言，当前实际提交 0 次；trace 显示原始 OCR 存在而 extracted 为空，根因证据是 `shouldIgnoreInlineText` 的“含点且无日文字符”分支。本次保留失败证据，不修该产品 Bug。
+2026-10-10 英文句点追加修复：原 `known-gaps/english-period.json` 修复前仍以“应提交英文对白”为断言失败（预期 1 次、实际 0 次）；raw OCR 保留而 extracted 为空，根因是 `shouldIgnoreInlineText` 的“含点且无日文字符”提前删除。移除这一提前删除，继续通过实际字符判断过滤纯标点/符号/空白，保留现有日文、短碎片和按钮规则。夹具升级为普通 `english-period.json`，保留原请求断言并增加原文、字幕与静止去重；`english-inline-period.json` 检查界面英文句点交付及同帧纯省略号过滤。无窗口生产过滤检查覆盖两条路径、三种框宽、英文句号/省略号/缩写/全角句点、日文省略号及纯标点。修复后的命令与结果见本轮报告追加记录。
 
 2026-10-10 追加修复：`inFlight` 只由实时采集/OCR 占有，识别完成即释放；网络使用独立内容 revision 与操作计数。确认新对白/页面时取消旧批次，传输、字幕与排队中的面板交付均检查内容 revision。相同在途文字不重复请求；保持对白两帧确认、恢复原文打断候选及界面修正三帧规则。界面仅位置变化时复用请求，回包使用最新已确认字段坐标，缓存键序列变化时重新提交。服务测试仍独立。显式“翻译当前界面”的快照操作保持原单次忙碌合同，会作废之前的实时网络结果。
 
-原 `known-gaps/latest-frame-while-busy.json` 已升级为普通回归 `latest-frame-while-translating.json`；保留“C 已确认后不得交付 A”的目标，并加强 OCR 连续、相同帧长期去重、取消及迟到错误检查。另有采集卡版本、带稳定门的 `fast-switch-busy.json`、`inline-page-while-translating.json` 与 `cancelled-dialogue-recurrence.json`。后者验证 A→在途 B→A 建立新身份，再次出现 B 不受已取消请求的 4 秒节流影响，迟到 B 不覆盖字幕。只证明这些合成生产链路场景通过，不证明所有真实游戏场景均已验收。当前剩余已登记缺口为英文句点。
+原 `known-gaps/latest-frame-while-busy.json` 已升级为普通回归 `latest-frame-while-translating.json`；保留“C 已确认后不得交付 A”的目标，并加强 OCR 连续、相同帧长期去重、取消及迟到错误检查。另有采集卡版本、带稳定门的 `fast-switch-busy.json`、`inline-page-while-translating.json` 与 `cancelled-dialogue-recurrence.json`。后者验证 A→在途 B→A 建立新身份，再次出现 B 不受已取消请求的 4 秒节流影响，迟到 B 不覆盖字幕。只证明这些合成生产链路场景通过，不证明所有真实游戏场景均已验收。原两个已登记缺口均转为普通回归，历史失败证据保留；这不等于所有设备与产品场景完成验收。
 
 ## 标准 Bug 修复协议
 

@@ -89,3 +89,24 @@
 | `FY_TEST_COMPILE_ONLY=1 bash scripts/run-learning-app-tests.sh DisplayTargetFollowTests` | 退出 0，仅编译。 |
 
 远端 CI 在提交后另行核对，结果与链接在任务交付中报告；前文字体 CI 是历史证据，不能代表本次源码。没有请求真实 API、运行真实游戏/设备/UI 或测量玩家延迟，不能承诺固定几秒出译文；没有安装应用或发布附件。最短验收仍为前段列出的快切、恢复和界面换页场景。
+
+## 2026-10-10 追加：英文句点误删
+
+触发：英文对白或界面文字包含句点，例如合成原文 `Welcome to the test garden.`。实际 OCR 保留文字，但 `shouldIgnoreInlineText` 的“含点且无日文字符”提前返回删除整行，稳定后请求仍为 0；期望一次请求并显示译文。修复前重跑旧目标退出 1（预期 1、实际 0，`.build/debug/20261010T021942Z-c54e7d`），新增生产过滤检查退出 2（`.build/english-punctuation-filter-before.log`）。
+
+局部修复移除上述提前删除，保留原来的逐字符纯标点/符号/空白判断；英文句号和省略号可以与实际文字共存，日文 `え……` 等仍保留。短碎片、按钮与其它已有过滤规则未改。没有增加句长阈值、字词白名单或另一套模拟算法。修改位于 `objc/LiveCaptionTranslator.m`；两条过滤路线和三种框宽的英文/日文/纯标点检查加入 `TranslationTracePipelineTests.m`。
+
+原 `known-gaps/english-period.json` 升级为普通 `english-period.json`，保留原一请求目标并增加源文、字幕及重复帧去重；新增 `english-inline-period.json`，验证英文界面句点经真实分组、确认、批次请求与交付，旁边纯 `......` 块不进入请求。两个原登记缺口现均作为普通回归通过；历史失败记录仍保留，不能由此推断全部真实设备体验已验收。
+
+| 实际命令 | 本次结果 |
+| --- | --- |
+| `python3 scripts/debug.py replay tests/fixtures/replay/english-period.json --repeat 2` | 退出 0，两遍通过；`.build/debug/20261010T022258Z-5d0f69`。 |
+| `python3 scripts/debug.py replay tests/fixtures/replay/english-inline-period.json --repeat 2` | 退出 0，两遍通过；`.build/debug/20261010T022337Z-8b48db`。 |
+| `bash scripts/run-translation-trace-tests.sh` | 新检查修复前退出 2；修复后退出 0，原有实时/预览/请求隔离回归同时通过。 |
+| `python3 scripts/debug.py check` | 在本次索引快照执行，退出 0，72 passed / 0 known gaps，`source_unchanged=true`；模块、离线采集卡、布局、Trace、Replay 均通过。报告 `.build/english-punctuation-snapshot/.build/debug/20261010T022623Z-24a102/summary.json`。其 261 项源码/夹具/媒体哈希逐项与提交索引一致。 |
+| `ARCHS='arm64 x86_64' bash scripts/build-app.sh` | 退出 0；dSYM UUID 核对通过：arm64 `104396BF-649B-3287-B423-C173B4636F50`，x86_64 `432250A3-9843-33CA-96F7-46CFEC78BC4E`。未安装。 |
+| `git diff --check` | 退出 0。 |
+
+并行的其它 OCR 工作先后新增 `tests/OCRStrategyBenchmark.m` 与 `scripts/run-ocr-strategy-benchmark.py`，源码目录的前两次统一检查因此按源不变规则中止，退出 1，结果 `incomplete`（`.build/debug/20261010T022424Z-58fc7f`、`20261010T022530Z-af4df6`），不算通过。保留这些工作文件，使用 `git checkout-index --all --prefix=.build/english-punctuation-snapshot/` 导出只含本次待提交修改的索引快照后，完整检查通过；基准文件未混入本次提交。
+
+远端 CI 在提交后单列核对，并在交付中提供结果链接。本次没有安装、重启应用、调用真实服务或运行真实游戏/UI/设备。最短后续验收：用本次构建选英文，对含句号或省略号的完整对白核对译文；同时确认纯省略号不产生翻译请求、日文 `え……` 不漏句，再检查界面含句号文字的贴译。现场验收与自动回归分别记录。

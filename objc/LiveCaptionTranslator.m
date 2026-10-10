@@ -5904,7 +5904,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 - (BOOL)shouldIgnoreInlineText:(NSString *)text normalized:(NSString *)normalized boundingBox:(CGRect)box strict:(BOOL)strict {
     if (normalized.length == 0) { return YES; }
 
-    // 只有**完全没有假名/汉字**的行才算“没有可译内容”：纯省略号、纯标点、空白。
+    // 只过滤纯省略号、纯标点/符号与空白；没有假名/汉字不等于没有文字。
+    // 英文句号与省略号不能触发整行删除。
     // 只要含一个有效日文字符就必须保留 —— 「え……」只有一个字也必须留。
     //
     // 以前这里用「点号占比 ≥ 一半 + 实义部分 ≤ 3 字 + 框宽 < 0.16」判噪声，把
@@ -5913,23 +5914,16 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     // 字数/框宽/点号占比条件，不再用新的宽度阈值或词语表替代。
     {
         NSCharacterSet *dots = [NSCharacterSet characterSetWithCharactersInString:@"・…‥.．·"];
-        NSUInteger dotCount = 0;
         BOOL hasJapanese = NO;
         for (NSUInteger index = 0; index < text.length; index++) {
             unichar character = [text characterAtIndex:index];
-            if ([dots characterIsMember:character]) { dotCount += 1; continue; }
+            if ([dots characterIsMember:character]) { continue; }
             if ((character >= 0x3040 && character <= 0x30FF) ||    // 平假名 / 片假名
                 (character >= 0x4E00 && character <= 0x9FFF) ||    // 汉字
                 (character >= 0xFF66 && character <= 0xFF9F)) {    // 半角片假名
                 hasJapanese = YES;
                 break;
             }
-        }
-        if (dotCount > 0 && !hasJapanese) {
-            // 保留诊断：现场“少半句”时先看有没有这行，能直接区分“被过滤”和“OCR 漏读”。
-            FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f dots=%lu/%lu", FYDiagTextLength(text), box.size.width,
-                        (unsigned long)dotCount, (unsigned long)text.length);
-            return YES;
         }
         // 纯标点/符号行（同样没有假名汉字）也没有可译内容。
         if (!hasJapanese && text.length > 0) {

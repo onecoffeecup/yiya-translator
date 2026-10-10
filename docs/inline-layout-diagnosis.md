@@ -187,3 +187,5 @@ python3 scripts/layout-debug.py compare /absolute/private/before.json /absolute/
 本次只提交布局诊断、边界候选、正文尺寸复用、过期几何回调及普通贴译标题调整，其它会话的采集线程、翻译任务、学习库、iPad 与发布修改保留在工作区。混合文件按本次改动暂存，原工作文件保留。将待提交索引独立导出至 `.build/commit-layout/snapshot/` 后，执行 `python3 scripts/debug.py check` 退出 0：57 项结果，基线通过，保留已登记的两个产品缺口，`source_unchanged:true`；其中 P0 → P3 共 132686 条断言通过。报告为该快照中的 `.build/debug/20261009T011614Z-9a5721/summary.json`。`FY_TEST_COMPILE_ONLY=1` 下的 `InlineAdaptiveLayoutTests`、`InlineLayoutDebugUITests` 和 `scripts/run-tests.sh` 均编译通过；本次提交准备没有再次运行桌面浮窗，也没有安装、推送或发布。
 
 2026-10-10 后续状态：上述忙时快切失败是历史证据；该夹具已升级为普通 `latest-frame-while-translating.json`，追加窗口/采集卡、稳定确认和界面换页回归。当前实现与验证见 [实时识别不再等待翻译](live-preview-stall.md#2026-10-10实时识别不再等待翻译)，英文句点缺口仍保留。
+
+2026-10-10 再次追加：英文句点也已从已知失败目标转为普通回归；保留英文句子与日文省略号，纯标点仍过滤。上文计数与缺口为历史记录，本次命令与结果见 [审查报告](review-dev0.2.1-261009.md)。

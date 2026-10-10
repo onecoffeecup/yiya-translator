@@ -698,6 +698,30 @@ static NSArray *Records(NSString *log) {
 static NSUInteger Count(NSArray *records, NSString *event) {
     NSUInteger count = 0; for (NSDictionary *r in records) { if ([r[@"event"] isEqual:event]) { count++; } } return count;
 }
+static void CheckPunctuationFiltering(void) {
+    // Call the production filter on both routes; no window or mock filtering.
+    AppDelegate *app = [AppDelegate new];
+    NSArray<NSString *> *content = @[@"Welcome to the test garden.", @"Wait...", @"Let's go.",
+        @"Dr. Smith has arrived.", @"I am here．", @"Welcome to the test garden",
+        @"あれは・・・・・・", @"え……", @"退学って・・・・・•"];
+    NSArray<NSString *> *marks = @[@"......", @"……", @"・・・・・・・", @"．·‥", @"！！？", @"、。", @"　", @""];
+    for (NSNumber *strict in @[@YES, @NO]) {
+        for (NSNumber *width in @[@0.05, @0.115987, @0.30]) {
+            CGRect box = CGRectMake(.29, .11, width.doubleValue, .055);
+            for (NSString *text in content) {
+                Require(![app shouldIgnoreInlineText:text normalized:NormalizeForComparison(text)
+                    boundingBox:box strict:strict.boolValue],
+                    @"real English/Japanese words with periods or ellipses must survive both production filters");
+            }
+            for (NSString *text in marks) {
+                Require([app shouldIgnoreInlineText:text normalized:NormalizeForComparison(text)
+                    boundingBox:box strict:strict.boolValue],
+                    @"pure periods, ellipses, punctuation and whitespace remain filtered on both routes");
+            }
+        }
+    }
+    puts("PASS punctuation filter: English and Japanese content kept; pure marks still rejected on dialogue and UI routes");
+}
 int main(void) { @autoreleasepool {
     unsetenv("FUYI_DIAG");
     Require(!FuyiDiagEnabled(), @"isolated tests ignore live legacy screenshot switches");
@@ -706,6 +730,7 @@ int main(void) { @autoreleasepool {
     TestTrace = [[FYTranslationTrace alloc] initWithDirectory:root clock:^{ return NSDate.date.timeIntervalSince1970; } maxBytes:1024 * 1024];
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class, @selector(shared)), class_getClassMethod(FYTranslationTrace.class, @selector(pipelineTestShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
+    CheckPunctuationFiltering();
     CheckLatestDialogueWhileTranslating();
     CheckPendingInlineGeometry();
     CheckServiceTestCancellation();

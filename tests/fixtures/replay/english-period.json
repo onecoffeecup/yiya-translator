@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "name": "english-period",
+  "mode": "dialogue",
+  "source": "window",
+  "language": "en",
+  "responses": [
+    {
+      "source": "Welcome to the test garden.",
+      "translation": "欢迎来到测试花园"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "Welcome to the test garden.",
+      "expect": {"requests": 0}
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "Welcome to the test garden.",
+      "expect": {
+        "requests": 1,
+        "sources": ["Welcome to the test garden."],
+        "captions": ["欢迎来到测试花园"],
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "Welcome to the test garden.",
+      "expect": {"requests": 1, "captions": ["欢迎来到测试花园"]}
+    }
+  ],
+  "notes": "Promoted former known gap without weakening its one-request expectation: retain English periods through production filtering, stability, exact request source and caption delivery; repeated frames do not submit again."
+}
