@@ -207,7 +207,7 @@ static void ReleaseDue(void) {
     }
 }
 static void Settle(ReplayApp *app) {
-    ReplayPump(^BOOL { ReleaseDue(); return !app.inFlight || HasPending(); });
+    ReplayPump(^BOOL { ReleaseDue(); return !app.inFlight; });
     // Flush nested main dispatches, including inline application, without a sleep.
     MainBarrier(); ReleaseDue(); MainBarrier(); MainBarrier();
 }

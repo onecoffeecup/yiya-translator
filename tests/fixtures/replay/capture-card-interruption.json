@@ -21,7 +21,7 @@
       "expect": {
         "requests": 1,
         "ocr_calls": 1,
-        "has_reason": "task_busy"
+        "has_reason": "capture_card_no_new_frame"
       }
     },
     {

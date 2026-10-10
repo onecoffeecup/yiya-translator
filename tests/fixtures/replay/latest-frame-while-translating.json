@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
-  "name": "fast-switch-busy",
+  "name": "latest-frame-while-translating",
   "mode": "dialogue",
   "source": "window",
+  "stable": false,
   "responses": [
     {
       "source": "明日はみんなで図書館に行きましょう。",
@@ -27,97 +28,71 @@
       "action": "frame",
       "text": "明日はみんなで図書館に行きましょう。",
       "expect": {
-        "requests": 0
-      }
-    },
-    {
-      "at_ms": 500,
-      "action": "frame",
-      "text": "明日はみんなで図書館に行きましょう。",
-      "expect": {
         "requests": 1,
-        "in_flight": false
-      }
-    },
-    {
-      "at_ms": 1000,
-      "action": "frame",
-      "text": "今日は公園で犬と一緒に遊びます。",
-      "expect": {
-        "requests": 1,
-        "ocr_calls": 3,
-        "cancel_calls": 0
-      }
-    },
-    {
-      "at_ms": 1500,
-      "action": "frame",
-      "text": "明日はみんなで図書館に行きましょう。",
-      "expect": {
-        "requests": 1,
-        "cancel_calls": 0
-      }
-    },
-    {
-      "at_ms": 2000,
-      "action": "frame",
-      "text": "今日は公園で犬と一緒に遊びます。",
-      "expect": {
-        "requests": 1,
-        "cancel_calls": 0
-      }
-    },
-    {
-      "at_ms": 2500,
-      "action": "frame",
-      "text": "今日は公園で犬と一緒に遊びます。",
-      "expect": {
-        "requests": 2,
-        "cancel_calls": 1
-      }
-    },
-    {
-      "at_ms": 3000,
-      "action": "frame",
-      "text": "週末は家族と海を見に出かけます。",
-      "expect": {
-        "requests": 2,
-        "cancel_calls": 1
-      }
-    },
-    {
-      "at_ms": 3500,
-      "action": "frame",
-      "text": "週末は家族と海を見に出かけます。",
-      "expect": {
-        "requests": 3,
-        "cancel_calls": 2
-      }
-    },
-    {
-      "at_ms": 4000,
-      "action": "release",
-      "request": 2,
-      "expect": {
-        "captions": [
-          "测试译文丙"
-        ]
-      }
-    },
-    {
-      "at_ms": 4500,
-      "action": "release",
-      "request": 1,
-      "expect": {
-        "captions": [
-          "测试译文丙"
+        "in_flight": false,
+        "pending": [
+          0
         ]
       }
     },
     {
       "at_ms": 5000,
+      "action": "frame",
+      "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {
+        "requests": 1,
+        "ocr_calls": 2,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 5500,
+      "action": "frame",
+      "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {
+        "requests": 2,
+        "ocr_calls": 3,
+        "cancel_calls": 1,
+        "captions": []
+      }
+    },
+    {
+      "at_ms": 6000,
+      "action": "frame",
+      "text": "週末は家族と海を見に出かけます。",
+      "expect": {
+        "requests": 3,
+        "ocr_calls": 4,
+        "cancel_calls": 2,
+        "captions": []
+      }
+    },
+    {
+      "at_ms": 6500,
+      "action": "release",
+      "request": 2,
+      "expect": {
+        "captions": [
+          "测试译文丙"
+        ],
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 7000,
       "action": "release",
       "request": 0,
+      "expect": {
+        "captions": [
+          "测试译文丙"
+        ],
+        "errors": 0
+      }
+    },
+    {
+      "at_ms": 7500,
+      "action": "release",
+      "request": 1,
       "expect": {
         "captions": [
           "测试译文丙"
@@ -127,5 +102,5 @@
       }
     }
   ],
-  "notes": "Busy network must not freeze OCR; one-frame noise must not cancel requests, and a restored frame interrupts candidate confirmation."
+  "notes": "Former latest-frame-while-busy desired guarantee: OCR must continue, replace confirmed content, and never deliver cancelled A/B results or errors after C."
 }

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "name": "cancelled-dialogue-recurrence",
+  "mode": "dialogue",
+  "source": "window",
+  "stable": false,
+  "responses": [
+    {"source": "明日はみんなで図書館に行きましょう。", "translation": "甲一"},
+    {"source": "今日は公園で犬と一緒に遊びます。", "translation": "乙旧", "hold": true},
+    {"source": "明日はみんなで図書館に行きましょう。", "translation": "甲二"},
+    {"source": "今日は公園で犬と一緒に遊びます。", "translation": "乙新"}
+  ],
+  "steps": [
+    {"at_ms": 0, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {"requests": 1, "captions": ["甲一"]}},
+    {"at_ms": 500, "action": "frame", "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {"requests": 2, "captions": ["甲一"], "pending": [1]}},
+    {"at_ms": 1000, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
+      "expect": {"requests": 3, "cancel_calls": 1, "captions": ["甲一", "甲二"]}},
+    {"at_ms": 1500, "action": "frame", "text": "今日は公園で犬と一緒に遊びます。",
+      "expect": {"requests": 4, "captions": ["甲一", "甲二", "乙新"]}},
+    {"at_ms": 2000, "action": "release", "request": 1,
+      "expect": {"requests": 4, "captions": ["甲一", "甲二", "乙新"], "errors": 0, "pending": []}}
+  ],
+  "notes": "A cancelled B request must neither hide a genuine A-B-A recurrence nor throttle the next B; its late result cannot overwrite the current sentence."
+}

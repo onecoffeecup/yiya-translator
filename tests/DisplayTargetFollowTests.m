@@ -520,7 +520,7 @@ static void TestStaleCallbackDoesNotRestoreOldPosition(FYLearningStore *store, F
     [app timerFired:nil];
     Pump(^BOOL { return gPendingResponse != nil; });
     Check(gPendingResponse != nil, @"第二轮的网络请求被扣住在途（真实异步路径）");
-    Check(app.inFlight, @"翻译在途时 inFlight 为真");
+    Check(!app.inFlight && app.contentTranslationOperations > 0, @"翻译在途只占网络状态，识别忙碌已释放");
 
     // 响应回来之前切到全屏投影，并让几何复核发现这次切换（真实应用里由 0.5 秒轮询触发）。
     app.usesScriptedTarget = YES;

@@ -20,7 +20,7 @@
       "action": "advance",
       "expect": {
         "captions": [],
-        "in_flight": true
+        "in_flight": false
       }
     },
     {

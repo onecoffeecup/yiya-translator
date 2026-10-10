@@ -179,17 +179,19 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 | --- | --- |
 | 静止与重复 | 两次确认后一次请求 / 字幕，后续静止帧仍 OCR 且不重复翻译 |
 | OCR 抖动 | 一两帧近似错字不替换；恢复原文打断候选；省略号变体保留身份 |
-| 快切现状 | 忙时没有新 OCR / 请求，空闲后处理 C；明确不能保证 A 返回时画面仍是 A |
+| 翻译在途快切 | OCR 继续；已确认新对白/页面替换旧请求；重复帧不重复提交；旧回复与错误不能覆盖新内容，也不能释放正在执行的新 OCR |
 | 乱序 | 重启后 C 先返回、A / B 后返回，只有 C 展示；同代次长短批次逆序完成后仍正确归位 |
 | A→B→A | 三次真实出现建立不同身份并提交三次；连续身份的 cache probe 复用成功译文 |
-| 翻译失败 | 超时、429、无效 JSON 释放 inFlight；节流内不重试，到期后恢复并缓存成功结果 |
+| 翻译失败 | 超时、429、无效 JSON 结束网络状态；OCR 不受阻塞；节流内不重试，到期后恢复并缓存成功结果 |
 | 输入中断 | 截图失败保留上一条、恢复后处理新对白；采集卡断开作废旧 epoch，重连后的新帧恢复 |
 | 窗口 / 模式过期 | 迟到结果有丢弃原因且不更新旧字幕 |
 | 界面 | 字段确认、缓存复用及长短批次乱序映射；真实布局由既有模块与 UI 套件验证 |
 
 `known-gaps/english-period.json` 以“应提交英文对白”为断言，当前实际提交 0 次；trace 显示原始 OCR 存在而 extracted 为空，根因证据是 `shouldIgnoreInlineText` 的“含点且无日文字符”分支。本次保留失败证据，不修该产品 Bug。
 
-`known-gaps/latest-frame-while-busy.json` 以“画面已到 C 后不能应用 A”为断言，当前会应用 A。`inFlight` 阻止 B / C 被采集；日志中 `task_busy` 和 OCR 次数给出证据。是否解耦采集 / 翻译、取消旧请求及如何管理并发，应在后续独立修复中落实。现有代次保护不能证明此更强要求已满足。
+2026-10-10 追加修复：`inFlight` 只由实时采集/OCR 占有，识别完成即释放；网络使用独立内容 revision 与操作计数。确认新对白/页面时取消旧批次，传输、字幕与排队中的面板交付均检查内容 revision。相同在途文字不重复请求；保持对白两帧确认、恢复原文打断候选及界面修正三帧规则。界面仅位置变化时复用请求，回包使用最新已确认字段坐标，缓存键序列变化时重新提交。服务测试仍独立。显式“翻译当前界面”的快照操作保持原单次忙碌合同，会作废之前的实时网络结果。
+
+原 `known-gaps/latest-frame-while-busy.json` 已升级为普通回归 `latest-frame-while-translating.json`；保留“C 已确认后不得交付 A”的目标，并加强 OCR 连续、相同帧长期去重、取消及迟到错误检查。另有采集卡版本、带稳定门的 `fast-switch-busy.json`、`inline-page-while-translating.json` 与 `cancelled-dialogue-recurrence.json`。后者验证 A→在途 B→A 建立新身份，再次出现 B 不受已取消请求的 4 秒节流影响，迟到 B 不覆盖字幕。只证明这些合成生产链路场景通过，不证明所有真实游戏场景均已验收。当前剩余已登记缺口为英文句点。
 
 ## 标准 Bug 修复协议
 
@@ -235,7 +237,7 @@ python3 scripts/run-acceptance.py --ui
 | 一直没有译文 | 当前构建、权限、显示窗口、capture；采集卡 frame index 是否增长，是否只是 busy 或无新帧 |
 | 少半句 | raw → pass1 → merged → modal → extracted；干净源图不能按已有译文过滤原文 |
 | 一句重复请求 | logical ID / HTTP task 是否长短批次；cache miss、身份 / 版本、失败重试或 A→B→A 是否属于既定行为 |
-| 旧字幕覆盖 | generation / epoch / window / mode 的 drop；同代次 busy 期间画面变化目前是已知缺口 |
+| 旧字幕覆盖 | generation / epoch / window / mode 的 drop；同代次新内容检查 content revision；未确认的一帧变化仍受稳定规则保护 |
 | 贴译闪动或错位 | inline_grouped / inline_stable 的块和位置；几何代次、映射与布局；最后核对真实面板 |
 | 测试超时 | 看该步骤日志、native failure 与 task 状态；首次 Vision 初始化可用媒体夹具的回调期限，不把超时当通过 |
 

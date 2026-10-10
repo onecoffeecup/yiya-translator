@@ -81,7 +81,7 @@
       "request": 1,
       "expect": {
         "inline": [],
-        "in_flight": true
+        "in_flight": false
       }
     },
     {

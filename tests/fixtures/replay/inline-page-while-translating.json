@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "name": "inline-page-while-translating",
+  "mode": "ui",
+  "source": "window",
+  "responses": [
+    {
+      "source": "1. 設定メニュー",
+      "translation": "1. 设置菜单",
+      "hold": true
+    },
+    {
+      "source": "1. 保存メニュー",
+      "translation": "1. 保存菜单",
+      "hold": true
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "設定メニュー",
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 1200,
+      "action": "frame",
+      "text": "設定メニュー",
+      "expect": {
+        "requests": 1,
+        "in_flight": false,
+        "pending": [
+          0
+        ]
+      }
+    },
+    {
+      "at_ms": 2400,
+      "action": "frame",
+      "text": "保存メニュー",
+      "expect": {
+        "requests": 1,
+        "ocr_calls": 3,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 3600,
+      "action": "frame",
+      "text": "保存メニュー",
+      "expect": {
+        "requests": 1,
+        "ocr_calls": 4,
+        "cancel_calls": 0,
+        "inline": []
+      }
+    },
+    {
+      "at_ms": 10000,
+      "action": "frame",
+      "text": "保存メニュー",
+      "expect": {
+        "requests": 2,
+        "ocr_calls": 5,
+        "cancel_calls": 1
+      }
+    },
+    {
+      "at_ms": 10500,
+      "action": "frame",
+      "text": "保存メニュー",
+      "expect": {
+        "requests": 2,
+        "ocr_calls": 6,
+        "cancel_calls": 1
+      }
+    },
+    {
+      "at_ms": 11000,
+      "action": "release",
+      "request": 1,
+      "expect": {
+        "inline": [
+          {
+            "sources": [
+              "保存メニュー"
+            ],
+            "translations": [
+              "保存菜单"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "at_ms": 12000,
+      "action": "release",
+      "request": 0,
+      "expect": {
+        "inline": [
+          {
+            "sources": [
+              "保存メニュー"
+            ],
+            "translations": [
+              "保存菜单"
+            ]
+          }
+        ],
+        "pending": []
+      }
+    }
+  ],
+  "notes": "UI page confirmation continues while HTTP waits; confirmed next page cancels the old batch, and repeated pending page never duplicates it. Same-position UI text corrections retain the existing three-frame confirmation."
+}

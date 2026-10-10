@@ -814,6 +814,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic) NSInteger translationGeneration;
 @property(nonatomic) BOOL running;
 @property(nonatomic) BOOL inFlight;
+// Capture/OCR owns inFlight. Network work has a separate latest-content lease.
+@property(nonatomic) NSUInteger contentTranslationRevision;
+@property(nonatomic) NSUInteger contentTranslationOperations;
+@property(nonatomic, copy) NSString *contentTranslationText;
+@property(nonatomic) NSInteger contentTranslationMode;
+@property(nonatomic, copy) NSArray<OCRTextItem *> *contentTranslationUIItems;
+@property(nonatomic) NSInteger contentTranslationGeometryGeneration;
+@property(nonatomic) uint32_t contentTranslationDisplayTarget;
 @property(nonatomic) BOOL screenAccessRequestedDuringSession;
 @property(nonatomic) BOOL mainWindowVisibleBeforeRegionSelection;
 @property(nonatomic) BOOL captionPanelVisibleBeforeRegionSelection;
@@ -3386,12 +3394,58 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
 #pragma mark - Actions
 
+- (void)invalidateContentTranslation {
+    if (self.contentTranslationOperations) {
+        // A cancelled attempt must not delay a new occurrence of that sentence.
+        self.lastSubmittedNormalizedText = nil;
+        self.lastTranslationAttemptDate = nil;
+    }
+    self.contentTranslationRevision += 1;
+    self.contentTranslationOperations = 0;
+    self.contentTranslationText = nil;
+    self.contentTranslationUIItems = nil;
+    [self.translationTaskOwner cancelActiveTask];
+}
+
+- (BOOL)pendingContentMatchesText:(NSString *)text mode:(NSInteger)mode {
+    if (!self.contentTranslationOperations || mode != self.contentTranslationMode) return NO;
+    return mode == ContentModeUI ? [text isEqualToString:self.contentTranslationText]
+        : [self isSameSubtitleText:text comparedTo:self.contentTranslationText];
+}
+
+- (BOOL)pendingInlineMatchesItems:(NSArray<OCRTextItem *> *)items {
+    if (items.count != self.contentTranslationUIItems.count) return NO;
+    for (NSUInteger index = 0; index < items.count; index++) {
+        if (![[self inlineTranslationCacheKeyForItem:items[index]] isEqualToString:
+              [self inlineTranslationCacheKeyForItem:self.contentTranslationUIItems[index]]]) return NO;
+    }
+    return YES;
+}
+
+- (NSUInteger)beginContentTranslation:(NSString *)text mode:(NSInteger)mode {
+    [self invalidateContentTranslation];
+    self.contentTranslationOperations = 1;
+    self.contentTranslationText = text;
+    self.contentTranslationMode = mode;
+    self.lastSubmittedNormalizedText = text;
+    self.lastTranslationAttemptDate = [self translationProcessingDate];
+    self.contentTranslationGeometryGeneration = self.ocrGeometryGeneration;
+    self.contentTranslationDisplayTarget = self.ocrDisplayTargetWindowID;
+    return self.contentTranslationRevision;
+}
+
+- (void)finishContentTranslation:(NSUInteger)revision {
+    if (revision == self.contentTranslationRevision && self.contentTranslationOperations) {
+        self.contentTranslationOperations -= 1;
+    }
+}
+
 - (void)advanceTranslationGeneration {
     self.translationGeneration += 1;
     self.previewRequestSerial += 1;
     self.previewRenderSerial += 1;
     self.lastPreviewCaptureFrameIndex = 0;
-    [self.translationTaskOwner cancelActiveTask];
+    [self invalidateContentTranslation];
 }
 
 - (void)toggleRunning:(id)sender {
@@ -3482,18 +3536,25 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 - (void)handleInlineTranslationResult:(NSArray<NSString *> *)translations forItems:(NSArray<OCRTextItem *> *)items error:(NSError *)translationError failureStatus:(NSString *)failureStatus successPrefix:(NSString *)successPrefix {
     NSDictionary *trace = FYCurrentTrace();
     NSDictionary *layoutDebug = FYCurrentLayoutDebug();
+    NSUInteger contentRevision = self.contentTranslationRevision;
     NSInteger generation = self.translationGeneration;
     NSInteger mode = [self effectiveModeSegment];
     NSUInteger inputEpoch = self.captureCardInput.sessionEpoch;
     // 这一批 OCR 块属于哪一帧画面：几何代次 + 显示目标都是**发出请求时**记下的。
     // 翻译期间切了窗口/投影的话，这些块对应的坐标系已经失效，绝不能把旧位置的贴译放回去。
-    NSInteger cycleGeometry = self.ocrGeometryGeneration;
-    uint32_t cycleTarget = self.ocrDisplayTargetWindowID;
+    NSInteger cycleGeometry = self.contentTranslationOperations
+        ? self.contentTranslationGeometryGeneration : self.ocrGeometryGeneration;
+    uint32_t cycleTarget = self.contentTranslationOperations
+        ? self.contentTranslationDisplayTarget : self.ocrDisplayTargetWindowID;
     // 先建立"画面 → 显示区域"的落位矩形：窗口截图用整个目标窗口，采集卡用视频帧适配后的可见矩形。
     NSRect placement = NSZeroRect;
     NSString *placementReason = nil;
     BOOL hasPlacement = [self inlinePlacementRect:&placement reason:&placementReason];
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (contentRevision != self.contentTranslationRevision) {
+            FYTrace(trace, @"inline_drop", @{@"reason": @"content_changed"});
+            return;
+        }
         NSString *reason = FYInlineDeliveryDropReason(generation, self.translationGeneration, inputEpoch,
             self.captureCardInput.sessionEpoch, self.running, mode,
             (generation == self.translationGeneration && inputEpoch == self.captureCardInput.sessionEpoch && self.running) ? [self effectiveModeSegment] : mode);
@@ -3926,6 +3987,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
                         return;
                     }
+                    // The network must never hold the capture/OCR slot.
+                    self.inFlight = NO;
                     self.ocrDurationLabel.stringValue = [NSString stringWithFormat:@"最近识别  %.2f 秒", ocrDuration];
                     if (error) {
                         FYTrace(trace, @"skip", @{@"reason": @"ocr_error", @"error_code": @(error.code)});
@@ -3956,6 +4019,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         NSInteger committedMode = (self.inlineOverflowChoicePanel || self.inlineExpandedReadingPanel)
                             ? previousMode : [self stableContentModeForBlocks:ocrBlocks];
                         if (previousMode != committedMode) {
+                            [self invalidateContentTranslation];
                             // Follow the new mode's cadence without creating a timer
                             // in headless/manual single-frame callers.
                             if (self.timer) { [self restartTimerIfRunning]; }
@@ -4036,6 +4100,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         }
                     }
 
+                    if (sameTextAsRendered && self.contentTranslationOperations &&
+                        (![self pendingContentMatchesText:normalized mode:currentFrameMode] ||
+                         (currentFrameMode == ContentModeUI && ![self pendingInlineMatchesItems:currentUIItems]))) {
+                        // A -> pending B -> A is a new occurrence. Let the existing
+                        // stability/identity rules confirm it instead of skipping A.
+                        [self invalidateContentTranslation];
+                        sameTextAsRendered = NO;
+                    }
                     if (sameTextAsRendered && !geometryChangedSinceRender && !groupingChangedSinceRender) {
                         self.inlineOCRPendingText = nil;
                         self.inlineOCRPendingCount = 0;
@@ -4057,6 +4129,18 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     if (sameTextAsRendered) {
                         FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated_geometry_changed"});
                         [self setStatus:[NSString stringWithFormat:@"画面位置变化 · 用已有译文重排 · OCR %.1fs", ocrDuration]];
+                    }
+                    if ([self pendingContentMatchesText:normalized mode:currentFrameMode] &&
+                        (currentFrameMode != ContentModeUI || [self pendingInlineMatchesItems:currentUIItems])) {
+                        [[self stabilityOwner] reset];
+                        if (currentFrameMode == ContentModeUI) {
+                            self.contentTranslationUIItems = currentUIItems;
+                            self.contentTranslationGeometryGeneration = self.ocrGeometryGeneration;
+                            self.contentTranslationDisplayTarget = self.ocrDisplayTargetWindowID;
+                        }
+                        FYTrace(trace, @"skip", @{@"reason": @"translation_pending"});
+                        [self setStatus:[NSString stringWithFormat:@"正在等待当前文字的译文 · OCR %.1fs", ocrDuration]];
+                        return;
                     }
                     // UI OCR changes have already been confirmed per on-screen block by
                     // inlineFrameStabilizer. A second whole-page text gate would make a
@@ -4093,9 +4177,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
                     FYTrace(trace, @"stable", @{@"reason": shouldWaitForStableText ? @"accepted" : @"not_required",
                                                @"stable_required": @(shouldWaitForStableText), @"stable_count": @(self.stableCandidateCount)});
-                    self.lastSubmittedNormalizedText = normalized;
-                    self.lastTranslationAttemptDate = [self translationProcessingDate];
-
                     {
                         NSUInteger tokens = UITokenHitCount(ocrBlocks);
                         NSUInteger substantial = 0;
@@ -4114,11 +4195,13 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     }
 
                     NSInteger frameMode = [self effectiveModeSegment];
+                    NSUInteger contentRevision = [self beginContentTranslation:normalized mode:frameMode];
 
                     if (frameMode == ContentModeUI) {
                         [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
                         NSMutableArray<OCRTextItem *> *uiItems = [currentUIItems mutableCopy];
                         if (uiItems.count == 0) {
+                            [self finishContentTranslation:contentRevision];
                             FYTrace(trace, @"skip", @{@"reason": @"ui_no_translatable_items", @"route": @"ui"});
                             if (captureCard) {
                                 // 采集卡模式本来就没有贴译面板；字幕窗保留上一条，只更新状态。
@@ -4140,6 +4223,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         NSString *uiStatus = [NSString stringWithFormat:@"翻译界面 · OCR %.1fs", ocrDuration];
                         [self setStatus:uiStatus];
                         NSArray<OCRTextItem *> *uiItemsForRender = [uiItems copy];
+                        self.contentTranslationUIItems = uiItemsForRender;
                         NSDate *uiTranslateStart = [NSDate date];
                         NSArray<FYRequestIdentity *> *uiIdentities = [self.learningCoordinator recordItems:[self textsFromItems:uiItemsForRender] kind:FYSentenceKindUI];
                         [self refreshLearningSource];
@@ -4147,6 +4231,11 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
                         FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
                         [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
+                            if (contentRevision != self.contentTranslationRevision) {
+                                FYTrace(uiTrace, @"inline_drop", @{@"reason": @"content_changed"});
+                                return;
+                            }
+                            NSArray<OCRTextItem *> *renderItems = self.contentTranslationUIItems ?: uiItemsForRender;
                             if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
                                 inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeUI) {
                                 NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
@@ -4154,7 +4243,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                        : (windowID != [self displayTargetWindowID] ? @"window_changed"
                                           : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
                                 FYTrace(uiTrace, @"inline_drop", @{@"reason": reason, @"route": @"ui", @"input_epoch": @(inputEpoch)});
-                                if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
+                                [self finishContentTranslation:contentRevision];
                                 return;
                             }
                             self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", [[NSDate date] timeIntervalSinceDate:uiTranslateStart]];
@@ -4172,18 +4261,18 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                 // 绝不静默把界面译文当成对白塞进字幕窗。
                                 [self setCaptionPanelVisibleForUIMode:YES];
                                 FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-                                    [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"采集卡：界面翻译出错" successPrefix:@"采集卡界面译文已更新"];
+                                    [self handleInlineTranslationResult:translations forItems:renderItems error:translationError failureStatus:@"采集卡：界面翻译出错" successPrefix:@"采集卡界面译文已更新"];
                                 });
                                 if (!translationError) {
                                     self.lastTranslatedNormalizedText = normalized;
                                     self.translationCount += 1;
                                     [self updateTranslationCount];
                                 }
-                                self.inFlight = NO;
+                                [self finishContentTranslation:contentRevision];
                                 return;
                             }
                             FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
-                                [self handleInlineTranslationResult:translations forItems:uiItemsForRender error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
+                                [self handleInlineTranslationResult:translations forItems:renderItems error:translationError failureStatus:@"界面翻译出错" successPrefix:@"界面译文已更新"];
                             });
                             if (!translationError) {
                                 self.lastTranslatedNormalizedText = normalized;
@@ -4192,7 +4281,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                             }
                             // 界面模式下字幕窗默认收起；映射不可用时由提示逻辑重新显示它。
                             [self setCaptionPanelVisibleForUIMode:YES];
-                            self.inFlight = NO;
+                            [self finishContentTranslation:contentRevision];
                         }];
                         });
                         return;
@@ -4227,6 +4316,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
                     // 选项：走贴译路线，贴在原选项文字旁边；有缓存时不会重复请求
                     if (optionItems.count > 0) {
+                        self.contentTranslationOperations += 1;
                         NSArray<OCRTextItem *> *optionsToRender = [optionItems copy];
                         NSArray<FYRequestIdentity *> *optionIdentities = [self.learningCoordinator recordItems:[self textsFromItems:optionsToRender] kind:FYSentenceKindOption];
                         [self refreshLearningSource];
@@ -4234,6 +4324,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         NSDictionary *optionTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
                         FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
                         [self translateInlineTextItems:optionsToRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
+                            if (contentRevision != self.contentTranslationRevision) {
+                                FYTrace(optionTrace, @"inline_drop", @{@"reason": @"content_changed"});
+                                return;
+                            }
                             if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
                                 inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
                                 NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
@@ -4241,6 +4335,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                        : (windowID != [self displayTargetWindowID] ? @"window_changed"
                                           : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
                                 FYTrace(optionTrace, @"inline_drop", @{@"reason": reason, @"route": @"option", @"input_epoch": @(inputEpoch)});
+                                [self finishContentTranslation:contentRevision];
                                 return;
                             }
                             [self bindTranslations:translations toIdentities:optionIdentities];
@@ -4249,12 +4344,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                             FYInlineDebugTracePerform(optionTrace, layoutDebug, ^{
                                 [self handleInlineTranslationResult:translations forItems:optionsToRender error:translationError failureStatus:@"选项翻译出错" successPrefix:@"选项已贴译"];
                             });
+                            [self finishContentTranslation:contentRevision];
                         }];
                         });
                     }
 
                     FYTrace(trace, @"dialogue", @{@"stage": @"extracted", @"source": dialogueText ?: @""});
                     if (NormalizeForComparison(dialogueText).length < 2) {
+                        [self finishContentTranslation:contentRevision];
                         FYTrace(trace, @"skip", @{@"reason": @"dialogue_empty"});
                         [self setStatus:@"对白框暂无可译文字"];
                         self.inFlight = NO;
@@ -4277,6 +4374,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     FYInlineDebugTracePerform(dialogueTrace, layoutDebug, ^{
                     [self translateDialogueText:dialogueText identity:dialogueIdentity systemPrompt:[self systemPrompt] completion:^(NSString *translated, NSError *translationError) {
                         dispatch_async(dispatch_get_main_queue(), ^{
+                            if (contentRevision != self.contentTranslationRevision) {
+                                FYTrace(dialogueTrace, @"caption_drop", @{@"reason": @"content_changed"});
+                                return;
+                            }
                             if (cycleGeneration != self.translationGeneration || !self.running || windowID != [self displayTargetWindowID] ||
                                 inputEpoch != self.captureCardInput.sessionEpoch || [self effectiveModeSegment] != ContentModeDialogue) {
                                 NSString *reason = cycleGeneration != self.translationGeneration ? @"generation_changed"
@@ -4284,7 +4385,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                        : (windowID != [self displayTargetWindowID] ? @"window_changed"
                                           : (inputEpoch != self.captureCardInput.sessionEpoch ? @"input_session_changed" : @"mode_changed")));
                                 FYTrace(dialogueTrace, @"caption_drop", @{@"reason": reason, @"input_epoch": @(inputEpoch)});
-                                if (cycleGeneration == self.translationGeneration) { self.inFlight = NO; }
+                                [self finishContentTranslation:contentRevision];
                                 return;
                             }
                             NSTimeInterval translationDuration = [[NSDate date] timeIntervalSinceDate:translationStart];
@@ -4315,7 +4416,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                 self.latestSourceLabel.stringValue = dialogueText;
                                 [self updateTranslationCount];
                             }
-                            self.inFlight = NO;
+                            [self finishContentTranslation:contentRevision];
                         });
                     }];
                     });
@@ -5251,6 +5352,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         return;
     }
 
+    [self invalidateContentTranslation];
     self.inFlight = YES;
     NSInteger cycleGeneration = self.translationGeneration;
     // 和实时循环一致：识别与贴译都用**实际承载游戏画面的窗口**。
@@ -8812,6 +8914,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     if (!serviceTest && !self.translationTaskOwner) { self.translationTaskOwner = [FYTranslationTaskOwner new]; }
     FYTranslationTaskOwner *owner = serviceTest ? self.serviceTestTaskOwner : self.translationTaskOwner;
     NSInteger generation = serviceTest ? self.serviceTestGeneration : self.translationGeneration;
+    NSUInteger contentRevision = self.contentTranslationRevision;
     uint32_t diagnosticWindowID = [self displayTargetWindowID];
     __block __weak NSURLSessionDataTask *submittedTask = nil;
     void (^deliver)(NSString *, NSError *) = ^(NSString *translated, NSError *error) {
@@ -8820,6 +8923,10 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         FYDeliverTranslationOnMain(generation, ^NSInteger { return serviceTest ? self.serviceTestGeneration : self.translationGeneration; },
             translated, error, ^(NSString *value, NSError *failure) {
                 [owner finishTask:submittedTask];
+                if (!serviceTest && contentRevision != self.contentTranslationRevision) {
+                    FYTrace(trace, @"caption_drop", @{@"reason": @"content_changed_before_delivery"});
+                    return;
+                }
                 completion(value, failure);
             }, ^{
                 [owner finishTask:submittedTask];

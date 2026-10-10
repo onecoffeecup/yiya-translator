@@ -85,6 +85,7 @@ static void (^PendingResponse)(void);
 @property uint32_t fixtureWindowID;
 @property NSInteger fixtureMode;
 @property NSUInteger inlineApplies;
+@property NSArray<OCRTextItem *> *lastInlineItems;
 @property BOOL captureReadOnMain;
 @property NSUInteger ocrCalls;
 @property(copy) NSString *lastStatus;
@@ -134,8 +135,8 @@ static void (^PendingResponse)(void);
 - (void)showError:(NSString *)s { Require(s.length == 0, @"unexpected pipeline error"); }
 - (void)updateTranslationCount {}
 - (void)updateCaptionWindowWithText:(NSString *)text status:(NSString *)status { [self.captions addObject:text]; }
-- (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items { self.inlineApplies++; }
-- (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items placementRect:(NSRect)rect { self.inlineApplies++; }
+- (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items { self.inlineApplies++; self.lastInlineItems=items; }
+- (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items placementRect:(NSRect)rect { self.inlineApplies++; self.lastInlineItems=items; }
 - (NSArray *)filteredInlineTextItems:(NSArray *)items strict:(BOOL)strict { return items; }
 - (NSArray *)mergedInlineTextItemsFromItems:(NSArray *)items { return items; }
 - (NSArray *)recognizeTextItemsInImage:(CGImageRef)i fastOCR:(BOOL)f languageSegment:(NSInteger)l error:(NSError **)e {
@@ -270,7 +271,7 @@ static void CheckIndependentLivePreview(void) {
         MockRequests = 0; SubmittedSources = [NSMutableArray new];
         PendingResponse = nil; HoldResponse = YES;
         [a timerFired:nil]; Pump(^BOOL { return PendingResponse != nil; });
-        Require(a.inFlight, @"production HTTP request is held while preview is tested");
+        Require(!a.inFlight && a.activeTranslationTask, @"production HTTP request is held independently while preview is tested");
         NSUInteger ocrBefore = a.ocrCalls, requestsBefore = MockRequests;
         uint64_t ocrFrameBefore = a.lastOCRedCaptureFrameIndex;
         [a restartPreviewTimerIfRunning];
@@ -284,7 +285,7 @@ static void CheckIndependentLivePreview(void) {
             Pump(^BOOL { return a.previewApplies > before && a.previewWidth == 16 + index; });
             Require(a.previewWidth == 16 + index, @"preview follows new frames while translation is busy");
         }
-        Require(a.inFlight && a.ocrCalls == ocrBefore && MockRequests == requestsBefore,
+        Require(!a.inFlight && a.activeTranslationTask && a.ocrCalls == ocrBefore && MockRequests == requestsBefore,
                 @"preview never clears OCR ownership or submits extra translation requests");
         if (source == 1) {
             NSUInteger before = a.previewApplies;
@@ -415,11 +416,87 @@ static NSArray *Fixture(NSString *text, CGFloat width) {
     return @[item];
 }
 static void TraceCycle(TracePipelineApp *a, NSArray *fixture) {
-    a.fixture = fixture; [a timerFired:nil]; Pump(^BOOL { return !a.inFlight; });
+    a.fixture = fixture; [a timerFired:nil]; Pump(^BOOL { return !a.inFlight && !a.activeTranslationTask && !a.contentTranslationOperations; });
     Require(FYCurrentTrace() == nil, @"scoped context cannot leak after timer callback");
     Require(![(TraceControl *)(id)a.autoFitRegionCheckbox stateReadOffMain], @"OCR options must be read on the main thread");
     Require(!a.activeTranslationTask, @"completed HTTP tasks release run ownership");
     Require(!a.captureReadOnMain, @"window pixels are captured off the main thread");
+}
+static void CheckLatestDialogueWhileTranslating(void) {
+    for (NSUInteger source = 0; source < 2; source++) {
+        TracePipelineApp *a = TraceApp(); a.inputSourceSegment=source;
+        FYTestCaptureCardInput *card=[FYTestCaptureCardInput new]; a.captureCardInput=card;
+        a.stableTextCheckbox.state=NSControlStateValueOff;
+        MockRequests=0; SubmittedSources=[NSMutableArray new]; HoldResponse=YES; PendingResponse=nil;
+        a.fixture=Fixture(@"明日はみんなで図書館に行きましょう。",.65);
+        Require([card testEnqueueFrameIndex:1 pixelSize:16], @"synthetic initial frame");
+        [a timerFired:nil]; Pump(^BOOL { return PendingResponse != nil; });
+        TraceTask *first=LastTask;
+        Require(!a.inFlight, @"a pending translation must not own the capture/OCR busy flag");
+        for (NSUInteger index=2; index<=5; index++) {
+            Require([card testEnqueueFrameIndex:index pixelSize:16], @"synthetic repeated frame");
+            [a timerFired:nil]; Pump(^BOOL { return a.ocrCalls==index && !a.inFlight; });
+        }
+        Require(MockRequests==1 && first.cancelCalls==0, @"unchanged pending dialogue is recognized without duplicate requests or cancellation");
+        a.fixture=Fixture(@"今日は公園で犬と一緒に遊びます。",.65);
+        Require([card testEnqueueFrameIndex:6 pixelSize:16], @"synthetic next sentence");
+        [a timerFired:nil]; Pump(^BOOL { return MockRequests==2; }); TraceTask *second=LastTask;
+        Require(first.cancelCalls==1, @"new confirmed dialogue cancels the old request");
+        a.fixture=Fixture(@"週末は家族と海を見に出かけます。",.65);
+        Require([card testEnqueueFrameIndex:7 pixelSize:16], @"synthetic latest sentence");
+        [a timerFired:nil]; Pump(^BOOL { return MockRequests==3; }); TraceTask *latest=LastTask;
+        Require(second.cancelCalls==1, @"the latest sentence replaces the intermediate request");
+        latest.response(); Pump(^BOOL { return a.captions.count==1; });
+        if (source==0) {
+            a.captureEntered=dispatch_semaphore_create(0); a.captureRelease=dispatch_semaphore_create(0);
+            dispatch_semaphore_t release=a.captureRelease;
+            [a timerFired:nil];
+            Require(dispatch_semaphore_wait(a.captureEntered,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0,@"hold the next real capture boundary");
+            first.response(); second.response(); Tick();
+            Require(a.inFlight,@"late responses must not release a newer capture's busy slot");
+            dispatch_semaphore_signal(release); Pump(^BOOL { return !a.inFlight; });
+        } else { first.response(); second.response(); Tick(); }
+        Require([a.captions isEqual:@[@"测试译文3"]], @"cancelled late responses cannot display old dialogue or overwrite the latest caption");
+        Require(!a.activeTranslationTask, @"late old completions cannot retain or replace the new task owner");
+        [a stop]; HoldResponse=NO; PendingResponse=nil;
+    }
+    puts("PASS latest dialogue: OCR continues; same sentence deduplicates; A/B cancelled; C alone delivered; old replies cannot release new OCR");
+}
+static void CheckPendingInlineGeometry(void) {
+    TracePipelineApp *a=TraceApp(); a.fixtureMode=ContentModeUI;
+    MockRequests=0; SubmittedSources=[NSMutableArray new]; HoldResponse=YES; PendingResponse=nil;
+    a.fixture=Fixture(@"設定メニュー",.3);
+    for (NSUInteger index=1; index<=2; index++) {
+        [a timerFired:nil]; Pump(^BOOL { return a.ocrCalls==index && !a.inFlight; });
+    }
+    Require(MockRequests==1 && PendingResponse!=nil,@"one confirmed UI batch is held");
+    TraceTask *task=LastTask;
+    a.fixture=Fixture(@"設定メニュー",.3);
+    ((OCRTextItem *)a.fixture.firstObject).boundingBox=CGRectMake(.24,.2,.3,.055);
+    for (NSUInteger index=3; index<=4; index++) {
+        [a timerFired:nil]; Pump(^BOOL { return a.ocrCalls==index && !a.inFlight; });
+    }
+    Require(MockRequests==1 && task.cancelCalls==0,@"only geometry moves: reuse the pending batch");
+    task.response(); Pump(^BOOL { return a.inlineApplies==1; });
+    Require(fabs(a.lastInlineItems.firstObject.boundingBox.origin.x-.24)<.001,
+            @"late UI response renders using the latest confirmed OCR geometry");
+    Require(a.contentTranslationOperations==0,@"the UI batch releases its own network slot");
+    a.fixture=Fixture(@"保存メニュー",.3);
+    for (NSUInteger index=5; index<=7; index++) {
+        [a timerFired:nil]; Pump(^BOOL { return a.ocrCalls==index && !a.inFlight; });
+    }
+    Require(MockRequests==2,@"hold the next confirmed UI page");
+    TraceTask *oldGeometry=LastTask;
+    a.geometryGeneration+=1;
+    a.captureEntered=dispatch_semaphore_create(0); a.captureRelease=dispatch_semaphore_create(0);
+    dispatch_semaphore_t release=a.captureRelease;
+    [a timerFired:nil];
+    Require(dispatch_semaphore_wait(a.captureEntered,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0,@"new geometry capture is pending");
+    oldGeometry.response(); Pump(^BOOL { return a.contentTranslationOperations==0; }); Tick();
+    Require(a.inlineApplies==1 && a.inFlight,@"an old UI batch cannot borrow the geometry of a newer unfinished OCR or release its slot");
+    dispatch_semaphore_signal(release); Pump(^BOOL { return !a.inFlight; });
+    [a stop]; HoldResponse=NO; PendingResponse=nil;
+    puts("PASS pending UI geometry: OCR continues, one batch retained, latest confirmed boxes used for delivery");
 }
 static void CheckServiceTestCancellation(void) {
     for (NSUInteger action = 0; action < 4; action++) {
@@ -629,6 +706,8 @@ int main(void) { @autoreleasepool {
     TestTrace = [[FYTranslationTrace alloc] initWithDirectory:root clock:^{ return NSDate.date.timeIntervalSince1970; } maxBytes:1024 * 1024];
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class, @selector(shared)), class_getClassMethod(FYTranslationTrace.class, @selector(pipelineTestShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
+    CheckLatestDialogueWhileTranslating();
+    CheckPendingInlineGeometry();
     CheckServiceTestCancellation();
     CheckHiddenPreview();
     CheckServiceConfigurationCancellation();
@@ -683,12 +762,12 @@ int main(void) { @autoreleasepool {
     TraceCycle(late, full);
     HoldResponse = YES; late.fixture = full; [late timerFired:nil];
     Pump(^BOOL { return PendingResponse != nil; });
-    [late timerFired:nil];
+    [late timerFired:nil]; Pump(^BOOL { return !late.inFlight; });
     BOOL busy = NO;
-    for (NSDictionary *r in Records(log)) { busy |= [r[@"reason"] isEqual:@"task_busy"]; }
-    Require(busy, @"busy cycle is observable without capturing another frame");
+    for (NSDictionary *r in Records(log)) { busy |= [r[@"reason"] isEqual:@"translation_pending"]; }
+    Require(busy, @"pending translation is observable while OCR continues");
     late.fixtureWindowID = 43; PendingResponse(); PendingResponse = nil; HoldResponse = NO;
-    Pump(^BOOL { return !late.inFlight; });
+    Pump(^BOOL { return !late.inFlight && !late.contentTranslationOperations; });
     Require(late.captions.count == 0, @"window change still drops response");
     BOOL dropped = NO;
     for (NSDictionary *r in Records(log)) { dropped |= [r[@"event"] isEqual:@"caption_drop"] && [r[@"reason"] isEqual:@"window_changed"]; }
