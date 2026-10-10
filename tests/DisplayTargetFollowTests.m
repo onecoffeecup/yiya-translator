@@ -208,7 +208,6 @@ static FollowApp *FollowMakeApp(FYLearningStore *store, FYLearningAnalyzer *anal
     app.apiKeyField.stringValue = @"follow-dummy-key";
     app.baseURLField.stringValue = @"https://example.invalid/v1";
     app.modelField.stringValue = @"follow-model";
-    app.realtimeModelField.stringValue = @"follow-model";
     return app;
 }
 

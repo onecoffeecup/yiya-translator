@@ -4,6 +4,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT void FYMountLearningPage(NSArray<NSView *> *pages, NSView *host, NSInteger index);
 FOUNDATION_EXPORT void FYUpdateLearningPageSelection(NSArray<NSView *> *pages, NSArray<NSButton *> *buttons, NSInteger index);
+// Small vector action/status icons; remain crisp at Retina scale.
+FOUNDATION_EXPORT NSImage *FYAdventureSymbolImage(NSString *symbol, NSColor *color);
 
 // Page/card contents stretch within their padded parent and wrap long text.
 @interface FYLearningStackView : NSStackView

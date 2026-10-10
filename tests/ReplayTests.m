@@ -177,7 +177,7 @@ static ReplayApp *NewApp(void) {
     ((ReplayControl *)(id)a.languageControl).selectedSegment = [Scenario[@"language"] isEqual:@"en"] ? 1 : 0;
     a.apiKeyField = (id)Control(@"REPLAY_SYNTHETIC_CREDENTIAL", NO);
     a.baseURLField = (id)Control(@"https://replay.invalid/v1", NO);
-    a.modelField = (id)Control(@"replay-model", NO); a.realtimeModelField = (id)Control(@"replay-model", NO);
+    a.modelField = (id)Control(@"replay-model", NO);
     a.learningCoordinator = [[FYLearningCoordinator alloc] initWithStore:nil analyzer:nil tokenizer:nil catalog:nil];
     FYTestCaptureCardInput *input = [FYTestCaptureCardInput new];
     FYTestCaptureCardDevice *device = [FYTestCaptureCardDevice new]; device.uniqueID=@"replay-device"; device.displayName=@"Replay";

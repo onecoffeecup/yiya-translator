@@ -181,7 +181,6 @@ static CaptureCardApp *CardApp(void) {
     app.apiKeyField = (id)CardText(@"card-test-key");
     app.baseURLField = (id)CardText(@"https://example.invalid/v1");
     app.modelField = (id)CardText(@"test-model");
-    app.realtimeModelField = (id)CardText(@"test-model");
     app.languageControl = (id)CardControlWithSegment(0);
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnonnull"

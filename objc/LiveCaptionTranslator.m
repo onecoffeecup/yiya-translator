@@ -161,6 +161,16 @@ static NSString *Trim(NSString *value) {
     return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static NSString *FYTranslationModelForSettings(NSDictionary *settings) {
+    // Keep the formerly tested model. Only recover the old realtime field when
+    // no ordinary model was configured; never carry two active model choices.
+    for (NSString *key in @[@"model", @"realtimeModel"]) {
+        NSString *value = settings[key];
+        if ([value isKindOfClass:NSString.class] && Trim(value).length) { return Trim(value); }
+    }
+    return @"gpt-4.1-mini";
+}
+
 static NSString *NormalizeForComparison(NSString *value) {
     return FYNormalizeOCRTextForComparison(value);
 }
@@ -775,7 +785,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSButton *manualOCRScopeCheckbox;
 @property(nonatomic, strong) NSTextField *baseURLField;
 @property(nonatomic, strong) NSTextField *modelField;
-@property(nonatomic, strong) NSTextField *realtimeModelField;
 @property(nonatomic, strong) NSSecureTextField *apiKeyField;
 @property(nonatomic, copy) NSString *persistedAPIKey;
 @property(nonatomic) BOOL credentialLoadFailed;
@@ -794,6 +803,12 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSArray<NSButton *> *themeSwatches;
 @property(nonatomic, strong) NSTextField *serviceStatusLabel;
 @property(nonatomic, strong) NSTextField *serviceErrorLabel;
+@property(nonatomic, strong) NSTextField *serviceTestModelLabel;
+@property(nonatomic, strong) NSTextField *serviceTestResultLabel;
+@property(nonatomic, strong) NSButton *serviceTestButton;
+@property(nonatomic, strong) NSImageView *serviceStatusIcon;
+@property(nonatomic, strong) FYAdventurePanel *serviceTestResultPanel;
+@property(nonatomic, strong) NSTextField *serviceTestMessageLabel;
 @property(nonatomic, strong) NSImageView *framePreview;
 @property(nonatomic, strong) NSTextField *previewPlaceholder;
 @property(nonatomic, strong) NSArray<NSView *> *pages;
@@ -1134,7 +1149,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.learningAnalyzer.baseURL = self.baseURLField.stringValue ?: @"";
     self.learningAnalyzer.apiKey = self.apiKeyField.stringValue ?: @"";
     NSString *learningModel = Trim(self.learningModelField.stringValue);
-    if (learningModel.length == 0) { learningModel = Trim(self.modelField.stringValue); }
+    if (learningModel.length == 0) { learningModel = [self configuredTranslationModel]; }
     self.learningAnalyzer.model = learningModel;
 }
 
@@ -1288,20 +1303,15 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.pageButtons=buttons;
     FYAdventureArtView *tree=[FYAdventureArtView new];tree.artwork=8;tree.translatesAutoresizingMaskIntoConstraints=NO;
     [view addSubview:tree];
-    self.serviceStatusLabel=[self label:@"服务未测试" font:FYUIFont(11, NSFontWeightRegular) color:FYAdventureColor(@"quiet")];
-    [view addSubview:self.serviceStatusLabel];
     [NSLayoutConstraint activateConstraints:@[
         [stack.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:12],
         [stack.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-12],
         [stack.topAnchor constraintEqualToAnchor:view.topAnchor constant:24],
         [tree.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:10],
         [tree.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-10],
-        [tree.bottomAnchor constraintEqualToAnchor:self.serviceStatusLabel.topAnchor constant:-10],
+        [tree.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:-16],
         [tree.topAnchor constraintGreaterThanOrEqualToAnchor:stack.bottomAnchor constant:12],
-        [tree.heightAnchor constraintGreaterThanOrEqualToConstant:0],
-        [self.serviceStatusLabel.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:16],
-        [self.serviceStatusLabel.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-16],
-        [self.serviceStatusLabel.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:-16]]];
+        [tree.heightAnchor constraintGreaterThanOrEqualToConstant:0]]];
     NSLayoutConstraint *treeHeight=[tree.heightAnchor constraintEqualToConstant:166];treeHeight.priority=749;treeHeight.active=YES;
     return view;
 }
@@ -3027,36 +3037,74 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.apiKeyField.delegate = self;
 
     NSStackView *apiKeyRow = [self horizontalStack];
-    NSButton *pasteAPIKeyButton = [NSButton buttonWithTitle:@"从剪贴板粘贴" target:self action:@selector(pasteAPIKeyFromClipboard:)];
-    NSButton *clearAPIKeyButton = [NSButton buttonWithTitle:@"清空" target:self action:@selector(clearAPIKey:)];
-    pasteAPIKeyButton.bezelStyle = NSBezelStyleRounded;
-    clearAPIKeyButton.bezelStyle = NSBezelStyleRounded;
+    NSButton *pasteAPIKeyButton = [self workspaceButton:@"从剪贴板粘贴" action:@selector(pasteAPIKeyFromClipboard:) primary:NO];
+    NSButton *clearAPIKeyButton = [self workspaceButton:@"清空" action:@selector(clearAPIKey:) primary:NO];
     [apiKeyRow addArrangedSubview:self.apiKeyField];
     [apiKeyRow addArrangedSubview:pasteAPIKeyButton];
     [apiKeyRow addArrangedSubview:clearAPIKeyButton];
 
     [stack addArrangedSubview:[self settingsRowWithLabel:@"Base URL" view:self.baseURLField]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"模型名" view:self.modelField]];
-    self.realtimeModelField = [self textField:@"deepseek-flash"];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"实时模型" view:self.realtimeModelField]];
-    self.learningModelField = [self textField:@"留空复用模型名"];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"学习模型" view:self.learningModelField]];
+    [stack addArrangedSubview:[self settingsRowWithLabel:@"翻译模型" view:self.modelField]];
+    [stack addArrangedSubview:[self mutedLabel:@"实时字幕、翻译当前界面和测试翻译使用同一个模型。"]];
     [stack addArrangedSubview:[self settingsRowWithLabel:@"API Key" view:apiKeyRow]];
 
     NSStackView *presetRow = [self horizontalStack];
-    [presetRow addArrangedSubview:[NSButton buttonWithTitle:@"DeepSeek Pro" target:self action:@selector(useDeepSeekPreset:)]];
-    [presetRow addArrangedSubview:[NSButton buttonWithTitle:@"DeepSeek Flash" target:self action:@selector(useDeepSeekFlashPreset:)]];
-    [presetRow addArrangedSubview:[NSButton buttonWithTitle:@"OpenAI 预设" target:self action:@selector(useOpenAIPreset:)]];
+    [presetRow addArrangedSubview:[self workspaceButton:@"DeepSeek Pro" action:@selector(useDeepSeekPreset:) primary:NO]];
+    [presetRow addArrangedSubview:[self workspaceButton:@"DeepSeek Flash" action:@selector(useDeepSeekFlashPreset:) primary:NO]];
+    [presetRow addArrangedSubview:[self workspaceButton:@"OpenAI 预设" action:@selector(useOpenAIPreset:) primary:NO]];
     [stack addArrangedSubview:presetRow];
 
+    [stack addArrangedSubview:[self separator]];
+    NSStackView *testSection = [self verticalStack]; testSection.spacing = 10;
     NSStackView *row = [self horizontalStack];
-    [row addArrangedSubview:[NSButton buttonWithTitle:@"测试翻译" target:self action:@selector(testTranslation:)]];
-    [stack addArrangedSubview:row];
-    [stack addArrangedSubview:[self label:@"实时翻译使用实时模型；翻译当前界面使用模型名；语法分析使用学习模型，留空则复用模型名。API Key 保存在本机应用数据文件；同一版本自动读取，新版本需重新填写。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
-    [stack addArrangedSubview:[self label:@"服务状态以测试翻译的结果为准。" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor secondaryLabelColor]]];
-    self.serviceErrorLabel = [self label:@"" font:FYUIFont(12, NSFontWeightRegular) color:[NSColor systemRedColor]];
-    self.serviceErrorLabel.maximumNumberOfLines = 3;
-    [stack addArrangedSubview:self.serviceErrorLabel];
+    self.serviceTestButton = [self workspaceButton:@"测试翻译" action:@selector(testTranslation:) primary:YES];
+    self.serviceTestButton.image = FYAdventureSymbolImage(@"play", FYAdventureColor(@"ink"));
+    self.serviceTestButton.imagePosition = NSImageLeft;
+    [row addArrangedSubview:self.serviceTestButton];
+    self.serviceStatusIcon = [[NSImageView alloc] init];
+    self.serviceStatusIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    self.serviceStatusIcon.imageScaling = NSImageScaleProportionallyUpOrDown;
+    [self.serviceStatusIcon.widthAnchor constraintEqualToConstant:20].active = YES;
+    [self.serviceStatusIcon.heightAnchor constraintEqualToConstant:20].active = YES;
+    [row addArrangedSubview:self.serviceStatusIcon];
+    self.serviceStatusLabel = [self label:@"服务未测试" font:FYUIFont(13, NSFontWeightSemibold) color:self.uiMuted];
+    self.serviceStatusLabel.selectable = YES;
+    [row addArrangedSubview:self.serviceStatusLabel];
+    [testSection addArrangedSubview:row];
+    NSStackView *modelRow = [self horizontalStack]; modelRow.spacing = 7;
+    NSImageView *modelIcon = [[NSImageView alloc] init];
+    modelIcon.translatesAutoresizingMaskIntoConstraints = NO;
+    modelIcon.identifier = @"service-test-model-icon";
+    modelIcon.image = FYAdventureSymbolImage(@"model", self.uiMuted);
+    modelIcon.accessibilityElement = NO;
+    [modelIcon.widthAnchor constraintEqualToConstant:18].active = YES;
+    [modelIcon.heightAnchor constraintEqualToConstant:18].active = YES;
+    [modelRow addArrangedSubview:modelIcon];
+    self.serviceTestModelLabel = [self mutedLabel:@"测试模型：—"];
+    self.serviceTestModelLabel.selectable = YES;
+    [modelRow addArrangedSubview:self.serviceTestModelLabel];
+    [testSection addArrangedSubview:modelRow];
+    NSStackView *result = [self verticalStack]; result.spacing = 7;
+    self.serviceTestMessageLabel = [self label:@"" font:FYUIFont(13, NSFontWeightSemibold) color:self.uiMuted];
+    self.serviceTestMessageLabel.selectable = YES;
+    [result addArrangedSubview:self.serviceTestMessageLabel];
+    self.serviceErrorLabel = [self label:@"" font:FYUIFont(12, NSFontWeightRegular) color:FYAdventureColor(@"serviceError")];
+    self.serviceErrorLabel.selectable = YES;
+    [result addArrangedSubview:self.serviceErrorLabel];
+    self.serviceTestResultLabel = [self label:@"" font:FYUIFont(13, NSFontWeightRegular) color:FYAdventureColor(@"ink")];
+    self.serviceTestResultLabel.selectable = YES;
+    [result addArrangedSubview:self.serviceTestResultLabel];
+    self.serviceTestResultPanel = (FYAdventurePanel *)[self cardWithStack:result];
+    [testSection addArrangedSubview:self.serviceTestResultPanel];
+    [stack addArrangedSubview:testSection];
+    [self presentServiceTestState:@"untested" error:nil result:nil];
+    [self updateServiceTestModelLabel];
+    NSStackView *advanced = [self verticalStack];
+    self.learningModelField = [self textField:@"留空复用翻译模型"];
+    [advanced addArrangedSubview:[self settingsRowWithLabel:@"学习模型（可选）" view:self.learningModelField]];
+    [advanced addArrangedSubview:[self mutedLabel:@"语法分析默认使用翻译模型；需要时可单独指定学习模型。"]];
+    [stack addArrangedSubview:[self disclosureWithTitle:@"高级选项" content:advanced]];
+    [stack addArrangedSubview:[self mutedLabel:@"API Key 保存在本机应用数据文件；同一版本自动读取，新版本需重新填写。"]];
     [stack addArrangedSubview:[self separator]];
     [stack addArrangedSubview:[self cardTitle:@"离线学习资料"]];
     [stack addArrangedSubview:[self mutedLabel:@"词义来自 JMdict，日文例句来自 Tatoeba，参考等级来自 OpenJLPT。下面说明资料的作者和使用许可，与翻译接口配置无关。"]];
@@ -5523,6 +5571,38 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     if (pending && !self.running) { [self setStatus:@"服务未测试"]; }
 }
 
+- (NSString *)configuredTranslationModel {
+    NSString *model = Trim(self.modelField.stringValue);
+    return model.length ? model : @"gpt-4.1-mini";
+}
+
+- (void)updateServiceTestModelLabel {
+    self.serviceTestModelLabel.stringValue = [NSString stringWithFormat:@"测试模型：%@ · 与实时字幕一致", [self configuredTranslationModel]];
+}
+
+- (void)presentServiceTestState:(NSString *)state error:(NSString *)error result:(NSString *)result {
+    BOOL pending = [state isEqualToString:@"pending"], success = [state isEqualToString:@"success"];
+    BOOL failure = [state isEqualToString:@"error"] || error.length > 0;
+    NSString *status = pending ? @"正在测试服务" : success ? @"服务测试成功" : [state isEqualToString:@"error"] ? @"服务测试失败" : @"服务未测试";
+    NSColor *color = FYAdventureColor(failure ? @"serviceError" : success ? @"serviceSuccess" : @"muted");
+    NSColor *fill = FYAdventureColor(failure ? @"serviceErrorSoft" : success ? @"serviceSuccessSoft" : @"canvas");
+    self.serviceStatusLabel.stringValue = status;
+    self.serviceStatusLabel.textColor = color;
+    self.serviceStatusIcon.image = FYAdventureSymbolImage(failure ? @"error" : success ? @"success" : pending ? @"pending" : @"untested", color);
+    self.serviceStatusIcon.accessibilityLabel = status;
+    self.serviceStatusIcon.identifier = failure ? @"service-test-error" : success ? @"service-test-success" : pending ? @"service-test-pending" : @"service-test-untested";
+    self.serviceTestButton.title = pending ? @"测试中…" : @"测试翻译";
+    self.serviceTestButton.enabled = !pending;
+    self.serviceTestMessageLabel.stringValue = pending ? @"正在等待翻译模型返回译文…" : success ? @"翻译模型已返回有效译文。" : failure ? @"请检查服务配置后重新测试。" : @"点击「测试翻译」，检查当前翻译模型能否返回译文。";
+    self.serviceTestMessageLabel.textColor = color;
+    self.serviceErrorLabel.stringValue = error ?: @"";
+    self.serviceErrorLabel.hidden = error.length == 0;
+    self.serviceTestResultLabel.stringValue = result ?: @"";
+    self.serviceTestResultLabel.hidden = result.length == 0;
+    self.serviceTestResultPanel.fillColor = fill;
+    self.serviceTestResultPanel.edgeColor = failure || success ? [fill blendedColorWithFraction:0.22 ofColor:color] : FYAdventureColor(@"rim");
+}
+
 - (void)testTranslation:(id)sender {
     NSString *sample = self.languageControl.selectedSegment == 1
         ? @"Would you like to walk home together today?"
@@ -5530,23 +5610,20 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [self invalidateServiceTest];
     if (!self.running) { [self setStatus:@"正在测试翻译"]; }
     NSInteger testGeneration = self.serviceTestGeneration;
-    NSInteger runGeneration = self.translationGeneration;
-    self.serviceStatusLabel.stringValue = @"正在测试服务";
+    [self presentServiceTestState:@"pending" error:nil result:nil];
+    [self updateServiceTestModelLabel];
     [self translateText:sample systemPrompt:[self systemPrompt] maxTokens:240 modelOverride:nil
         longText:NO serviceTest:YES completion:^(NSString *translated, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             if (testGeneration != self.serviceTestGeneration) { return; }
             BOOL showTestStatus = !self.running;
-            BOOL showTestCaption = showTestStatus && runGeneration == self.translationGeneration;
             if (error) {
-                if (showTestStatus) { [self showError:error.localizedDescription]; [self setStatus:@"翻译测试失败"]; }
-                self.serviceStatusLabel.stringValue = @"服务测试失败";
-                self.serviceErrorLabel.stringValue = error.localizedDescription ?: @"未知错误";
+                if (showTestStatus) { [self setStatus:@"翻译测试失败"]; }
+                [self presentServiceTestState:@"error" error:error.localizedDescription ?: @"未知错误" result:nil];
             } else {
-                if (showTestStatus) { [self showError:@""]; [self setStatus:@"翻译测试完成"]; }
-                self.serviceStatusLabel.stringValue = @"服务测试成功";
-                self.serviceErrorLabel.stringValue = @"";
-                if (showTestCaption) { [self updateCaptionWindowWithText:[self displayableTranslation:translated sourceText:sample] status:@"翻译测试完成"]; }
+                if (showTestStatus) { [self setStatus:@"翻译测试完成"]; }
+                NSString *result = [NSString stringWithFormat:@"测试原文：%@\n译文：%@", sample, [self displayableTranslation:translated sourceText:sample]];
+                [self presentServiceTestState:@"success" error:nil result:result];
             }
         });
     }];
@@ -5555,18 +5632,13 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 - (void)useDeepSeekPreset:(id)sender {
     self.baseURLField.stringValue = @"https://api.deepseek.com";
     self.modelField.stringValue = @"deepseek-v4-pro";
-    // 高质量预设只影响“翻译当前界面”，实时模型保持 Flash，否则实时字幕会被推理拖死
-    if (Trim(self.realtimeModelField.stringValue).length == 0) {
-        self.realtimeModelField.stringValue = @"deepseek-flash";
-    }
-    [self setStatus:@"已应用 DeepSeek Pro 预设（实时仍用 Flash）"];
+    [self setStatus:@"已应用 DeepSeek Pro 预设"];
     [self serviceSettingsChanged];
 }
 
 - (void)useDeepSeekFlashPreset:(id)sender {
     self.baseURLField.stringValue = @"https://api.deepseek.com";
     self.modelField.stringValue = @"deepseek-flash";
-    self.realtimeModelField.stringValue = @"deepseek-flash";
     [self setStatus:@"已应用 DeepSeek Flash 预设"];
     [self serviceSettingsChanged];
 }
@@ -5574,7 +5646,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 - (void)useOpenAIPreset:(id)sender {
     self.baseURLField.stringValue = @"https://api.openai.com/v1";
     self.modelField.stringValue = @"gpt-4.1-mini";
-    self.realtimeModelField.stringValue = @"gpt-4.1-mini";
     [self setStatus:@"已应用 OpenAI 预设"];
     [self serviceSettingsChanged];
 }
@@ -5604,14 +5675,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.saveTimer = nil;
     if (self.loadingSettings) { return; }
     if (self.credentialLoadFailed) {
-        self.serviceErrorLabel.stringValue = @"无法读取本机 API Key 文件，设置未保存。请检查文件访问权限。";
+        [self presentServiceTestState:@"untested" error:@"无法读取本机 API Key 文件，设置未保存。请检查文件访问权限。" result:nil];
         return;
     }
     NSString *apiKey = self.apiKeyField.stringValue ?: @"";
     if (![apiKey isEqualToString:self.persistedAPIKey ?: @""]) {
         FYAPIKeyStatus keyStatus = FYWriteAPIKey(apiKey);
         if (keyStatus != FYAPIKeySuccess) {
-            self.serviceErrorLabel.stringValue = @"API Key 无法保存到本机文件，设置未保存。请检查文件访问权限。";
+            [self presentServiceTestState:@"untested" error:@"API Key 无法保存到本机文件，设置未保存。请检查文件访问权限。" result:nil];
             return;
         }
         self.persistedAPIKey = apiKey;
@@ -5637,7 +5708,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         @"autoFitRegion": @(self.autoFitRegionCheckbox.state == NSControlStateValueOn),
         @"baseURL": self.baseURLField.stringValue ?: @"",
         @"model": self.modelField.stringValue ?: @"",
-        @"realtimeModel": self.realtimeModelField.stringValue ?: @"",
         @"learningModel": self.learningModelField.stringValue ?: @"",
         // 识别输入源（0 = 窗口截图，1 = 采集卡）与上次选择的采集卡设备。
         // 只记硬件标识用于恢复选择，不写入日志；启动时不会因此自动开始采集。
@@ -5666,10 +5736,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     }
     if (field == self.apiKeyField) { self.credentialLoadFailed = NO; }
     [self scheduleSettingsSave];
-    if (field == self.baseURLField || field == self.modelField || field == self.realtimeModelField || field == self.apiKeyField) {
+    if (field == self.baseURLField || field == self.modelField || field == self.apiKeyField) {
         [self invalidateServiceTest];
-        self.serviceStatusLabel.stringValue = @"服务未测试";
-        self.serviceErrorLabel.stringValue = @"";
+        [self presentServiceTestState:@"untested" error:nil result:nil];
+        [self updateServiceTestModelLabel];
     }
     if (field == self.learningModelField || field == self.baseURLField || field == self.modelField || field == self.apiKeyField) {
         [self syncLearningAnalyzerConfig];
@@ -5698,8 +5768,9 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
 - (void)serviceSettingsChanged {
     [self invalidateServiceTest];
-    self.serviceStatusLabel.stringValue = @"服务未测试";
-    self.serviceErrorLabel.stringValue = @"";
+    [self presentServiceTestState:@"untested" error:nil result:nil];
+    [self updateServiceTestModelLabel];
+    [self syncLearningAnalyzerConfig];
     [self saveSettings:nil];
 }
 
@@ -5734,10 +5805,9 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.manualOCRScopeCheckbox.state=[settings[@"manualOCRScope"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff;
     self.autoFitRegionCheckbox.state = settings[@"autoFitRegion"] ? ([settings[@"autoFitRegion"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
     self.baseURLField.stringValue = settings[@"baseURL"] ?: @"https://api.openai.com/v1";
-    self.modelField.stringValue = settings[@"model"] ?: @"gpt-4.1-mini";
-    // 老存档没有这个键 —— 默认给 Flash：实时翻译用推理模型会卡到没法用
-    self.realtimeModelField.stringValue = settings[@"realtimeModel"] ?: @"deepseek-flash";
+    self.modelField.stringValue = FYTranslationModelForSettings(settings);
     self.learningModelField.stringValue = settings[@"learningModel"] ?: @"";
+    [self updateServiceTestModelLabel];
     NSString *storedKey = nil;
     FYAPIKeyStatus keyStatus = FYReadAPIKey(&storedKey);
     if (keyStatus == FYAPIKeySuccess || keyStatus == FYAPIKeyNotFound) {
@@ -5753,7 +5823,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         self.apiKeyField.stringValue = @"";
         self.persistedAPIKey = nil;
         self.credentialLoadFailed = YES;
-        self.serviceErrorLabel.stringValue = @"无法读取本机 API Key 文件；原文件已保留。请检查文件访问权限。";
+        [self presentServiceTestState:@"untested" error:@"无法读取本机 API Key 文件；原文件已保留。请检查文件访问权限。" result:nil];
     }
     // 识别输入源与采集卡设备：只恢复选择，不自动启动采集（权限也不会在这里申请）。
     self.inputSourceSegment = [settings[@"inputSource"] integerValue] == 1 ? 1 : 0;
@@ -6122,9 +6192,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     NSString *prompt = FYInlineBatchPrompt(source, isLong);
     NSInteger maxTokens = FYInlineBatchMaxTokens(items.count, isLong);
 
-    NSString *realtimeModel = Trim(self.realtimeModelField.stringValue);
     [self translateText:numberedText systemPrompt:prompt maxTokens:maxTokens
-        modelOverride:realtimeModel.length ? realtimeModel : @"deepseek-flash"
+        modelOverride:nil
         longText:isLong serviceTest:NO completion:^(NSString *translated, NSError *error) {
         if (error) { completion(error); return; }
 
@@ -8832,19 +8901,15 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     }];
 }
 
-// 实时路径专用：走界面上的“实时模型”（默认 deepseek-flash）。
-// 推理模型（如 deepseek-v4-pro）会把时间全花在思考上、最后只回思考内容，
-// 实时字幕用它等于没有译文 —— 所以实时路径不复用“模型名”那个字段。
+// All translation routes resolve the same field at the transport boundary.
 - (void)translateTextRealtime:(NSString *)text
                  systemPrompt:(NSString *)systemPrompt
                     maxTokens:(NSInteger)maxTokens
                    completion:(void (^)(NSString *translated, NSError *error))completion {
-    NSString *realtimeModel = Trim(self.realtimeModelField.stringValue);
-    if (realtimeModel.length == 0) { realtimeModel = @"deepseek-flash"; }
     [self translateText:text
            systemPrompt:systemPrompt
               maxTokens:maxTokens
-          modelOverride:realtimeModel
+          modelOverride:nil
              completion:completion];
 }
 
@@ -8884,10 +8949,9 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
         return;
     }
 
-    // 实时路径传“实时模型”（默认 Flash）；快照/整屏留空，走界面上的“模型名”
+    // Service test, realtime subtitles and snapshots share the translation model.
     NSString *model = Trim(modelOverride);
-    if (model.length == 0) { model = Trim(self.modelField.stringValue); }
-    if (model.length == 0) { model = @"gpt-4.1-mini"; }
+    if (model.length == 0) { model = [self configuredTranslationModel]; }
 
     NSError *jsonError = nil;
     NSMutableURLRequest *request = [FYTranslationManager requestWithURL:url apiKey:apiKey model:model

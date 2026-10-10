@@ -79,6 +79,44 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     Snapshot(app.captionAppearancePreviewPanel.contentView,[output stringByAppendingPathComponent:@"caption-preview.png"]);
     Require([app.captionTextLabel.stringValue isEqualToString:caption] && app.captionPanelShownByUser==shown,@"sample never replaces translation or changes its hide/show preference");
     [app selectPageAtIndex:5];Tick();Require(!app.captionAppearancePreviewPanel.isVisible,@"leaving appearance closes the preview");
+    NSView *servicePage=app.pages[5];
+    NSButton *testButton=Button(servicePage,@selector(testTranslation:));
+    Require(testButton && app.serviceStatusLabel.superview==testButton.superview &&
+            [app.serviceStatusLabel isDescendantOf:servicePage],@"service test status is next to its button on the service page");
+    Require([testButton isKindOfClass:FYWorkspaceButton.class] && ((FYWorkspaceButton *)testButton).primary &&
+        testButton.image && testButton.imagePosition==NSImageLeft && app.serviceStatusIcon.superview==testButton.superview,
+        @"service test uses the leaf-green native button with a play icon and adjacent status icon");
+    NSView *modelIcon=Find(servicePage,^BOOL(NSView *view){return [view.identifier isEqualToString:@"service-test-model-icon"];});
+    Require(modelIcon && [app.serviceTestModelLabel.stringValue containsString:@"与实时字幕一致"],@"model information has a vector icon and explains shared realtime configuration");
+    Require(![app respondsToSelector:@selector(realtimeModelField)] &&
+            [app.modelField.accessibilityLabel isEqualToString:@"翻译模型"],@"settings exposes one translation model field");
+    Require([app.learningModelField isHiddenOrHasHiddenAncestor],@"optional learning model starts inside collapsed advanced options");
+    NSButton *advanced=(NSButton *)Find(servicePage,^BOOL(NSView *view){return [view isKindOfClass:NSButton.class] && [[(NSButton *)view title] isEqualToString:@"高级选项"];});
+    Require(advanced!=nil,@"advanced options exist");[advanced performClick:nil];Tick();
+    Require(![app.learningModelField isHiddenOrHasHiddenAncestor] && app.learningModelField.editable,@"advanced options reveal the editable optional learning model");
+    [advanced performClick:nil];Tick();
+    Require(app.serviceStatusLabel.selectable && app.serviceErrorLabel.selectable && app.serviceTestResultLabel.selectable &&
+            app.serviceErrorLabel.maximumNumberOfLines==0,@"test status, errors and sample results can be selected and long errors are not truncated");
+    [app presentServiceTestState:@"error" error:@"未找到翻译模型。请核对服务商提供的模型名称及访问权限，再点击测试翻译。" result:nil];
+    Require([app.serviceStatusIcon.identifier isEqualToString:@"service-test-error"] && !app.serviceErrorLabel.hidden &&
+        app.serviceTestResultLabel.hidden && [app.serviceTestResultPanel.fillColor isEqual:FYAdventureColor(@"serviceErrorSoft")],@"failure displays its icon and tinted error card");
+    for(NSNumber *width in @[@720,@1320]){
+        [app.mainWindow setContentSize:NSMakeSize(width.doubleValue,800)];[app.mainWindow.contentView layoutSubtreeIfNeeded];Tick();
+        NSRect buttonFrame=[testButton convertRect:testButton.bounds toView:servicePage];
+        NSRect statusFrame=[app.serviceStatusLabel convertRect:app.serviceStatusLabel.bounds toView:servicePage];
+        NSRect iconFrame=[app.serviceStatusIcon convertRect:app.serviceStatusIcon.bounds toView:servicePage];
+        Require(NSMaxX(buttonFrame)<=NSMinX(statusFrame)+1 && NSMaxX(statusFrame)<=NSWidth(servicePage.bounds)+1,
+            @"test button and result remain beside each other inside wide and narrow service pages");
+        Require(NSMaxX(buttonFrame)<=NSMinX(iconFrame)+1 && NSMaxX(iconFrame)<=NSMinX(statusFrame)+1 && NSWidth(iconFrame)>=18,
+            @"status icon remains visible between the test button and text at both widths");
+        Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:[NSString stringWithFormat:@"service-failure-%@.png",width]]);
+    }
+    [app.mainWindow setContentSize:NSMakeSize(980,800)];
+    app.modelField.stringValue=@"synthetic-translation-model";[app updateServiceTestModelLabel];
+    [app presentServiceTestState:@"success" error:nil result:@"测试原文：今日は一緒に帰りませんか？\n译文：今天要不要一起回家？"];
+    Require([app.serviceStatusIcon.identifier isEqualToString:@"service-test-success"] && app.serviceErrorLabel.hidden &&
+        !app.serviceTestResultLabel.hidden && [app.serviceTestResultPanel.fillColor isEqual:FYAdventureColor(@"serviceSuccessSoft")],@"success displays its check icon and tinted selectable translation card");
+    Tick();Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"service-success.png"]);
     NSButton *disclosure=(NSButton *)Find(app.pages[5],^BOOL(NSView *view){return [view isKindOfClass:NSButton.class] && [[(NSButton *)view title] isEqualToString:@"资料来源与许可"];});
     Require(disclosure!=nil,@"source disclosure exists");[disclosure performClick:nil];[app.mainWindow.contentView layoutSubtreeIfNeeded];Tick();
     NSScrollView *notes=(NSScrollView *)Find(app.pages[5],^BOOL(NSView *view){return [view.identifier isEqualToString:@"reference-license-notes"];});

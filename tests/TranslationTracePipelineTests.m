@@ -18,6 +18,7 @@ static NSDictionary *LastRequestPolicy;
 @class TraceTask;
 static TraceTask *LastTask;
 static BOOL HoldResponse;
+static NSInteger MockResponseStatus = 200;
 static void (^PendingResponse)(void);
 
 @interface FYTranslationTrace (PipelineTest)
@@ -52,7 +53,9 @@ static void (^PendingResponse)(void);
     MockRequests++;
     NSString *translated = [source hasPrefix:@"1. "] ? @"1. 测试界面" : [NSString stringWithFormat:@"测试译文%lu", (unsigned long)MockRequests];
     TraceTask *task = [TraceTask new]; LastTask = task;
-    task.response = ^{ completion(Envelope(translated), Response(), nil); };
+    NSInteger status = MockResponseStatus;
+    task.response = ^{ completion(Envelope(translated), [[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"https://example.invalid/v1"]
+        statusCode:status HTTPVersion:@"HTTP/1.1" headerFields:@{}], nil); };
     return task;
 }
 @end
@@ -68,6 +71,15 @@ static void (^PendingResponse)(void);
 @property NSInteger selectedSegment;
 @property double doubleValue;
 @property(copy) NSString *stringValue;
+@property(strong) NSColor *textColor;
+@property(getter=isHidden) BOOL hidden;
+@property(getter=isEnabled) BOOL enabled;
+@property(copy) NSString *title;
+@property(copy) NSString *identifier;
+@property(copy) NSString *accessibilityLabel;
+@property(strong) NSImage *image;
+@property(strong) NSColor *fillColor;
+@property(strong) NSColor *edgeColor;
 @property BOOL requiresMainThread;
 @property BOOL stateReadOffMain;
 @end
@@ -244,9 +256,15 @@ static TracePipelineApp *TraceAppOfClass(Class appClass) {
     a.apiKeyField = (id)TextControl(@"TRACE_CREDENTIAL_SENTINEL");
     a.baseURLField = (id)TextControl(@"https://example.invalid/v1");
     a.modelField = (id)TextControl(@"test-model");
-    a.realtimeModelField = (id)TextControl(@"test-model");
+    a.learningModelField = (id)TextControl(@"");
     a.serviceStatusLabel = (id)TextControl(@"服务未测试");
     a.serviceErrorLabel = (id)TextControl(@"");
+    a.serviceTestModelLabel = (id)TextControl(@"");
+    a.serviceTestResultLabel = (id)TextControl(@"");
+    a.serviceTestButton = (id)[TraceControl new];
+    a.serviceStatusIcon = (id)[TraceControl new];
+    a.serviceTestMessageLabel = (id)TextControl(@"");
+    a.serviceTestResultPanel = (id)[TraceControl new];
     if ([a isKindOfClass:TracePreviewApp.class]) {
         TraceWindowState *window=[TraceWindowState new]; window.visible=YES; window.onActiveSpace=YES;
         window.occlusionState=NSWindowOcclusionStateVisible; a.mainWindow=(id)window;
@@ -524,19 +542,157 @@ static void CheckServiceTestCancellation(void) {
         HoldResponse = NO;
     }
 }
+static void CheckUnifiedTranslationModel(void) {
+    TracePipelineApp *a = TraceApp();
+    a.modelField.stringValue = @"unified-translation-model";
+    HoldResponse = NO; SubmittedSources = [NSMutableArray new];
+    [a testTranslation:nil]; Tick();
+    Require([LastRequestPolicy[@"model"] isEqual:@"unified-translation-model"], @"service test uses the configured translation model");
+    Require([a.serviceTestModelLabel.stringValue containsString:@"unified-translation-model"] &&
+        [a.serviceTestResultLabel.stringValue containsString:@"测试原文："] && a.captions.count == 0,
+        @"the tested model and sample result stay on the service page without replacing game subtitles");
+    Require([a.serviceTestModelLabel.stringValue containsString:@"与实时字幕一致"],
+        @"service test explicitly identifies the shared realtime model beside its results");
+    __block BOOL done = NO;
+    [a translateTextRealtime:@"合成实时对白" systemPrompt:@"synthetic-prompt" maxTokens:240 completion:^(NSString *value, NSError *error) {
+        Require(value.length && !error, @"synthetic realtime request completes"); done = YES;
+    }];
+    Pump(^BOOL { return done; });
+    Require([LastRequestPolicy[@"model"] isEqual:@"unified-translation-model"], @"realtime subtitles use the same translation model as the service test");
+    done = NO;
+    [a translateText:@"合成整屏快照" completion:^(NSString *value, NSError *error) {
+        Require(value.length && !error, @"synthetic snapshot request completes"); done = YES;
+    }];
+    Pump(^BOOL { return done; });
+    Require([LastRequestPolicy[@"model"] isEqual:@"unified-translation-model"], @"snapshot translation uses the same translation model");
+    for (NSNumber *longText in @[@NO, @YES]) {
+        done = NO;
+        [a translateInlineBatch:Fixture(@"合成界面字段", .2) indexes:@[@0] keys:@[@"unified-field"]
+            translations:[NSMutableArray arrayWithObject:@""] long:longText.boolValue completion:^(NSError *error) {
+                Require(!error, @"synthetic inline batch completes"); done = YES;
+            }];
+        Pump(^BOOL { return done; });
+        Require([LastRequestPolicy[@"model"] isEqual:@"unified-translation-model"], @"short and long inline batches use the same translation model");
+    }
+    puts("PASS unified translation model: service test, realtime, snapshot and short/long inline requests agree");
+}
+static void CheckTranslationModelSettingsMigration(void) {
+    NSArray *fixtures = @[
+        @{@"model":@" ordinary-model ", @"realtimeModel":@"misspelled-realtime", @"learningModel":@"study-model"},
+        @{@"model":@"", @"realtimeModel":@" legacy-realtime "},
+        @{@"model":@"old-single-model"},
+        @{@"model":@" \n ", @"realtimeModel":@""},
+        @{}
+    ];
+    NSArray *expected = @[@"ordinary-model", @"legacy-realtime", @"old-single-model", @"gpt-4.1-mini", @"gpt-4.1-mini"];
+    FYTestLocalAPIKeyValue = @"synthetic-retained-key";
+    for (NSUInteger i=0;i<fixtures.count;i++) {
+        [NSUserDefaults.standardUserDefaults setObject:fixtures[i] forKey:SettingsKey];
+        TracePipelineApp *a=TraceApp(); [a loadSettings];
+        a.learningAnalyzer = [FYLearningAnalyzer new]; [a syncLearningAnalyzerConfig];
+        Require([a.modelField.stringValue isEqual:expected[i]], @"migration retains ordinary model and uses legacy realtime only as fallback");
+        NSString *expectedLearning = fixtures[i][@"learningModel"] ?: expected[i];
+        Require([a.learningAnalyzer.model isEqual:expectedLearning], @"learning override survives; empty learning model reuses translation model");
+        Require([a.apiKeyField.stringValue isEqual:@"synthetic-retained-key"] && !a.credentialLoadFailed,
+            @"model migration automatically restores the existing same-version key");
+        // A redundant credential write must not be required to save model changes.
+        FYTestLocalAPIKeyFailWrites=YES;
+        [a serviceSettingsChanged];
+        NSDictionary *saved=[NSUserDefaults.standardUserDefaults objectForKey:SettingsKey];
+        Require([saved[@"model"] isEqual:expected[i]] && saved[@"realtimeModel"]==nil && saved[@"apiKey"]==nil,
+            @"saving persists one translation model and omits the removed field and credential");
+        Require([FYTestLocalAPIKeyValue isEqual:@"synthetic-retained-key"] && a.serviceErrorLabel.stringValue.length==0,
+            @"model-only changes do not rewrite, clear or invalidate the retained key");
+        FYTestLocalAPIKeyFailWrites=NO;
+        TracePipelineApp *reopened=TraceApp(); [reopened loadSettings];
+        Require([reopened.modelField.stringValue isEqual:expected[i]] &&
+            [reopened.apiKeyField.stringValue isEqual:@"synthetic-retained-key"], @"reopening retains the unified model and local key");
+    }
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:SettingsKey]; FYTestLocalAPIKeyValue=nil;
+    TracePipelineApp *a=TraceApp(); a.learningAnalyzer=[FYLearningAnalyzer new];
+    a.modelField.stringValue=@""; [a syncLearningAnalyzerConfig];
+    Require([a.learningAnalyzer.model isEqual:@"gpt-4.1-mini"], @"learning fallback matches the translation transport when the field is empty");
+    a.learningModelField.stringValue=@"separate-study-model"; [a syncLearningAnalyzerConfig];
+    Require([a.learningAnalyzer.model isEqual:@"separate-study-model"], @"optional learning model remains independent");
+    for (NSUInteger preset=0;preset<3;preset++) {
+        a.serviceTestResultLabel.stringValue=@"old result";
+        switch(preset) {
+            case 0: [a useDeepSeekPreset:nil]; break;
+            case 1: [a useDeepSeekFlashPreset:nil]; break;
+            case 2: [a useOpenAIPreset:nil]; break;
+        }
+        Require([a.serviceStatusLabel.stringValue isEqual:@"服务未测试"] && !a.serviceTestResultLabel.stringValue.length,
+            @"presets clear stale test results");
+        Require([a.serviceTestModelLabel.stringValue containsString:[a configuredTranslationModel]], @"preset identifies the single test model");
+        Require([a.learningAnalyzer.model isEqual:@"separate-study-model"], @"presets preserve optional learning override");
+    }
+    puts("PASS model migration: legacy settings, one saved field, learning fallback/override, presets and same-version key retention");
+}
+static void CheckServiceTestPageResults(void) {
+    for (NSNumber *running in @[@NO, @YES]) {
+        TracePipelineApp *a=TraceApp(); a.running=running.boolValue;
+        SubmittedSources=[NSMutableArray new]; HoldResponse=NO;
+        [a.captions addObject:@"existing game caption"];
+        a.serviceTestResultLabel.stringValue=@"previous success"; MockResponseStatus=404;
+        [a testTranslation:nil];
+        Require(a.serviceTestResultLabel.stringValue.length==0, @"starting a new test clears the previous sample result immediately");
+        Require(!a.serviceTestButton.enabled && [a.serviceTestButton.title isEqual:@"测试中…"] &&
+            [a.serviceStatusIcon.identifier isEqual:@"service-test-pending"] && a.serviceStatusIcon.image,
+            @"pending test disables repeated clicks and displays its clock icon");
+        Pump(^BOOL { return [a.serviceStatusLabel.stringValue isEqual:@"服务测试失败"]; });
+        Require([a.serviceStatusLabel.textColor isEqual:[NSColor colorWithSRGBRed:156.0/255 green:69.0/255 blue:62.0/255 alpha:1]] &&
+            !a.serviceErrorLabel.hidden && a.serviceTestResultLabel.hidden && a.serviceTestButton.enabled &&
+            [a.serviceStatusIcon.identifier isEqual:@"service-test-error"] && a.serviceStatusIcon.image &&
+            [a.serviceTestResultPanel.fillColor isEqual:FYAdventureColor(@"serviceErrorSoft")],
+            @"failure has a red status and shows only the complete error result");
+        Require(a.serviceErrorLabel.stringValue.length && a.serviceTestResultLabel.stringValue.length==0 &&
+            [a.captions isEqual:@[@"existing game caption"]], @"failure appears on service page and keeps game caption unchanged while paused or running");
+        MockResponseStatus=200; [a testTranslation:nil];
+        Require(a.serviceErrorLabel.stringValue.length==0, @"retry clears previous error immediately");
+        Pump(^BOOL { return [a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"]; });
+        Require([a.serviceStatusLabel.textColor isEqual:[NSColor colorWithSRGBRed:72.0/255 green:97.0/255 blue:59.0/255 alpha:1]] &&
+            a.serviceErrorLabel.hidden && !a.serviceTestResultLabel.hidden && a.serviceTestButton.enabled &&
+            [a.serviceStatusIcon.identifier isEqual:@"service-test-success"] && a.serviceStatusIcon.image &&
+            [a.serviceTestResultPanel.fillColor isEqual:FYAdventureColor(@"serviceSuccessSoft")],
+            @"success has a green status and shows only the selectable translation result");
+        Require(a.serviceTestResultLabel.stringValue.length && [a.captions isEqual:@[@"existing game caption"]],
+            @"successful sample translation appears on service page and keeps game caption unchanged");
+    }
+    MockResponseStatus=200;
+    TracePipelineApp *a=TraceApp();
+    FYTestLocalAPIKeyValue=@"synthetic-original-key";
+    a.persistedAPIKey=FYTestLocalAPIKeyValue; a.apiKeyField.stringValue=@"synthetic-replacement-key";
+    [a presentServiceTestState:@"success" error:nil result:@"synthetic previous translation"];
+    FYTestLocalAPIKeyFailWrites=YES; [a saveSettings:nil]; FYTestLocalAPIKeyFailWrites=NO;
+    Require(!a.serviceErrorLabel.hidden && a.serviceErrorLabel.stringValue.length && a.serviceTestResultLabel.hidden &&
+        [a.serviceStatusIcon.identifier isEqual:@"service-test-error"] && [FYTestLocalAPIKeyValue isEqual:@"synthetic-original-key"],
+        @"credential save failures remain visible in the result card and preserve the original key");
+    FYTestLocalAPIKeyValue=nil;
+    puts("PASS service-page results: success, 404 failure, retry and paused/running caption isolation");
+}
 static void CheckServiceConfigurationCancellation(void) {
-    for (NSUInteger action=0;action<2;action++) {
+    for (NSUInteger action=0;action<3;action++) {
         TracePipelineApp *a=TraceApp(); a.running=NO; SubmittedSources=[NSMutableArray new]; HoldResponse=YES;
         [a testTranslation:nil]; TraceTask *oldTask=LastTask;
         void (^oldResponse)(void)=PendingResponse; PendingResponse=nil;
         if (action==0) { [a serviceSettingsChanged]; }
-        else { [a testTranslation:nil]; }
+        else if(action==1) { [a testTranslation:nil]; }
+        else {
+            a.modelField.stringValue=@"edited-translation-model";
+            [a controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification object:a.modelField]];
+            Require([a.serviceTestModelLabel.stringValue containsString:@"edited-translation-model"], @"editing the model updates the test model label immediately");
+        }
         Require(oldTask.cancelCalls==1,@"changing service or testing again cancels the old service task only");
         oldResponse(); Tick();
-        Require([a.serviceStatusLabel.stringValue isEqual:action==0 ? @"服务未测试" : @"正在测试服务"],@"old service completion cannot overwrite changed configuration or replacement test");
-        if (action==0) { Require([a.lastStatus isEqual:@"服务未测试"],@"cancelled service test clears paused testing status"); }
+        Require([a.serviceStatusLabel.stringValue isEqual:action==1 ? @"正在测试服务" : @"服务未测试"] && a.serviceTestResultLabel.stringValue.length==0,
+            @"old service completion cannot overwrite changed configuration or replacement test");
+        Require([a.serviceStatusIcon.identifier isEqual:action==1 ? @"service-test-pending" : @"service-test-untested"] &&
+            a.serviceErrorLabel.hidden && a.serviceTestResultLabel.hidden,
+            @"cancelled completion cannot restore the previous result icon or card");
+        if (action!=1) { Require([a.lastStatus isEqual:@"服务未测试"],@"cancelled service test clears paused testing status"); }
         if (action==1) { void (^fresh)(void)=PendingResponse; PendingResponse=nil; fresh(); Tick();
-            Require([a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"] && a.captions.count==1,@"replacement service test completes and keeps idle test-caption behavior"); }
+            Require([a.serviceStatusLabel.stringValue isEqual:@"服务测试成功"] && a.captions.count==0 && a.serviceTestResultLabel.stringValue.length,
+                @"replacement service test completes on the service page without showing a game caption"); }
         HoldResponse=NO;
     }
 }
@@ -648,8 +804,7 @@ static void CheckDialogueLatencyPolicies(void) {
 
     TracePipelineApp *relay = TraceApp();
     relay.baseURLField.stringValue = @"https://relay.example.invalid/v1";
-    relay.modelField.stringValue = @"gpt-4.1-mini";
-    relay.realtimeModelField.stringValue = @"deepseek-flash";
+    relay.modelField.stringValue = @"deepseek-flash";
     relay.stableTextCheckbox.state = NSControlStateValueOff;
     TraceCycle(relay, Fixture(@"明日はみんなで図書館に行きましょう。", .4));
     BOOL realtimeReasoningDisabled = [LastRequestPolicy[@"model"] isEqual:@"deepseek-flash"] &&
@@ -658,8 +813,7 @@ static void CheckDialogueLatencyPolicies(void) {
 
     TracePipelineApp *other = TraceApp();
     other.baseURLField.stringValue = @"https://relay.example.invalid/v1";
-    other.modelField.stringValue = @"deepseek-flash";
-    other.realtimeModelField.stringValue = @"gpt-4.1-mini";
+    other.modelField.stringValue = @"gpt-4.1-mini";
     other.stableTextCheckbox.state = NSControlStateValueOff;
     TraceCycle(other, Fixture(@"今日は公園で犬と一緒に遊びます。", .4));
     BOOL otherModelUnmodified = [LastRequestPolicy[@"model"] isEqual:@"gpt-4.1-mini"] &&
@@ -669,8 +823,8 @@ static void CheckDialogueLatencyPolicies(void) {
         dialogueInterval * 1000, interfaceInterval * 1000, realtimeReasoningDisabled, otherModelUnmodified);
     Require(dialogueInterval <= .5, @"dialogue must confirm fresh frames at most 500ms apart despite the legacy hidden 1.2s setting");
     Require(interfaceInterval == 1.2, @"interface polling ignores old hidden cadence and uses 1.2 seconds");
-    Require(realtimeReasoningDisabled, @"DeepSeek realtime override on a relay must disable reasoning based on the actual requested model");
-    Require(otherModelUnmodified, @"a different quality model must not inject DeepSeek fields into a non-DeepSeek realtime request");
+    Require(realtimeReasoningDisabled, @"DeepSeek translation model on a relay must disable reasoning based on the actual requested model");
+    Require(otherModelUnmodified, @"a non-DeepSeek translation model must not receive DeepSeek reasoning fields");
 }
 static TracePipelineApp *RunSequence(NSArray *full, NSArray *partial) {
     MockRequests = 0; SubmittedSources = [NSMutableArray new];
@@ -736,6 +890,9 @@ int main(void) { @autoreleasepool {
     CheckServiceTestCancellation();
     CheckHiddenPreview();
     CheckServiceConfigurationCancellation();
+    CheckUnifiedTranslationModel();
+    CheckTranslationModelSettingsMigration();
+    CheckServiceTestPageResults();
     CheckInlineRequestTimeouts();
     CheckAtomicCaptureIdentity();
     CheckLateCaptureCancellation();

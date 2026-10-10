@@ -129,9 +129,12 @@ void FYUpdateLearningPageSelection(NSArray<NSView *> *pages, NSArray<NSButton *>
 @implementation FYWorkspaceButton
 - (NSSize)intrinsicContentSize {
     NSSize text = [self.title sizeWithAttributes:@{NSFontAttributeName:self.font ?: FYUIFont(12, NSFontWeightRegular)}];
-    return NSMakeSize(text.width + (self.navigation ? 70 : 26), self.navigation ? 48 : 34);
+    CGFloat imageWidth = !self.navigation && self.image && self.imagePosition == NSImageLeft ? 24 : 0;
+    return NSMakeSize(text.width + imageWidth + (self.navigation ? 70 : 26), self.navigation ? 48 : 34);
 }
 - (void)setTitle:(NSString *)title { [super setTitle:title]; [self invalidateIntrinsicContentSize]; self.needsDisplay = YES; }
+- (void)setImage:(NSImage *)image { [super setImage:image]; [self invalidateIntrinsicContentSize]; self.needsDisplay = YES; }
+- (void)setImagePosition:(NSCellImagePosition)position { [super setImagePosition:position]; [self invalidateIntrinsicContentSize]; self.needsDisplay = YES; }
 - (void)setEnabled:(BOOL)enabled { [super setEnabled:enabled]; self.needsDisplay = YES; }
 - (void)setState:(NSControlStateValue)state { [super setState:state]; self.needsDisplay=YES; }
 - (void)updateTrackingAreas {
@@ -156,11 +159,47 @@ void FYUpdateLearningPageSelection(NSArray<NSView *> *pages, NSArray<NSButton *>
     }
     NSDictionary *attributes=@{NSFontAttributeName:self.font ?: FYUIFont(13,NSFontWeightRegular),NSForegroundColorAttributeName:[FYAdventureColor(@"ink") colorWithAlphaComponent:self.enabled?1:.5]};
     NSSize size=[self.title sizeWithAttributes:attributes];
-    [self.title drawAtPoint:NSMakePoint(self.navigation?59:(NSWidth(self.bounds)-size.width)/2,NSMidY(rect)-size.height/2-(pressed?1:0)) withAttributes:attributes];
+    BOOL hasImage = !self.navigation && self.image && self.imagePosition == NSImageLeft;
+    CGFloat textX = self.navigation ? 59 : (NSWidth(self.bounds)-size.width-(hasImage ? 24 : 0))/2;
+    if (hasImage) {
+        [self.image drawInRect:NSMakeRect(textX, NSMidY(rect)-8-(pressed?1:0), 16, 16)
+            fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:self.enabled?1:.5 respectFlipped:YES hints:nil];
+        textX += 24;
+    }
+    [self.title drawAtPoint:NSMakePoint(textX,NSMidY(rect)-size.height/2-(pressed?1:0)) withAttributes:attributes];
     if(self.window.firstResponder==self){[NSGraphicsContext saveGraphicsState];NSSetFocusRingStyle(NSFocusRingOnly);[shape fill];[NSGraphicsContext restoreGraphicsState];}
 
 }
 @end
+
+NSImage *FYAdventureSymbolImage(NSString *symbol, NSColor *color) {
+    return [NSImage imageWithSize:NSMakeSize(20,20) flipped:NO drawingHandler:^BOOL(NSRect rect) {
+        [color setStroke];
+        NSBezierPath *path = [NSBezierPath bezierPath];
+        path.lineWidth = 1.7; path.lineCapStyle = NSLineCapStyleRound; path.lineJoinStyle = NSLineJoinStyleRound;
+        if ([symbol isEqualToString:@"play"]) {
+            [path moveToPoint:NSMakePoint(6,4)]; [path lineToPoint:NSMakePoint(16,10)];
+            [path lineToPoint:NSMakePoint(6,16)]; [path closePath];
+        } else if ([symbol isEqualToString:@"model"]) {
+            [path moveToPoint:NSMakePoint(5,7)]; [path lineToPoint:NSMakePoint(10,4)];
+            [path lineToPoint:NSMakePoint(15,7)]; [path lineToPoint:NSMakePoint(15,13)];
+            [path lineToPoint:NSMakePoint(10,16)]; [path lineToPoint:NSMakePoint(5,13)]; [path closePath];
+            [path moveToPoint:NSMakePoint(5,13)]; [path lineToPoint:NSMakePoint(10,10)];
+            [path lineToPoint:NSMakePoint(15,13)]; [path moveToPoint:NSMakePoint(10,10)]; [path lineToPoint:NSMakePoint(10,4)];
+        } else {
+            [path appendBezierPathWithOvalInRect:NSMakeRect(2,2,16,16)];
+            if ([symbol isEqualToString:@"success"]) {
+                [path moveToPoint:NSMakePoint(6,10)]; [path lineToPoint:NSMakePoint(9,7)]; [path lineToPoint:NSMakePoint(14,13)];
+            } else if ([symbol isEqualToString:@"error"]) {
+                [path moveToPoint:NSMakePoint(10,13)]; [path lineToPoint:NSMakePoint(10,9)];
+                [path moveToPoint:NSMakePoint(10,6)]; [path lineToPoint:NSMakePoint(10,6.2)];
+            } else if ([symbol isEqualToString:@"pending"]) {
+                [path moveToPoint:NSMakePoint(10,14)]; [path lineToPoint:NSMakePoint(10,10)]; [path lineToPoint:NSMakePoint(13,8)];
+            }
+        }
+        [path stroke]; return YES;
+    }];
+}
 
 void FYConfigureSourceTextView(NSTextView *textView, NSScrollView *scrollView, CGFloat fontSize) {
     scrollView.hasVerticalScroller = YES;
@@ -386,7 +425,9 @@ NSColor *FYAdventureColor(NSString *token) {
         @"teal":@0x593E2B, @"orange":@0xCADAA6, @"orangeShade":@0xB7CB8B,
         @"cream":@0xFFF8EC, @"quiet":@0x75604E, @"reading":@0xF1E3CB,
         @"muted":@0x75604E, @"canvas":@0xF9F4EB, @"ai":@0xF8F0E7,
-        @"leaf":@0xCADAA6, @"line":@0xBAA181}; });
+        @"leaf":@0xCADAA6, @"line":@0xBAA181,
+        @"serviceSuccess":@0x48613B, @"serviceSuccessSoft":@0xF0F3E4,
+        @"serviceError":@0x9C453E, @"serviceErrorSoft":@0xF8EAE4}; });
     NSUInteger rgb = [palette[token] unsignedIntegerValue];
     return [NSColor colorWithSRGBRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:1];
 }

@@ -909,18 +909,12 @@ int main(void) {
               [throttleApp translationAttemptThrottleForMode:ContentModeDialogue],
               @"interface throttle must be strictly shorter than dialogue throttle");
 
-        // 回归：实时模型必须独立于“模型名”。
-        // 之前只有“模型名”一个字段，用户挂了推理模型（deepseek-v4-pro）后，
-        // 实时翻译每轮要等 20+ 秒、还只回思考内容 —— 等于没有译文。
+        // 用户确认只保留一个翻译模型；请求一致性由无界面生产链路回归验证。
         AppDelegate *modelApp = [[AppDelegate alloc] init];
         modelApp.modelField = [[NSTextField alloc] init];
         modelApp.modelField.stringValue = @"deepseek-v4-pro";
-        modelApp.realtimeModelField = [[NSTextField alloc] init];
-        modelApp.realtimeModelField.stringValue = @"deepseek-flash";
-        Check([modelApp.modelField.stringValue isEqualToString:@"deepseek-v4-pro"],
-              @"sanity: the high-quality model field should hold the reasoning model");
-        Check([modelApp.realtimeModelField.stringValue isEqualToString:@"deepseek-flash"],
-              @"the realtime model must be able to hold a fast model independently");
+        Check([[modelApp configuredTranslationModel] isEqualToString:@"deepseek-v4-pro"],
+              @"translation routes resolve the one configured model");
 
         // 回归：界面模式不能套用对白模式的“噪声词表”。
         // 之前两者共用一张忽略表，导致「No. 48 5/1更新」被 “更新” 命中而整条不翻，
