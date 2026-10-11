@@ -458,14 +458,16 @@ int main(void) { @autoreleasepool {
     HoldResponse = YES;
     [late timerFired:nil];
     Pump(^BOOL { return PendingResponse != nil; });
-    Require(late.inFlight, @"the request is still in flight while the device is unplugged");
+    Require(late.contentTranslationOperations == 1 && PendingResponse != nil,
+            @"the translation lease remains active while its held request is pending");
+    Require(!late.inFlight, @"capture/OCR is free to process new frames while translation is pending");
     NSUInteger epochAtRequest = lateInput.sessionEpoch;
     [lateInput testDisconnectActiveDevice];
     Require(lateInput.sessionEpoch != epochAtRequest, @"the input session really changed mid-request");
     PendingResponse();
     PendingResponse = nil;
     HoldResponse = NO;
-    Pump(^BOOL { return !late.inFlight; });
+    Pump(^BOOL { return late.contentTranslationOperations == 0; });
     Require(late.captions.count == 0, @"a reply from the previous input session cannot update the caption");
     NSArray *records = CardRecords([root stringByAppendingPathComponent:@"events.jsonl"]);
     BOOL droppedForSession = NO, requestLinked = NO, ocrLinked = NO;

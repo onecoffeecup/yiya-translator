@@ -30,10 +30,13 @@ int main(void){@autoreleasepool{
     Require([app.learningCoordinator.currentSentenceID isEqualToString:identity.sentenceID] && app.learningCoordinator.isPinned && [app.learningSourceTextView.string isEqualToString:source],@"saved sentence entry returns to exact source and auto analyzes");
     [app.mainWindow orderOut:nil];
     done=NO;[store preserveSentenceForHistory:nil completion:^(NSError *error){done=YES;}];Pump(^BOOL{return done;});
-    [store setValue:@1 forKey:@"historyRetentionLimit"];[coordinator recordText:@"新句です。" kind:FYSentenceKindDialogue];Drain(store);
+    [store setValue:@1 forKey:@"historyRetentionLimit"];
+    FYRequestIdentity *newer=[coordinator recordText:@"新句です。" kind:FYSentenceKindDialogue];
+    [coordinator setTranslation:@"这是新句。" forIdentity:newer];Drain(store);
     __block BOOL fetched=NO;[store fetchSentence:identity.sentenceID completion:^(FYSentenceRecord *record,NSError *error){Require(record!=nil,@"sentence bookmark protects source from history pruning");fetched=YES;}];Pump(^BOOL{return fetched;});
     done=NO;[store toggleSentenceBookmark:identity completion:^(BOOL saved,NSError *error){Require(!saved && !error,@"sentence bookmark cancelled");done=YES;}];Pump(^BOOL{return done;});
-    [coordinator recordText:@"さらに新句です。" kind:FYSentenceKindDialogue];Drain(store);
+    FYRequestIdentity *newest=[coordinator recordText:@"さらに新句です。" kind:FYSentenceKindDialogue];
+    [coordinator setTranslation:@"这是又一个新句。" forIdentity:newest];Drain(store);
     fetched=NO;[store fetchSentence:identity.sentenceID completion:^(FYSentenceRecord *record,NSError *error){Require(record==nil,@"cancelled bookmark no longer prevents pruning");fetched=YES;}];Pump(^BOOL{return fetched;});
     NSLog(@"PASS: structure validation, cache persistence, saved sentence reopen, retention and cancellation");
 }return 0;}

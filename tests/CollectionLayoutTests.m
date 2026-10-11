@@ -52,9 +52,13 @@ int main(int argc,const char *argv[]){@autoreleasepool{
         [app.learningCollectionTabs[index] performClick:nil];Tick();Require(app.learningCollectionHost.arrangedSubviews.count==1 && app.learningCollectionHost.arrangedSubviews.firstObject==app.learningCollectionSections[index],@"each collection/review tab displays exactly one section");
     }
     [app.learningCollectionTabs[0] performClick:nil];
+    // 用户只手动开关侧栏；先通过正式按钮释放 720 pt 的窄窗范围。
+    if(!app.mainStudyChatView.hidden){[app.mainChatToggle performClick:nil];Tick();}
+    Require(app.mainStudyChatView.hidden && app.mainWindow.contentMinSize.width==720,
+            @"manual sidebar collapse permits a narrow collection window");
     [app.mainWindow setFrame:NSMakeRect(50,50,980,660) display:NO];Tick();
     NSLog(@"COLLECTION MINIMUM: %@",NSStringFromRect(app.mainWindow.frame));
-    Require(fabs(NSWidth(app.mainWindow.frame)-980)<1,@"compact collection supports minimum window width");
+    Require(fabs(NSWidth(app.mainWindow.frame)-980)<1,@"compact collection preserves the chosen narrow width after manual sidebar collapse");
     Require(NSHeight(app.learningCollectionTitle.frame)<35,@"collection heading remains a readable line at minimum width");
     if(argc>1){CollectionScreenshot(app.mainWindow.contentView,[[NSString stringWithUTF8String:argv[1]] stringByAppendingPathComponent:@"collection-narrow.png"]);}
     [detail performClick:nil];Tick();Require(fabs(NSWidth(app.mainWindow.frame)-980)<1,@"expanded details do not force a wider window");[detail performClick:nil];

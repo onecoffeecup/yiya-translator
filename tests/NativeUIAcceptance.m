@@ -73,16 +73,16 @@ int main(int argc, const char *argv[]) {
         Require([app.headerTitleLabel.stringValue isEqualToString:@"运行设置"] && app.pageButtons[3].state == NSControlStateValueOn, @"run settings navigation must select the matching page");
         [app selectPageAtIndex:0]; Tick();
         {
-            // 中栏按「画面 → 当前对白 → 中文翻译 → 语法」自上而下；documentView 是 flipped。
+            // 中栏按「画面 → 中文翻译 → 当前对白 → 语法」自上而下；documentView 是 flipped。
             NSView *document = ((NSScrollView *)app.pages[0]).documentView;
             NSRect previewRect = [app.framePreview convertRect:app.framePreview.bounds toView:document];
             NSRect dialogueRect = [app.learningSourceTextView convertRect:app.learningSourceTextView.bounds toView:document];
             NSRect translationRect = [app.learningTranslationLabel convertRect:app.learningTranslationLabel.bounds toView:document];
             NSRect grammarRect = [app.grammarStatusLabel convertRect:app.grammarStatusLabel.bounds toView:document];
-            Require(NSMaxY(previewRect) <= NSMinY(dialogueRect) + 2 &&
-                    NSMaxY(dialogueRect) <= NSMinY(translationRect) + 2 &&
-                    NSMaxY(translationRect) <= NSMinY(grammarRect) + 2,
-                    @"live layout must read game, dialogue, translation then grammar vertically");
+            Require(NSMaxY(previewRect) <= NSMinY(translationRect) + 2 &&
+                    NSMaxY(translationRect) <= NSMinY(dialogueRect) + 2 &&
+                    NSMaxY(dialogueRect) <= NSMinY(grammarRect) + 2,
+                    @"live layout must read game, translation, dialogue then grammar vertically");
         }
         CGFloat liveWidth = app.learningSourceTextView.frame.size.width;
         CGFloat liveClip = app.learningSourceTextView.enclosingScrollView.contentView.bounds.size.width;
@@ -102,9 +102,12 @@ int main(int argc, const char *argv[]) {
         [app selectPageAtIndex:3]; Tick(); Render(app, [output stringByAppendingPathComponent:@"native-run-settings-default.png"]);
         [app selectPageAtIndex:4]; Tick(); Render(app, [output stringByAppendingPathComponent:@"native-appearance-default.png"]);
         [app selectPageAtIndex:0];
+        if(!app.mainStudyChatView.hidden){[app.mainChatToggle performClick:nil];Tick();}
+        Require(app.mainStudyChatView.hidden && app.mainWindow.contentMinSize.width==720,
+                @"manual sidebar collapse releases the permitted narrow-window range");
         [app.mainWindow setFrame:NSMakeRect(140, 120, 980, 660) display:YES]; Tick();
         NSLog(@"MINIMUM WINDOW: outer=%@ content=%@", NSStringFromRect(app.mainWindow.frame), NSStringFromRect(app.mainWindow.contentView.bounds));
-        Require(fabs(app.mainWindow.frame.size.width - 980) < 2, @"native minimum window width must be 980");
+        Require(fabs(app.mainWindow.frame.size.width - 980) < 2, @"native window preserves the chosen 980 pt width after manual sidebar collapse");
         {
             NSView *document = ((NSScrollView *)app.pages[0]).documentView;
             NSRect previewSmall = [app.framePreview convertRect:app.framePreview.bounds toView:document];

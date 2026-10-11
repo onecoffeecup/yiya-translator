@@ -924,7 +924,9 @@ int main(void) {
             Item(@"No. 48 5/1更新", CGRectMake(0.40, 0.32, 0.14, 0.039)),
             Item(@"詳細", CGRectMake(0.87, 0.27, 0.04, 0.034)),
             Item(@"掘り出し物を探しにフリマへ行こう！", CGRectMake(0.38, 0.24, 0.34, 0.049)),
-            Item(@"9/1更新", CGRectMake(0.84, 0.81, 0.06, 0.034))
+            Item(@"9/1更新", CGRectMake(0.84, 0.81, 0.06, 0.034)),
+            Item(@"更新", CGRectMake(0.90, 0.80, 0.05, 0.030)),
+            Item(@"今日の約束を更新した。", CGRectMake(0.30, 0.16, 0.36, 0.045))
         ];
         NSArray<OCRTextItem *> *uiKept = [filterApp filteredInlineTextItems:uiTexts strict:NO];
         NSMutableArray<NSString *> *uiKeptTexts = [NSMutableArray array];
@@ -935,12 +937,18 @@ int main(void) {
         Check([uiKeptTexts containsObject:@"9/1更新"], @"interface mode must keep update badges");
         Check([uiKeptTexts containsObject:@"掘り出し物を探しにフリマへ行こう！"], @"interface mode must keep item body text");
 
-        // 对白模式仍然要丢掉这些，避免把菜单/按钮混进字幕
+        // 严格观察过滤只排除带控件几何的独立标签；不按子串裁剪完整文字。
+        // 帧级菜单／对白选择由 FYContentRouter 的生产路由与 Replay 另行验证。
         NSArray<OCRTextItem *> *dialogueKept = [filterApp filteredInlineTextItems:uiTexts strict:YES];
         NSMutableArray<NSString *> *dialogueTexts = [NSMutableArray array];
         for (OCRTextItem *item in dialogueKept) { [dialogueTexts addObject:item.text]; }
         Check(![dialogueTexts containsObject:@"詳細"], @"dialogue mode should still drop button labels");
-        Check(![dialogueTexts containsObject:@"No. 48 5/1更新"], @"dialogue mode should still drop list rows");
+        Check([dialogueTexts containsObject:@"No. 48 5/1更新"],
+              @"strict observation filtering must preserve complete text rather than drop a row by a control substring");
+        Check(![dialogueTexts containsObject:@"更新"],
+              @"strict observation filtering must still reject a standalone peripheral update control");
+        Check([dialogueTexts containsObject:@"今日の約束を更新した。"],
+              @"a control word inside spoken prose must remain intact");
         Check([dialogueTexts containsObject:@"掘り出し物を探しにフリマへ行こう！"], @"dialogue mode keeps real sentences");
 
         // 回归：按钮类文字必须排在队尾，且不能挤掉正文。
@@ -1201,7 +1209,9 @@ int main(void) {
             Item(@"ことと", CGRectMake(0.30, 0.193, 0.09, 0.044)),
             Item(@"おはよう", CGRectMake(0.30, 0.150, 0.10, 0.040)),
             Item(@"映画公演スケジュール", CGRectMake(0.10, 0.60, 0.20, 0.040)),
-            Item(@"9/1更新", CGRectMake(0.84, 0.81, 0.06, 0.034))
+            Item(@"9/1更新", CGRectMake(0.84, 0.81, 0.06, 0.034)),
+            Item(@"更新", CGRectMake(0.90, 0.80, 0.05, 0.030)),
+            Item(@"今日の約束を更新した。", CGRectMake(0.30, 0.16, 0.36, 0.045))
         ];
         NSArray<OCRTextItem *> *noiseKept = [noiseApp filteredInlineTextItems:noiseItems strict:NO];
         NSMutableArray<NSString *> *noiseTexts = [NSMutableArray array];
