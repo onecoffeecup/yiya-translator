@@ -3,6 +3,24 @@
 static NSString *FYTrim(NSString *value) {
     return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
+static NSString *FYDialogueBodyExcludingLabels(NSString *source, NSSet<NSString *> *keys) {
+    NSArray<NSString *> *lines=[source componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+    NSUInteger removed=0;
+    while (removed<lines.count && [keys containsObject:FYDialogueComparisonKey(lines[removed])]) { removed++; }
+    return removed && removed<lines.count
+        ? [[lines subarrayWithRange:NSMakeRange(removed,lines.count-removed)] componentsJoinedByString:@"\n"] : nil;
+}
+
+static BOOL FYHistoryHasExcludedLabelPrefix(FYSentenceRecord *legacy, FYSentenceRecord *confirmed) {
+    if (legacy.kind != FYSentenceKindDialogue || confirmed.kind != FYSentenceKindDialogue ||
+        !confirmed.excludedSpeakerLabels.count) return NO;
+    NSRange newline=[legacy.latestText rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet];
+    if (newline.location == NSNotFound) return NO;
+    NSString *prefix=FYDialogueComparisonKey([legacy.latestText substringToIndex:newline.location]);
+    NSString *body=[legacy.latestText substringFromIndex:NSMaxRange(newline)];
+    return [confirmed.excludedSpeakerLabels containsObject:prefix] &&
+        [FYDialogueComparisonKey(body) isEqualToString:FYDialogueComparisonKey(confirmed.latestText)];
+}
 
 static NSString *FYTextHash(NSString *text) {
     // FNV-1a 64-bit，用于缓存键，不用于安全。
@@ -28,6 +46,7 @@ static NSString *FYTextHash(NSString *text) {
 @property(nonatomic, strong, nullable) FYRequestIdentity *lastIdentity;
 @property(nonatomic, copy, nullable) NSString *lastDialogueKey;
 @property(nonatomic, strong, nullable) FYRequestIdentity *lastDialogueIdentity;
+@property(nonatomic, copy, nullable) NSSet<NSString *> *lastDialogueExcludedSpeakerKeys;
 @property(nonatomic) NSUInteger recordsSinceLastDialogue;
 @property(nonatomic, copy) NSArray<NSString *> *lastItemTexts;
 @property(nonatomic, copy) NSArray<FYRequestIdentity *> *lastItemIdentities;
@@ -63,7 +82,8 @@ static NSString *FYTextHash(NSString *text) {
                     same = record.latestText.length > 0 && [group.firstObject.latestText isEqualToString:record.latestText];
                 } else {
                     for (FYSentenceRecord *member in group) {
-                        if (FYDialogueTextsAreEquivalent(member.latestText, record.latestText)) { same = YES; break; }
+                        if (FYDialogueTextsAreEquivalent(member.latestText, record.latestText) ||
+                            FYHistoryHasExcludedLabelPrefix(member,record) || FYHistoryHasExcludedLabelPrefix(record,member)) { same = YES; break; }
                     }
                 }
                 if (same) { [matches addObject:group]; }
@@ -93,9 +113,18 @@ static NSString *FYTextHash(NSString *text) {
             // when the clipped frame arrived later. `group` is newest-first.
             FYSentenceRecord *representative = nil;
             for (FYSentenceRecord *candidate in group) {
+                // Prefer the stored body-only identity over an obsolete label-prefixed
+                // snapshot, including a later pixel miss. Exact body + typed plate
+                // evidence is required; a name-like first line alone proves nothing.
+                BOOL obsoleteLabel=NO;
+                for (FYSentenceRecord *other in group) {
+                    if (other != candidate && FYHistoryHasExcludedLabelPrefix(candidate,other)) { obsoleteLabel=YES; break; }
+                }
+                if (obsoleteLabel) continue;
                 BOOL degraded = NO;
                 for (FYSentenceRecord *other in group) {
                     if (other == candidate) { continue; }
+                    if (FYHistoryHasExcludedLabelPrefix(other,candidate)) continue;
                     if (FYDialogueIsIncompleteFrame(candidate.latestText, other.latestText) ||
                         FYDialogueIsFragmentOfDialogue(candidate.latestText, other.latestText)) { degraded = YES; break; }
                 }
@@ -244,6 +273,7 @@ static NSString *FYTextHash(NSString *text) {
     if (kind == FYSentenceKindDialogue) {
         self.lastDialogueKey = dialogueKey;
         self.lastDialogueIdentity = identity;
+        self.lastDialogueExcludedSpeakerKeys = nil;
         self.recordsSinceLastDialogue = 0;
     } else if (kind != FYSentenceKindOption) {
         // Options belong to the same dialogue frame; a UI/snapshot starts a
@@ -258,6 +288,46 @@ static NSString *FYTextHash(NSString *text) {
     }
     self.lastItemTexts = @[];
     self.lastItemIdentities = @[];
+    return identity;
+}
+
+- (FYRequestIdentity *)recordDialogueText:(NSString *)text excludingSpeakerLabels:(NSArray<NSString *> *)labels {
+    FYRequestIdentity *previous=self.lastDialogueIdentity;
+    NSSet<NSString *> *previousKeys=self.lastDialogueExcludedSpeakerKeys;
+    // A transient pixel miss must not reintroduce a label already confirmed
+    // for this unchanged body. A new spoken body does not inherit this rule.
+    NSString *incomingBody=previous ? FYDialogueBodyExcludingLabels(text,previousKeys) : nil;
+    if (incomingBody && [FYDialogueComparisonKey(incomingBody) isEqualToString:FYDialogueComparisonKey(previous.sourceText)]) {
+        text=incomingBody;
+    }
+    NSMutableSet<NSString *> *excludedKeys=[NSMutableSet new];
+    for (NSString *label in labels) {
+        NSString *key=FYDialogueComparisonKey(label);
+        if (key.length) [excludedKeys addObject:key];
+    }
+    if (self.learningEnabled && self.japaneseMode && labels.count && self.lastDialogueIdentity) {
+        NSString *oldBody=FYDialogueBodyExcludingLabels(self.lastDialogueIdentity.sourceText,excludedKeys);
+        if (oldBody) {
+            if ([FYDialogueComparisonKey(oldBody) isEqualToString:FYDialogueComparisonKey(text)]) {
+                // Removing a confirmed label is a correction, not a clipped
+                // frame. Start a clean identity without rewriting old history.
+                self.lastDialogueIdentity=nil;
+                self.lastDialogueKey=nil;
+            }
+        }
+    }
+    FYRequestIdentity *identity=[self recordText:text kind:FYSentenceKindDialogue];
+    if (identity) {
+        if (identity==previous && previousKeys.count) [excludedKeys unionSet:previousKeys];
+        self.lastDialogueExcludedSpeakerKeys=excludedKeys;
+        if (excludedKeys.count &&
+            [FYDialogueComparisonKey(identity.sourceText) isEqualToString:FYDialogueComparisonKey(text)] &&
+            (identity != previous || ![excludedKeys isEqualToSet:previousKeys])) {
+            [self.store recordExcludedSpeakerLabels:excludedKeys.allObjects forIdentity:identity completion:^(NSError *error) {
+                if (error && self.persistenceErrorHandler) self.persistenceErrorHandler(error);
+            }];
+        }
+    }
     return identity;
 }
 

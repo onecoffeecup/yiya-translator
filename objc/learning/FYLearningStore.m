@@ -325,6 +325,16 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         const char *upgrade="BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS sentence_bookmarks (sentence_id TEXT NOT NULL, version INTEGER NOT NULL, source TEXT NOT NULL, translation TEXT, bookmarked_at REAL, PRIMARY KEY(sentence_id,version)); PRAGMA user_version=2; COMMIT;";
         if(sqlite3_exec(_db,upgrade,NULL,NULL,NULL)!=SQLITE_OK){NSError *error=FYStoreError(_db,@"升级句子收藏数据表失败");sqlite3_exec(_db,"ROLLBACK",NULL,NULL,NULL);return error;}
     }
+    if (userVersion < 3) {
+        const char *upgrade = "BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS sentence_speaker_exclusions ("
+            "sentence_id TEXT NOT NULL, version INTEGER NOT NULL, labels_json TEXT NOT NULL, "
+            "PRIMARY KEY(sentence_id,version), FOREIGN KEY(sentence_id,version) "
+            "REFERENCES sentence_versions(sentence_id,version) ON DELETE CASCADE); PRAGMA user_version=3; COMMIT;";
+        if (sqlite3_exec(_db, upgrade, NULL, NULL, NULL) != SQLITE_OK) {
+            NSError *error=FYStoreError(_db,@"升级对白姓名栏记录失败");
+            sqlite3_exec(_db,"ROLLBACK;",NULL,NULL,NULL); return error;
+        }
+    }
     return nil;
 }
 
@@ -600,6 +610,42 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
     });
 }
 
+- (void)recordExcludedSpeakerLabels:(NSArray<NSString *> *)labels forIdentity:(FYRequestIdentity *)identity
+                        completion:(void (^)(NSError *))completion {
+    NSMutableSet<NSString *> *keys=[NSMutableSet new];
+    for (NSString *label in labels) {
+        NSString *key=FYDialogueComparisonKey(label);
+        if (key.length) [keys addObject:key];
+    }
+    if (!keys.count || !identity.sentenceID.length || identity.version < 1) {
+        [self deliverError:nil completion:completion]; return;
+    }
+    NSData *data=[NSJSONSerialization dataWithJSONObject:[keys.allObjects sortedArrayUsingSelector:@selector(compare:)] options:0 error:NULL];
+    NSString *json=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    NSString *sentenceID=[identity.sentenceID copy], *source=[identity.sourceText copy];
+    NSInteger version=identity.version;
+    dispatch_async(self.queue, ^{
+        NSError *error=[self ensureOpened];
+        if (!error) {
+            // A queued correction or pruning must not attach roles to another version/source.
+            const char *sql="INSERT INTO sentence_speaker_exclusions (sentence_id,version,labels_json) "
+                "SELECT v.sentence_id,v.version,? FROM sentence_versions v JOIN sentences s ON s.sentence_id=v.sentence_id "
+                "WHERE v.sentence_id=? AND v.version=? AND v.text=? AND s.kind=0 "
+                "ON CONFLICT(sentence_id,version) DO UPDATE SET labels_json=excluded.labels_json;";
+            sqlite3_stmt *stmt=NULL;
+            if (sqlite3_prepare_v2(self.db,sql,-1,&stmt,NULL)==SQLITE_OK) {
+                sqlite3_bind_text(stmt,1,json.UTF8String,-1,SQLITE_TRANSIENT);
+                sqlite3_bind_text(stmt,2,sentenceID.UTF8String,-1,SQLITE_TRANSIENT);
+                sqlite3_bind_int64(stmt,3,version);
+                sqlite3_bind_text(stmt,4,source.UTF8String,-1,SQLITE_TRANSIENT);
+                if (sqlite3_step(stmt)!=SQLITE_DONE) error=FYStoreError(self.db,@"保存对白姓名栏记录失败");
+                sqlite3_finalize(stmt);
+            } else { error=FYStoreError(self.db,@"准备对白姓名栏记录失败"); }
+        }
+        [self deliverError:error completion:completion];
+    });
+}
+
 - (FYSentenceRecord *)sentenceRecordFromStatement:(sqlite3_stmt *)stmt {
     FYSentenceRecord *record = [[FYSentenceRecord alloc] init];
     record.sentenceID = FYSQLiteStringOrEmpty(stmt, 0);
@@ -614,6 +660,15 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
     record.displayName = displayName ? [NSString stringWithUTF8String:(const char *)displayName] : nil;
     const unsigned char *latestText = sqlite3_column_text(stmt, 8);
     record.latestText = latestText ? [NSString stringWithUTF8String:(const char *)latestText] : record.originalText;
+    NSData *data=[FYSQLiteStringOrEmpty(stmt,9) dataUsingEncoding:NSUTF8StringEncoding];
+    id labels=data.length ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    NSMutableArray<NSString *> *keys=[NSMutableArray new];
+    if ([labels isKindOfClass:NSArray.class]) {
+        for (id label in labels) {
+            if ([label isKindOfClass:NSString.class] && [label length]) [keys addObject:label];
+        }
+    }
+    record.excludedSpeakerLabels=keys;
     return record;
 }
 
@@ -624,7 +679,8 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         FYSentenceRecord *record = nil;
         if (!error) {
             const char *sql = "SELECT s.sentence_id, s.session_id, s.kind, s.original_text, s.latest_version, s.latest_translation, s.occurred_at, s.display_name,"
-                              " (SELECT v.text FROM sentence_versions v WHERE v.sentence_id = s.sentence_id AND v.version = s.latest_version) AS latest_text"
+                              " (SELECT v.text FROM sentence_versions v WHERE v.sentence_id = s.sentence_id AND v.version = s.latest_version) AS latest_text,"
+                              " (SELECT e.labels_json FROM sentence_speaker_exclusions e WHERE e.sentence_id=s.sentence_id AND e.version=s.latest_version)"
                               " FROM sentences s WHERE s.sentence_id = ?;";
             sqlite3_stmt *stmt = NULL;
             if (sqlite3_prepare_v2(self.db, sql, -1, &stmt, NULL) == SQLITE_OK) {
@@ -649,7 +705,8 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         NSMutableArray<FYSentenceRecord *> *records = [NSMutableArray array];
         if (!error) {
             const char *sql = "SELECT s.sentence_id, s.session_id, s.kind, s.original_text, s.latest_version, s.latest_translation, s.occurred_at, s.display_name,"
-                              " (SELECT v.text FROM sentence_versions v WHERE v.sentence_id = s.sentence_id AND v.version = s.latest_version) AS latest_text"
+                              " (SELECT v.text FROM sentence_versions v WHERE v.sentence_id = s.sentence_id AND v.version = s.latest_version) AS latest_text,"
+                              " (SELECT e.labels_json FROM sentence_speaker_exclusions e WHERE e.sentence_id=s.sentence_id AND e.version=s.latest_version)"
                               " FROM sentences s WHERE fy_has_translation(s.latest_translation) "
                               "ORDER BY s.occurred_at DESC, s.rowid DESC LIMIT ?;";
             sqlite3_stmt *stmt = NULL;

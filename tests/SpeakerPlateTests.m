@@ -29,12 +29,44 @@ static CGImageRef Image(BOOL separate, BOOL bounded) {
     CGDataProviderRelease(provider);
     return image;
 }
+static CGImageRef EmbeddedImage(CGImageRef game, CGRect viewport, CGSize canvas) {
+    CGColorSpaceRef space=CGColorSpaceCreateDeviceRGB();
+    CGContextRef context=CGBitmapContextCreate(NULL,canvas.width,canvas.height,8,0,space,kCGImageAlphaPremultipliedLast);
+    CGColorSpaceRelease(space);
+    CGContextSetRGBFillColor(context,.10,.12,.15,1);
+    CGContextFillRect(context,CGRectMake(0,0,canvas.width,canvas.height));
+    CGContextDrawImage(context,viewport,game);
+    CGImageRef image=CGBitmapContextCreateImage(context);CGContextRelease(context);return image;
+}
+static CGRect EmbeddedBox(CGRect box,CGRect viewport,CGSize canvas) {
+    return CGRectMake((viewport.origin.x+box.origin.x*viewport.size.width)/canvas.width,
+        (viewport.origin.y+box.origin.y*viewport.size.height)/canvas.height,
+        box.size.width*viewport.size.width/canvas.width,box.size.height*viewport.size.height/canvas.height);
+}
 
 int main(void) { @autoreleasepool {
     NSURL *url=[NSURL fileURLWithPath:@"tests/fixtures/replay/assets/speaker-plate.png"];
     CGImageSourceRef source=CGImageSourceCreateWithURL((__bridge CFURLRef)url,NULL);
     CGImageRef image=source ? CGImageSourceCreateImageAtIndex(source,0,NULL) : NULL;
     Check(image!=NULL,@"synthetic source pixels must load");
+    NSURL *patternURL=[NSURL fileURLWithPath:@"tests/fixtures/replay/assets/speaker-plate-textured.png"];
+    CGImageSourceRef patternSource=CGImageSourceCreateWithURL((__bridge CFURLRef)patternURL,NULL);
+    CGImageRef patterned=patternSource ? CGImageSourceCreateImageAtIndex(patternSource,0,NULL) : NULL;
+    Check(patterned!=NULL,@"synthetic ink and textured body fixture must load");
+    OCRTextItem *tightLabel=Item(@"青木",CGRectMake(.267,.256,.07,.043));
+    OCRTextItem *patternBody=Item(@"田中に相談してね。",CGRectMake(.289,.179,.17,.053));
+    NSArray *patternMarked=[FYOCRManager itemsByMarkingSpeakerLabels:@[tightLabel,patternBody] inImage:patterned];
+    Check([(OCRTextItem *)patternMarked.firstObject speakerLabel] && !tightLabel.speakerLabel,@"tight ink bounds and a nonuniform translucent body still confirm the separate filled plate");
+    Check([[FYContentRouter dialogueRouteForItems:patternMarked optionsCanPasteInline:YES filterObserver:nil].dialogueText isEqual:patternBody.text],@"exclude the structural label and retain a name mentioned in the body");
+    CGSize canvas=CGSizeMake(1370,796);CGRect viewport=CGRectMake(396,305,800,450);
+    CGImageRef embedded=EmbeddedImage(patterned,viewport,canvas);
+    OCRTextItem *embeddedLabel=Item(@"青木",EmbeddedBox(tightLabel.boundingBox,viewport,canvas));
+    OCRTextItem *embeddedBody=Item(patternBody.text,EmbeddedBox(patternBody.boundingBox,viewport,canvas));
+    NSArray *embeddedMarked=[FYOCRManager itemsByMarkingSpeakerLabels:@[embeddedLabel,embeddedBody] inImage:embedded];
+    Check([(OCRTextItem *)embeddedMarked.firstObject speakerLabel],@"a filled name plate remains metadata when the game is embedded above OBS controls");
+    Check([[FYContentRouter dialogueRouteForItems:embeddedMarked optionsCanPasteInline:NO filterObserver:nil].dialogueText isEqual:patternBody.text],@"full-window fallback must also exclude the confirmed plate");
+    CGImageRelease(embedded);
+    CGImageRelease(patterned);CFRelease(patternSource);
     OCRTextItem *body=Item(@"明日は休みです。",CGRectMake(.289,.117,.18,.054));
     for (NSString *text in @[@"ててて",@"ink",@"？？？",@"みよ",@"青木",@"ルード"]) {
         OCRTextItem *label=Item(text,CGRectMake(.267,.183,.068,.057));
@@ -43,12 +75,11 @@ int main(void) { @autoreleasepool {
         Check(result.speakerLabel && !label.speakerLabel,@"mark only copies with positive plate evidence");
         Check([result.text isEqual:text] && CGRectEqualToRect(result.boundingBox,label.boundingBox) &&
             result.confidence==label.confidence && [result.sourceBlockID isEqual:label.sourceBlockID],@"role evidence must not rewrite OCR or lose metadata");
-        BOOL known=[FYContentRouter looksLikeSpeakerName:text];
-        NSString *expected=known ? [NSString stringWithFormat:@"%@\n%@",text,body.text] : body.text;
+        NSString *expected=body.text;
         FYContentRoute *route=[FYContentRouter dialogueRouteForItems:marked optionsCanPasteInline:YES filterObserver:nil];
-        Check([route.dialogueText isEqual:expected] && route.optionItems.count==0,@"unrecognized plate is metadata; recognized speaker remains in complete source");
+        Check([route.dialogueText isEqual:expected] && route.optionItems.count==0,@"every confirmed plate is metadata; dialogue contains only the spoken body");
     }
-    for (NSString *text in @[@"え……",@"うん、",@"ここ",@"ててて",@"Wait"]) {
+    for (NSString *text in @[@"え……",@"うん、",@"ここ",@"ててて",@"Wait",@"田中",@"待機"]) {
         OCRTextItem *speech=Item(text,CGRectMake(.267,.183,.068,.057));
         FYContentRoute *route=[FYContentRouter dialogueRouteForItems:@[speech,body] optionsCanPasteInline:YES filterObserver:nil];
         Check([route.dialogueText hasPrefix:text],@"ordinary unmarked speech is never removed by script, repetition or width");
@@ -69,6 +100,9 @@ int main(void) { @autoreleasepool {
     NSArray *shortMarked=[FYOCRManager itemsByMarkingSpeakerLabels:@[label,shortBody] inImage:image];
     Check([(OCRTextItem *)shortMarked.firstObject speakerLabel],@"a real plate is still distinct above a narrower short body");
     Check([[FYContentRouter dialogueRouteForItems:shortMarked optionsCanPasteInline:YES filterObserver:nil].dialogueText isEqual:shortBody.text],@"preserve the short spoken body below an unrecognized plate");
+    OCRTextItem *mentionedName=Item(@"田中に相談してね。",body.boundingBox);
+    NSArray *mentioned=[FYOCRManager itemsByMarkingSpeakerLabels:@[Item(@"青木",label.boundingBox),mentionedName] inImage:image];
+    Check([[FYContentRouter dialogueRouteForItems:mentioned optionsCanPasteInline:YES filterObserver:nil].dialogueText isEqual:mentionedName.text],@"a character name within the spoken sentence is preserved verbatim");
     CGImageRelease(image);CFRelease(source);
     NSLog(@"PASS SpeakerPlateTests: %lu assertions",(unsigned long)Checks);
 } return 0; }

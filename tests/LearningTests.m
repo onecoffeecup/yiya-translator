@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #include <unistd.h>
+#include <sqlite3.h>
 #import "FYLearningModels.h"
 #import "FYLearningStore.h"
 #import "FYLearningAnalyzer.h"
@@ -192,6 +193,118 @@ static void TestDialogueEllipsisHistory(void) {
     [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
 }
 
+static void TestSpeakerExcludedHistory(void) {
+    NSString *body = @"旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。";
+    NSString *legacySource = [@"青木\n" stringByAppendingString:body];
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [NSString stringWithFormat:@"fuyi-speaker-history-%@.sqlite3", NSUUID.UUID.UUIDString]];
+    FYLearningStore *store = [[FYLearningStore alloc] initWithDatabasePath:path];
+    FYLearningCoordinator *coordinator = [[FYLearningCoordinator alloc] initWithStore:store
+        analyzer:[FYLearningAnalyzer new] tokenizer:[FYJapaneseTokenizer new] catalog:LoadCatalog()];
+    FYRequestIdentity *legacy = [coordinator recordText:legacySource kind:FYSentenceKindDialogue];
+    [coordinator setTranslation:@"青木\n旅程、天气……\n想进一步了解的话，\n随时来联系。" forIdentity:legacy];
+    FYRequestIdentity *clipped=[coordinator recordDialogueText:@"詳しく知りたいなら、\nいつでも連絡して。" excludingSpeakerLabels:@[@"青木"]];
+    Check([clipped.sentenceID isEqual:legacy.sentenceID], @"genuinely clipped body still reuses the full original identity");
+    __block FYSentenceRecord *clippedRecord=nil;
+    [store fetchSentence:legacy.sentenceID completion:^(FYSentenceRecord *record,NSError *error) { Check(error==nil,@"fetch preserved complete source"); clippedRecord=record; }];
+    PumpUntil(^BOOL { return clippedRecord!=nil; });
+    Check(clippedRecord.excludedSpeakerLabels.count==0, @"a reused label-containing source is never falsely marked as body-only evidence");
+    FYRequestIdentity *clean = [coordinator recordDialogueText:body excludingSpeakerLabels:@[@"青木"]];
+    NSString *cleanTranslation=@"旅程、天气……\n想进一步了解的话，\n随时来联系。";
+    [coordinator setTranslation:cleanTranslation forIdentity:clean];
+    __block NSArray<FYSentenceRecord *> *saved;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records, NSError *error) {
+        Check(error == nil, @"speaker history reads the isolated production store"); saved = records;
+    }];
+    PumpUntil(^BOOL { return saved != nil; });
+    Check(saved.count == 2 && ![legacy.sentenceID isEqual:clean.sentenceID], @"late speaker confirmation keeps both immutable identities");
+    NSArray<FYSentenceRecord *> *display = [FYLearningCoordinator displayHistoryRecords:saved];
+    Check(display.count == 1 && [display.firstObject.sentenceID isEqual:clean.sentenceID] &&
+          [display.firstObject.latestText isEqual:body] && [display.firstObject.latestTranslation isEqual:cleanTranslation],
+          @"recent dialogue chooses the confirmed body-only source and translation instead of restoring a speaker line");
+    Check([FYLearningCoordinator historyRecordInList:display index:0 identifier:clean.sentenceID] == display.firstObject,
+          @"history analysis opens the same body-only identity shown in the row");
+    __block FYSentenceRecord *oldRecord;
+    [store fetchSentence:legacy.sentenceID completion:^(FYSentenceRecord *record, NSError *error) { Check(error == nil, @"legacy snapshot remains readable"); oldRecord=record; }];
+    PumpUntil(^BOOL { return oldRecord != nil; });
+    Check([oldRecord.latestText isEqual:legacySource] && [oldRecord.latestTranslation hasPrefix:@"青木\n"],
+          @"history presentation leaves the old source and translation snapshots untouched");
+    __block BOOL closed = NO;
+    [store closeWithCompletion:^(NSError *error) { Check(error == nil, @"speaker history closes"); closed=YES; }];
+    PumpUntil(^BOOL { return closed; });
+    store=[[FYLearningStore alloc] initWithDatabasePath:path]; saved=nil;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records, NSError *error) { Check(error == nil, @"speaker history reopens"); saved=records; }];
+    PumpUntil(^BOOL { return saved != nil; });
+    display=[FYLearningCoordinator displayHistoryRecords:saved];
+    Check(display.count == 1 && [display.firstObject.sentenceID isEqual:clean.sentenceID],
+          @"confirmed body-only history remains preferred after closing and reopening SQLite");
+    FYSentenceRecord *confirmed=display.firstObject;
+    Check(confirmed.excludedSpeakerLabels.count == 1 && [confirmed.excludedSpeakerLabels containsObject:@"青木"],
+          @"confirmed plate evidence is persisted for the exact source version");
+    oldRecord.occurredAt=[NSDate distantFuture];
+    display=[FYLearningCoordinator displayHistoryRecords:@[oldRecord,confirmed]];
+    Check(display.count == 1 && display.firstObject == confirmed, @"a newer label-prefixed duplicate cannot override a confirmed body-only record");
+    confirmed.excludedSpeakerLabels=nil;
+    display=[FYLearningCoordinator displayHistoryRecords:@[confirmed,oldRecord]];
+    Check(display.count == 1 && display.firstObject == oldRecord,
+          @"without positive plate evidence, a dropped first body line still favors the complete snapshot");
+    confirmed.excludedSpeakerLabels=@[@"青木"];
+    confirmed.latestText=@"青木\nそう呼んでください。";
+    confirmed.latestTranslation=@"请叫我青木。";
+    oldRecord.latestText=[@"青木\n" stringByAppendingString:confirmed.latestText];
+    display=[FYLearningCoordinator displayHistoryRecords:@[oldRecord,confirmed]];
+    Check(display.count == 1 && display.firstObject == confirmed && [display.firstObject.latestText hasPrefix:@"青木\n"],
+          @"removing one proven plate line preserves the same name spoken as the first real body line");
+    oldRecord.latestText=@"青木\n今日は本を返してから、\n一緒に図書館へ行こう。";
+    confirmed.latestText=@"一緒に図書館へ行こう。";
+    display=[FYLearningCoordinator displayHistoryRecords:@[confirmed,oldRecord]];
+    Check(display.count == 1 && display.firstObject == oldRecord,
+          @"plate evidence does not excuse a genuinely missing body line");
+    oldRecord.latestText=@"青木\nはい。"; confirmed.latestText=@"はい。";
+    display=[FYLearningCoordinator displayHistoryRecords:@[oldRecord,confirmed]];
+    Check(display.count == 1 && display.firstObject == confirmed, @"exact plate evidence also resolves very short dialogue history");
+    oldRecord.kind=FYSentenceKindUI;
+    Check([FYLearningCoordinator displayHistoryRecords:@[oldRecord,confirmed]].count == 2,
+          @"dialogue plate evidence cannot merge a UI history entry");
+    closed=NO; [store closeWithCompletion:^(NSError *error) { Check(error == nil, @"reopened history closes"); closed=YES; }];
+    PumpUntil(^BOOL { return closed; });
+    // Simulate a pre-fix learning database without changing any saved sentence/version.
+    sqlite3 *db=NULL;
+    Check(sqlite3_open(path.UTF8String,&db)==SQLITE_OK, @"open isolated legacy migration fixture");
+    Check(sqlite3_exec(db,"DROP TABLE sentence_speaker_exclusions; PRAGMA user_version=2;",NULL,NULL,NULL)==SQLITE_OK,
+          @"prepare legacy schema without speaker metadata");
+    sqlite3_close(db);
+    store=[[FYLearningStore alloc] initWithDatabasePath:path]; saved=nil;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records,NSError *error) {
+        Check(error == nil,@"legacy learning schema upgrades without losing sentences"); saved=records;
+    }];
+    PumpUntil(^BOOL { return saved != nil; });
+    Check(saved.count==2 && [FYLearningCoordinator displayHistoryRecords:saved].firstObject.excludedSpeakerLabels.count==0,
+          @"legacy rows gain no invented speaker evidence during migration");
+    __block BOOL attached=NO;
+    [store recordExcludedSpeakerLabels:@[@"青木"] forIdentity:clean completion:^(NSError *error) {
+        Check(error == nil,@"new OCR evidence is writable after legacy migration"); attached=YES;
+    }];
+    PumpUntil(^BOOL { return attached; }); saved=nil;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records,NSError *error) { Check(error==nil,@"read upgraded speaker history"); saved=records; }];
+    PumpUntil(^BOOL { return saved != nil; });
+    Check([[FYLearningCoordinator displayHistoryRecords:saved].firstObject.sentenceID isEqual:clean.sentenceID],
+          @"new evidence resolves the old prefix after upgrading the learning store");
+    __block NSInteger newVersion=0;
+    [store appendVersionForSentence:clean.sentenceID text:@"青木\nそう呼んでください。" translation:@"请叫我青木。" completion:^(NSInteger version,NSError *error) {
+        Check(error==nil,@"append a distinct source version"); newVersion=version;
+    }];
+    PumpUntil(^BOOL { return newVersion>0; });
+    __block FYSentenceRecord *newRecord=nil;
+    [store fetchSentence:clean.sentenceID completion:^(FYSentenceRecord *record,NSError *error) { Check(error==nil,@"fetch distinct source version"); newRecord=record; }];
+    PumpUntil(^BOOL { return newRecord!=nil; });
+    Check(newVersion==2 && newRecord.excludedSpeakerLabels.count==0 && [newRecord.latestText hasPrefix:@"青木\n"],
+          @"speaker evidence stays with its original version and cannot erase a later spoken name");
+    closed=NO; [store closeWithCompletion:^(NSError *error) { Check(error==nil,@"upgraded store closes"); closed=YES; }];
+    PumpUntil(^BOOL { return closed; });
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+}
+
 static void TestDialogueLeadingEllipsisHistory(void) {
     NSString *source = @"青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」";
     NSMutableArray<FYSentenceRecord *> *rows = [NSMutableArray new];
@@ -238,6 +351,7 @@ int main(void) {
     @autoreleasepool {
         TestTokenizerTextSnapshots();
         TestReadingCueEnumeration();
+        TestSpeakerExcludedHistory();
         TestDialogueEllipsisHistory();
         TestDialogueLeadingEllipsisHistory();
         FYVocabularyEntry *first=[FYVocabularyEntry new], *second=[FYVocabularyEntry new];

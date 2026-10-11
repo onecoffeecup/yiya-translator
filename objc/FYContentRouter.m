@@ -140,9 +140,9 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
     OCRTextItem *previous = nil;
     for (OCRTextItem *item in items) {
         // A pixel-confirmed name plate is metadata, not a spoken short line.
-        // Preserve recognized names; unrecognized plate OCR must not be sent
-        // as body text. Do not apply this rule to ordinary kana/Latin speech.
-        if ([self isUncertainSpeakerLabelItem:item]) { continue; }
+        // Exclude both recognized names and plate OCR noise from the body.
+        // Ordinary spoken lines retain their text, including character names.
+        if ([self isExcludedSpeakerLabelItem:item]) { continue; }
         if ([self isCornerHelpButton:item] || [self isFurigana:item nearLargerLineInItems:items]) { continue; }
         FYContentTextFilterReason reason = [self filterReasonForText:item.text
             normalized:FYNormalizeOCRTextForComparison(item.text) boundingBox:item.boundingBox strict:YES];
@@ -158,8 +158,8 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
     if (speakerLabelOnly) { *speakerLabelOnly = [self dialogueFrameIsSpeakerLabelOnly:lines]; }
     return [self dialogueTextWithoutTrailingButton:[lines componentsJoinedByString:@"\n"]];
 }
-+ (BOOL)isUncertainSpeakerLabelItem:(OCRTextItem *)item {
-    return item.speakerLabel && ![self looksLikeSpeakerName:item.text];
++ (BOOL)isExcludedSpeakerLabelItem:(OCRTextItem *)item {
+    return item.speakerLabel;
 }
 + (NSTimeInterval)recognitionPollingIntervalForMode:(NSInteger)mode {
     return mode == FYContentModeDialogue ? 0.5 : 1.2;

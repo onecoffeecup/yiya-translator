@@ -175,7 +175,7 @@ static void MainBarrier(void) {
 static ReplayControl *Control(NSString *text, BOOL on) {
     ReplayControl *value = [ReplayControl new]; value.stringValue = text; value.state = on; return value;
 }
-static ReplayApp *NewApp(void) {
+static ReplayApp *NewApp(NSString *directory) {
     ReplayApp *a = [ReplayApp new]; a.fixtureWindow = 42; a.running = YES;
     a.fixtureMode = [Scenario[@"mode"] isEqual:@"ui"] ? ContentModeUI : ContentModeDialogue;
     a.detectedModeSegment = a.fixtureMode; a.automaticMode = [Scenario[@"auto_mode"] boolValue];
@@ -190,7 +190,13 @@ static ReplayApp *NewApp(void) {
     a.apiKeyField = (id)Control(@"REPLAY_SYNTHETIC_CREDENTIAL", NO);
     a.baseURLField = (id)Control(@"https://replay.invalid/v1", NO);
     a.modelField = (id)Control(@"replay-model", NO);
-    a.learningCoordinator = [[FYLearningCoordinator alloc] initWithStore:nil analyzer:nil tokenizer:nil catalog:nil];
+    for (NSDictionary *step in Scenario[@"steps"]) {
+        if (step[@"expect"][@"history"]) {
+            a.learningStore=[[FYLearningStore alloc] initWithDatabasePath:[directory stringByAppendingPathComponent:@"learning.sqlite3"]];
+            break;
+        }
+    }
+    a.learningCoordinator = [[FYLearningCoordinator alloc] initWithStore:a.learningStore analyzer:nil tokenizer:nil catalog:nil];
     FYTestCaptureCardInput *input = [FYTestCaptureCardInput new];
     FYTestCaptureCardDevice *device = [FYTestCaptureCardDevice new]; device.uniqueID=@"replay-device"; device.displayName=@"Replay";
     input.testDevices = @[device]; input.testAvailability = FYCaptureCardAvailabilityAuthorized;
@@ -238,13 +244,26 @@ static NSDictionary *Snapshot(ReplayApp *app, NSString *traceDirectory) {
         if ([name isEqual:@"dialogue"] && [event[@"stage"] isEqual:@"identity_source"] &&
             [event[@"sentence_id"] length]) { [dialogueIdentities addObject:event[@"sentence_id"]]; }
     }
-    return @{@"requests": @(Sources.count), @"sources": Sources, @"captions": app.captions,
+    NSMutableDictionary *snapshot=[@{@"requests": @(Sources.count), @"sources": Sources, @"captions": app.captions,
         @"inline": app.inlineOutputs, @"errors": @(app.errorCount), @"in_flight": @(app.inFlight),
         @"pending": pending, @"cancel_calls": @(cancelled), @"ocr_calls": @(app.ocrCalls),
         @"mode": @([app effectiveModeSegment]), @"reasons": reasons, @"drops": drops,
         @"events": counts, @"direct_results": DirectResults,
         @"dialogue_identity_count": @(dialogueIdentities.count),
-        @"learning_source": app.learningCoordinator.currentSourceText ?: @""};
+        @"learning_source": app.learningCoordinator.currentSourceText ?: @""} mutableCopy];
+    if (Scenario[@"steps"][StepIndex][@"expect"][@"history"]) {
+        __block NSArray<FYSentenceRecord *> *records=nil;
+        [app.learningStore fetchRecentSentencesWithLimit:FYRecentSentenceLimit completion:^(NSArray<FYSentenceRecord *> *values, NSError *error) {
+            CheckReplay(error == nil,@"读取隔离历史失败",@YES,@(error == nil)); records=values;
+        }];
+        ReplayPump(^BOOL { return records != nil; });
+        NSMutableArray *history=[NSMutableArray new];
+        for (FYSentenceRecord *record in [FYLearningCoordinator displayHistoryRecords:records]) {
+            [history addObject:@{@"source":record.latestText,@"translation":record.latestTranslation ?: @""}];
+        }
+        snapshot[@"history"]=history;
+    }
+    return snapshot;
 }
 static CGImageRef FrameImage(NSDictionary *step, NSString *base) {
     if (step[@"image"]) {
@@ -309,7 +328,7 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
     }
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class,@selector(shared)),class_getClassMethod(FYTranslationTrace.class,@selector(replayShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class,@selector(sharedSession)),class_getClassMethod(FYTestURLSession.class,@selector(replaySession)));
-    ReplayApp *app=NewApp(); NSMutableArray *checkpoints=[NSMutableArray new]; BOOL passed=NO;
+    ReplayApp *app=NewApp(directory); NSMutableArray *checkpoints=[NSMutableArray new]; BOOL passed=NO;
     @try {
         for (NSDictionary *step in Scenario[@"steps"]) {
             ReplayNow=[step[@"at_ms"] doubleValue]/1000; NSString *action=step[@"action"];

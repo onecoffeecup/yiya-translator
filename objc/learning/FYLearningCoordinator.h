@@ -48,6 +48,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 // 记录一条原句（对白/快照），返回不可变身份供回填。连续相同画面复用已有记录。
 - (FYRequestIdentity *)recordText:(NSString *)text kind:(FYSentenceKind)kind;
+// Positive speaker-role evidence supersedes an earlier source containing the
+// same leading label; ordinary incomplete-frame preservation stays unchanged.
+- (FYRequestIdentity *)recordDialogueText:(NSString *)text excludingSpeakerLabels:(NSArray<NSString *> *)labels;
 
 // 逐条记录（贴译/选项），返回与输入一一对应的身份数组。
 - (NSArray<FYRequestIdentity *> *)recordItems:(NSArray<NSString *> *)texts kind:(FYSentenceKind)kind;

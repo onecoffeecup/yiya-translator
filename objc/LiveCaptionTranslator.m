@@ -4139,7 +4139,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     if (currentFrameMode == ContentModeDialogue) {
                         NSMutableArray<NSString *> *comparisonLines = [NSMutableArray array];
                         for (OCRTextItem *item in ocrBlocks) {
-                            if (![FYContentRouter isUncertainSpeakerLabelItem:item]) { [comparisonLines addObject:item.text]; }
+                            if (![FYContentRouter isExcludedSpeakerLabelItem:item]) { [comparisonLines addObject:item.text]; }
                         }
                         // Use the same plate/body distinction before stability,
                         // pending-request matching and rendered-frame dedup.
@@ -4454,7 +4454,11 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     NSString *translatingStatus = [NSString stringWithFormat:@"翻译对白 · 自动判别 · OCR %.1fs", ocrDuration];
                     [self setStatus:translatingStatus];
                     NSDate *translationStart = [NSDate date];
-                    FYRequestIdentity *dialogueIdentity = speakerLabelOnlyFrame ? nil : [self.learningCoordinator recordText:dialogueText kind:FYSentenceKindDialogue];
+                    NSMutableArray<NSString *> *excludedSpeakerLabels=[NSMutableArray new];
+                    for (OCRTextItem *item in contentRoute.dialogueItems.count ? contentRoute.dialogueItems : dialogueSource) {
+                        if ([FYContentRouter isExcludedSpeakerLabelItem:item]) { [excludedSpeakerLabels addObject:item.text]; }
+                    }
+                    FYRequestIdentity *dialogueIdentity = speakerLabelOnlyFrame ? nil : [self.learningCoordinator recordDialogueText:dialogueText excludingSpeakerLabels:excludedSpeakerLabels];
                     // Reused identities retain the complete source. Never overwrite its
                     // translation with one generated from a degraded OCR frame.
                     if (dialogueIdentity.sourceText.length) { dialogueText = dialogueIdentity.sourceText; }

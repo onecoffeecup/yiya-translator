@@ -64,6 +64,8 @@ typedef NS_ENUM(NSInteger, FYAnalysisStatus) {
 @property(nonatomic) NSInteger latestVersion;
 @property(nonatomic, copy, nullable) NSString *latestTranslation;
 @property(nonatomic, copy) NSString *latestText;   // 最新版本对应的文本
+// Positive OCR plate evidence for this exact version, never inferred from a short name-like line.
+@property(nonatomic, copy, nullable) NSArray<NSString *> *excludedSpeakerLabels;
 @property(nonatomic, strong) NSDate *occurredAt;
 @property(nonatomic, copy, nullable) NSString *displayName;
 @end

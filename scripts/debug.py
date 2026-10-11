@@ -27,7 +27,7 @@ ACTION_FIELDS = {
 }
 EXPECT_KEYS = {"requests", "sources", "captions", "inline", "errors", "in_flight", "pending",
                "cancel_calls", "ocr_calls", "mode", "reasons", "drops", "events", "direct_results",
-               "dialogue_identity_count", "learning_source",
+               "dialogue_identity_count", "learning_source", "history",
                "has_reason", "caption_contains"}
 
 

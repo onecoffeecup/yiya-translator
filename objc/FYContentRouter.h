@@ -64,7 +64,7 @@ typedef NSString *(^FYContentComparisonKey)(NSString *text);
 + (NSString *)dialogueTextFromItems:(NSArray<OCRTextItem *> *)items
                   speakerLabelOnly:(BOOL *)speakerLabelOnly
                     filterObserver:(FYContentTextFilterObserver)observer;
-+ (BOOL)isUncertainSpeakerLabelItem:(OCRTextItem *)item;
++ (BOOL)isExcludedSpeakerLabelItem:(OCRTextItem *)item;
 + (FYContentTextFilterReason)filterReasonForText:(NSString *)text normalized:(NSString *)normalized
                                   boundingBox:(CGRect)box strict:(BOOL)strict;
 

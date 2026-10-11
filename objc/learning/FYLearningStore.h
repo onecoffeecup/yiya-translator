@@ -41,6 +41,11 @@ FOUNDATION_EXPORT const NSUInteger FYRecentSentenceLimit;
                   version:(NSInteger)version
                completion:(void (^)(NSError *_Nullable error))completion;
 
+// Attach confirmed plate keys to an immutable dialogue version without changing its snapshots.
+- (void)recordExcludedSpeakerLabels:(NSArray<NSString *> *)labels
+                       forIdentity:(FYRequestIdentity *)identity
+                        completion:(void (^)(NSError *_Nullable error))completion;
+
 // 追加新版本（OCR 修正后）；返回写入的版本号。
 - (void)appendVersionForSentence:(NSString *)sentenceID
                             text:(NSString *)text

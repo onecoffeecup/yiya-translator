@@ -819,6 +819,19 @@ static BOOL FYPlateDominantColor(FYOCRPixelBuffer *buffer, CGRect box, unsigned 
     if (best*100<count*55) { return NO; }
     memcpy(color,samples[bestIndex],3);return YES;
 }
+static BOOL FYPlateBodyHasDistinctBackdrop(FYOCRPixelBuffer *buffer, CGRect box, const unsigned char *color) {
+    NSUInteger distinct=0,total=0;
+    for (NSUInteger row=0;row<7;row++) for (NSUInteger col=0;col<9;col++) {
+        const unsigned char *p=FYPlatePixel(buffer,box.origin.x+box.size.width*(col+.5)/9,
+            box.origin.y+box.size.height*(row+.5)/7);
+        if (!p) { return NO; }
+        total++;
+        if (abs(p[0]-color[0])>=45 || abs(p[1]-color[1])>=45 || abs(p[2]-color[2])>=45) { distinct++; }
+    }
+    // Translucent dialogue can show a textured scene. It need not have one
+    // uniform color, but most of it must differ from the filled name plate.
+    return distinct*100>=total*80;
+}
 + (NSArray<OCRTextItem *> *)itemsByMarkingSpeakerLabels:(NSArray<OCRTextItem *> *)items inImage:(CGImageRef)image {
     if (!image) { return items; }
     NSArray<OCRTextItem *> *band=[FYContentRouter subtitleBandItems:items];
@@ -832,26 +845,32 @@ static BOOL FYPlateDominantColor(FYOCRPixelBuffer *buffer, CGRect box, unsigned 
     if (band.count<2) { return items; }
     OCRTextItem *label=band[0],*body=band[1];
     CGRect a=label.boundingBox,b=body.boundingBox;
+    // The game can sit above OBS controls. The selected band and local plate
+    // geometry supply evidence; its absolute position in the window does not.
     CGFloat widestBody=0;
     for (NSUInteger i=1;i<band.count;i++) widestBody=MAX(widestBody,band[i].boundingBox.size.width);
     CGFloat height=MAX(a.size.height,b.size.height),gap=CGRectGetMinY(a)-CGRectGetMaxY(b);
     if (label.lineCount>1 || label.lineTexts.count>1 ||
         [label.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound ||
-        CGRectGetMidY(a)>.45 || CGRectGetMidY(b)>.38 || a.size.width<=0 || a.size.height<=0 ||
+        a.size.width<=0 || a.size.height<=0 ||
         a.size.width>MAX(widestBody*.6,height*2.5) || a.size.height<b.size.height*.35 || a.size.height>b.size.height*1.8 ||
         gap< -height*.25 || gap>height*1.2 ||
         CGRectGetMinX(a)>CGRectGetMinX(b)+height*.5) { return items; }
     FYOCRPixelBuffer buffer=FYCreateOCRPixelBuffer(image);
     if (!buffer.pixels) { return items; }
-    unsigned char labelColor[3],bodyColor[3];
+    unsigned char labelColor[3];
     CGRect bodySample=CGRectInset(b,-b.size.height*.15,-b.size.height*.1);
-    BOOL confirmed=FYPlateDominantColor(&buffer,a,labelColor) &&
-        FYPlateDominantColor(&buffer,bodySample,bodyColor) &&
-        (abs(labelColor[0]-bodyColor[0])>=45 || abs(labelColor[1]-bodyColor[1])>=45 || abs(labelColor[2]-bodyColor[2])>=45);
-    // Require visible bounds above and to the right of the plate. A broad
-    // colored scene/background or a highlight spanning the whole body fails.
-    NSUInteger outside=0,total=0;
-    if (confirmed) {
+    BOOL confirmed=NO;
+    // Tight ink bounds need a collar; smaller embedded video can instead mix
+    // the collar with the body at sampling resolution. Try both, requiring the
+    // same fill, distinct body and visible plate bounds for either candidate.
+    for (NSUInteger attempt=0;attempt<2 && !confirmed;attempt++) {
+        CGFloat padding=attempt==0 ? a.size.height*.2 : 0;
+        CGRect labelSample=CGRectInset(a,-padding,-padding);
+        if (!FYPlateDominantColor(&buffer,labelSample,labelColor) ||
+            !FYPlateBodyHasDistinctBackdrop(&buffer,bodySample,labelColor)) { continue; }
+        // A broad scene color or a highlight spanning the whole body fails.
+        NSUInteger outside=0,total=0;
         for (NSUInteger i=0;i<5;i++) {
             const unsigned char *above=FYPlatePixel(&buffer,CGRectGetMinX(a)+a.size.width*(i+.5)/5,
                 CGRectGetMaxY(a)+a.size.height);

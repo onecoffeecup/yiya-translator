@@ -9,12 +9,6 @@
     {
       "translation": "明天休息。",
       "hold": true
-    },
-    {
-      "translation": "青木：明天休息。"
-    },
-    {
-      "translation": "田中：明天休息。"
     }
   ],
   "steps": [
@@ -304,9 +298,9 @@
         }
       ],
       "expect": {
-        "requests": 2,
-        "dialogue_identity_count": 2,
-        "learning_source": "青木\n明日は休みです。",
+        "requests": 1,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
         "mode": 0
       }
     },
@@ -335,9 +329,9 @@
         }
       ],
       "expect": {
-        "requests": 2,
-        "dialogue_identity_count": 2,
-        "learning_source": "青木\n明日は休みです。",
+        "requests": 1,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
         "mode": 0
       }
     },
@@ -366,22 +360,18 @@
         }
       ],
       "expect": {
-        "requests": 3,
-        "dialogue_identity_count": 3,
-        "learning_source": "田中\n明日は休みです。",
+        "requests": 1,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
         "mode": 0,
         "sources": [
-          "明日は休みです。",
-          "青木\n明日は休みです。",
-          "田中\n明日は休みです。"
+          "明日は休みです。"
         ],
         "captions": [
-          "明天休息。",
-          "青木：明天休息。",
-          "田中：明天休息。"
+          "明天休息。"
         ]
       }
     }
   ],
-  "notes": "Synthetic pixels identify a separate filled speaker plate. Changes in its unrecognized OCR must not contaminate the body or create requests."
+  "notes": "Synthetic pixels identify a separate filled speaker plate. Known names and unrecognized plate OCR are excluded from dialogue requests and learning text; changes in the plate must not create duplicate body translations."
 }
