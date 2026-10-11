@@ -13,6 +13,7 @@ FY_RUNTIME_BASE_SOURCES=(
   "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m"
   "${FY_CONTENT_ROUTER_SOURCES[@]}"
   "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
+  "$ROOT_DIR/objc/FYTranslationServiceSettings.m"
 )
 FY_RUNTIME_SOURCES=("${FY_RUNTIME_BASE_SOURCES[@]}" "$ROOT_DIR/objc/FYCaptureCardInput.m")
 FY_LEARNING_CORE_SOURCES=(
@@ -24,6 +25,7 @@ FY_LEARNING_CORE_SOURCES=(
   "$ROOT_DIR/objc/learning/FYLearningCoordinator.m"
 )
 FY_LEARNING_UI_SOURCES=(
+  "$ROOT_DIR/objc/FYTranslationServiceView.m"
   "$ROOT_DIR/objc/learning/FYLearningViews.m"
   "$ROOT_DIR/objc/learning/FYStudyChatView.m"
   "$ROOT_DIR/objc/learning/FYStudyChatSession.m"

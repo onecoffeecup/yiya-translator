@@ -42,6 +42,10 @@ typedef NS_ENUM(NSInteger, FYTranslationURLValidationError) {
 FOUNDATION_EXPORT NSURL *FYChatCompletionsURLWithError(NSString *baseURL, NSError **error);
 // Compatibility wrapper, identical acceptance rules.
 FOUNDATION_EXPORT NSURL *FYChatCompletionsURL(NSString *baseURL);
+// Official Claude host or an explicitly supplied /messages endpoint uses Messages.
+// Other service URLs retain OpenAI-compatible requests; no UI protocol choice.
+FOUNDATION_EXPORT NSURL *FYTranslationServiceURLWithError(NSString *baseURL, NSError **error);
+FOUNDATION_EXPORT BOOL FYUsesAnthropicMessagesAPI(NSURL *url);
 FOUNDATION_EXPORT BOOL FYIsDeepSeekService(NSString *baseURL, NSString *model);
 FOUNDATION_EXPORT NSString *FYNumberedTranslationSource(NSUInteger count, NSString *(^textAtIndex)(NSUInteger));
 FOUNDATION_EXPORT NSString *FYInlineBatchPrompt(NSString *sourceLanguage, BOOL longText);
@@ -78,6 +82,10 @@ FOUNDATION_EXPORT void FYDeliverTranslationOnMain(NSInteger requestGeneration, N
 @end
 
 @interface FYTranslationManager : NSObject
++ (NSMutableURLRequest *)requestWithURL:(NSURL *)url apiKey:(NSString *)key model:(NSString *)model
+                              messages:(NSArray<NSDictionary *> *)messages maxTokens:(NSInteger)maxTokens
+                      disableReasoning:(BOOL)disableReasoning requiresJSON:(BOOL)requiresJSON
+                               timeout:(NSTimeInterval)timeout error:(NSError **)error;
 // Returns suspended task. Observer runs before decoding; completion stays on session queue.
 + (NSURLSessionDataTask *)taskWithRequest:(NSURLRequest *)request session:(NSURLSession *)session
                               observer:(void (^)(NSURLResponse *, NSError *))observer

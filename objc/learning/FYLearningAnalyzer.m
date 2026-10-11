@@ -58,7 +58,7 @@ static NSError *FYCanceledError(void) {
 }
 
 - (NSURL *)chatCompletionsURL {
-    return FYChatCompletionsURL(self.baseURL);
+    return FYTranslationServiceURLWithError(self.baseURL,NULL);
 }
 
 - (void)postMessages:(NSArray<NSDictionary *> *)messages
@@ -77,45 +77,30 @@ static NSError *FYCanceledError(void) {
         return;
     }
     NSError *urlError = nil;
-    NSURL *url = FYChatCompletionsURLWithError(self.baseURL, &urlError);
+    NSURL *url = FYTranslationServiceURLWithError(self.baseURL, &urlError);
     if (!url) {
         completion(nil, [NSError errorWithDomain:@"FYLearningAnalyzer" code:10000
                                         userInfo:@{NSLocalizedDescriptionKey: urlError.localizedDescription ?: @"Base URL 无效。"}]);
         return;
     }
     NSString *model = FYTrim(self.model);
-    if (model.length == 0) { model = @"gpt-4.1-mini"; }
-
-    NSMutableDictionary *payload = [@{
-        @"model": model,
-        @"messages": messages,
-        @"temperature": @0.2,
-        @"max_tokens": @(MAX(120, maxTokens))
-    } mutableCopy];
-    // Grammar uses the configured model without hidden reasoning. Keep JSON
-    // output independent of the thinking toggle, and leave unknown APIs alone.
-    BOOL grammarJSON = grammarAnalysis && [@[@"deepseek-flash", @"deepseek-v4-pro", @"deepseek-v4-flash"] containsObject:model.lowercaseString];
-    if ([self isDeepSeek]) {
-        payload[@"reasoning_effort"] = @"none";
-        payload[@"thinking"] = @{@"type": @"disabled"};
-    }
-    if (grammarJSON) {
-        payload[@"response_format"] = @{@"type":@"json_object"};
-    }
-
-    NSData *body = [NSJSONSerialization dataWithJSONObject:payload options:0 error:NULL];
-    if (!body) {
-        completion(nil, [NSError errorWithDomain:@"FYLearningAnalyzer" code:500
-                                        userInfo:@{NSLocalizedDescriptionKey: @"构造请求失败。"}]);
+    if (model.length == 0) {
+        completion(nil, [NSError errorWithDomain:@"FYLearningAnalyzer" code:10003
+            userInfo:@{NSLocalizedDescriptionKey:@"请前往「翻译服务」填写翻译模型；也可在高级选项中填写学习模型。"}]);
         return;
     }
 
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-    request.HTTPMethod = @"POST";
-    request.timeoutInterval = 30;
-    request.HTTPBody = body;
-    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:[NSString stringWithFormat:@"Bearer %@", self.apiKey] forHTTPHeaderField:@"Authorization"];
+    // Translation and learning share the service adapter, including Claude.
+    BOOL grammarJSON=grammarAnalysis && [@[@"deepseek-flash",@"deepseek-v4-pro",@"deepseek-v4-flash"] containsObject:model.lowercaseString];
+    NSError *requestError=nil;
+    NSMutableURLRequest *request=[FYTranslationManager requestWithURL:url apiKey:self.apiKey model:model
+        messages:messages maxTokens:maxTokens disableReasoning:[self isDeepSeek] requiresJSON:grammarJSON
+        timeout:30 error:&requestError];
+    if (!request) {
+        completion(nil,[NSError errorWithDomain:@"FYLearningAnalyzer" code:500
+            userInfo:@{NSLocalizedDescriptionKey:@"构造请求失败。",NSUnderlyingErrorKey:requestError ?: [NSError errorWithDomain:@"FYLearningAnalyzer" code:500 userInfo:nil]}]);
+        return;
+    }
 
     NSInteger generation = self.generation;
     NSString *requestID = NSUUID.UUID.UUIDString;
@@ -167,6 +152,20 @@ static NSError *FYCanceledError(void) {
             if (![decoded isKindOfClass:NSDictionary.class]) {
                 completion(nil, [NSError errorWithDomain:@"FYLearningAnalyzer" code:203
                                                 userInfo:@{NSLocalizedDescriptionKey: @"接口没有返回合法 JSON。"}]);
+                return;
+            }
+            if (FYUsesAnthropicMessagesAPI(request.URL)) {
+                if ([decoded[@"stop_reason"] isEqual:@"max_tokens"]) {
+                    completion(nil,[NSError errorWithDomain:@"FYLearningAnalyzer" code:204
+                        userInfo:@{NSLocalizedDescriptionKey:@"接口输出被截断，没有返回完整结果。"}]);
+                    return;
+                }
+                NSError *contentError=nil;
+                NSString *content=[FYTranslationManager translationFromData:data statusCode:statusCode error:&contentError];
+                if (!content.length) {
+                    completion(nil,[NSError errorWithDomain:@"FYLearningAnalyzer" code:204
+                        userInfo:@{NSLocalizedDescriptionKey:@"学习接口没有返回最终内容。"}]);
+                } else completion(content,nil);
                 return;
             }
             NSArray *choices = decoded[@"choices"];

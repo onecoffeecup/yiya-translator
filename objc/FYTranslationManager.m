@@ -100,6 +100,24 @@ NSURL *FYChatCompletionsURLWithError(NSString *baseURL, NSError **error) {
     return url;
 }
 NSURL *FYChatCompletionsURL(NSString *baseURL) { return FYChatCompletionsURLWithError(baseURL,NULL); }
+BOOL FYUsesAnthropicMessagesAPI(NSURL *url) {
+    NSString *path=url.path;
+    while ([path hasSuffix:@"/"]) path=[path substringToIndex:path.length-1];
+    return [url.host.lowercaseString isEqual:@"api.anthropic.com"] || [path hasSuffix:@"/messages"];
+}
+NSURL *FYTranslationServiceURLWithError(NSString *baseURL, NSError **error) {
+    NSURL *validated=FYChatCompletionsURLWithError(baseURL,error);
+    if (!validated) return nil;
+    NSString *trimmed=[baseURL stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    NSURLComponents *components=[NSURLComponents componentsWithString:trimmed];
+    if (!FYUsesAnthropicMessagesAPI(components.URL)) return validated;
+    NSString *path=components.path;
+    while ([path hasSuffix:@"/"]) path=[path substringToIndex:path.length-1];
+    if (!path.length) path=@"/v1";
+    if (![path hasSuffix:@"/messages"]) path=[path stringByAppendingString:@"/messages"];
+    components.path=path;
+    return components.URL;
+}
 NSString *FYNumberedTranslationSource(NSUInteger count, NSString *(^textAtIndex)(NSUInteger)) {
     NSMutableString *result=[NSMutableString string];
     for (NSUInteger index=0; index<count; index++) [result appendFormat:@"%lu. %@\n", (unsigned long)(index+1), textAtIndex(index)];
@@ -204,24 +222,67 @@ static NSString *FYTrimString(id value) {
                            sourceText:(NSString *)text systemPrompt:(NSString *)prompt
                             maxTokens:(NSInteger)maxTokens disableReasoning:(BOOL)disableReasoning
                              longText:(BOOL)longText error:(NSError **)error {
-    if (!FYChatCompletionsURLWithError(url.absoluteString, error)) { return nil; }
-    NSMutableDictionary *payload = [@{@"model": model, @"messages": @[
-        @{@"role": @"system", @"content": prompt}, @{@"role": @"user", @"content": FYTrimString(text)}],
-        @"temperature": @0.2, @"max_tokens": @(MAX(120, maxTokens))} mutableCopy];
-    if (disableReasoning) {
+    return [self requestWithURL:url apiKey:key model:model messages:@[
+        @{@"role":@"system",@"content":prompt ?: @""},@{@"role":@"user",@"content":FYTrimString(text)}]
+        maxTokens:maxTokens disableReasoning:disableReasoning requiresJSON:NO
+        timeout:longText ? MIN(90,MAX(60,ceil(maxTokens/30.0)+15)) : 15 error:error];
+}
++ (NSMutableURLRequest *)requestWithURL:(NSURL *)url apiKey:(NSString *)key model:(NSString *)model
+                              messages:(NSArray<NSDictionary *> *)messages maxTokens:(NSInteger)maxTokens
+                      disableReasoning:(BOOL)disableReasoning requiresJSON:(BOOL)requiresJSON
+                               timeout:(NSTimeInterval)timeout error:(NSError **)error {
+    NSURL *endpoint=FYTranslationServiceURLWithError(url.absoluteString,error);
+    if (!endpoint) return nil;
+    BOOL anthropic=FYUsesAnthropicMessagesAPI(endpoint);
+    NSMutableDictionary *payload=[@{@"model":model ?: @"",@"max_tokens":@(MAX(120,maxTokens))} mutableCopy];
+    if (anthropic) {
+        NSMutableArray *systems=[NSMutableArray new], *turns=[NSMutableArray new];
+        for (NSDictionary *message in messages) {
+            if ([message[@"role"] isEqual:@"system"]) { NSString *text=FYTrimString(message[@"content"]); if(text.length) [systems addObject:text]; }
+            else [turns addObject:message];
+        }
+        payload[@"messages"]=turns;
+        if(systems.count) payload[@"system"]=[systems componentsJoinedByString:@"\n\n"];
+    } else { payload[@"messages"]=messages; payload[@"temperature"]=@0.2; }
+    if (disableReasoning && !anthropic) {
         payload[@"reasoning_effort"] = @"none";
         payload[@"thinking"] = @{@"type": @"disabled"};
     }
+    if (requiresJSON && !anthropic) payload[@"response_format"]=@{@"type":@"json_object"};
+    // Known preset models have different thinking/sampling contracts. Keep
+    // these details internal and leave unknown compatible services unchanged.
+    NSString *name=model.lowercaseString ?: @"", *host=endpoint.host.lowercaseString;
+    BOOL thinkingBudget=NO;
+    if (anthropic && [name hasPrefix:@"claude-sonnet-5-5"]) {
+        payload[@"thinking"]=@{@"type":@"between_tools"}; payload[@"output_config"]=@{@"effort":@"low"};
+    } else if (anthropic && [name hasPrefix:@"claude-haiku-5-5"]) {
+        payload[@"thinking"]=@{@"type":@"disabled"}; payload[@"output_config"]=@{@"effort":@"low"};
+    } else if (anthropic && [name hasPrefix:@"claude-opus-5-5"]) {
+        payload[@"output_config"]=@{@"effort":@"low"}; thinkingBudget=YES;
+    } else if (([@[@"api.moonshot.cn",@"api.moonshot.ai"] containsObject:host] && [name hasPrefix:@"kimi-k3"]) ||
+               ([host isEqual:@"open.bigmodel.cn"] && [name hasPrefix:@"glm-5.3"]) ||
+               ([host isEqual:@"generativelanguage.googleapis.com"] && [name hasPrefix:@"gemini-3"])) {
+        [payload removeObjectForKey:@"temperature"]; [payload removeObjectForKey:@"thinking"];
+        payload[@"reasoning_effort"]=@"low"; thinkingBudget=YES;
+    } else if ([@[@"api.moonshot.cn",@"api.moonshot.ai"] containsObject:host] && [name hasPrefix:@"kimi-k2."]) {
+        [payload removeObjectForKey:@"temperature"]; [payload removeObjectForKey:@"reasoning_effort"];
+        if ([name hasPrefix:@"kimi-k2.6"]) payload[@"thinking"]=@{@"type":@"disabled"};
+        else { [payload removeObjectForKey:@"thinking"]; thinkingBudget=YES; }
+    }
+    if (thinkingBudget) payload[@"max_tokens"]=@(MAX(4096,maxTokens+2048));
     NSData *body = [NSJSONSerialization dataWithJSONObject:payload options:0 error:error];
     if (!body) { return nil; }
-    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:endpoint];
     request.HTTPMethod = @"POST";
     // Small realtime responses keep their current latency bound. Nonstreaming
     // batches need time to produce larger output, but remain cancellable/bounded.
-    request.timeoutInterval = longText ? MIN(90, MAX(60, ceil(maxTokens / 30.0) + 15)) : 15;
+    request.timeoutInterval = timeout;
     request.HTTPBody = body;
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [request setValue:[NSString stringWithFormat:@"Bearer %@", key] forHTTPHeaderField:@"Authorization"];
+    if(anthropic) {
+        [request setValue:key forHTTPHeaderField:@"x-api-key"];
+        [request setValue:@"2023-06-01" forHTTPHeaderField:@"anthropic-version"];
+    } else [request setValue:[NSString stringWithFormat:@"Bearer %@",key] forHTTPHeaderField:@"Authorization"];
     return request;
 }
 + (NSString *)translationFromData:(NSData *)data statusCode:(NSInteger)statusCode error:(NSError **)error {
@@ -234,6 +295,16 @@ static NSString *FYTrimString(id value) {
     NSError *decodeError = nil;
     id decoded = [NSJSONSerialization JSONObjectWithData:data ?: [NSData data] options:0 error:&decodeError];
     if (!decoded) { if (error) { *error = decodeError; } return nil; }
+    if ([decoded isKindOfClass:NSDictionary.class] && [decoded[@"content"] isKindOfClass:NSArray.class]) {
+        NSMutableArray *texts=[NSMutableArray new];
+        for(id block in decoded[@"content"]) {
+            if(![block isKindOfClass:NSDictionary.class] || ![block[@"type"] isEqual:@"text"]) continue;
+            NSString *text=FYTrimString(block[@"text"]); if(text.length) [texts addObject:text];
+        }
+        if(texts.count) return [texts componentsJoinedByString:@"\n"];
+        if(error) *error=[NSError errorWithDomain:@"LiveCaptionTranslator" code:204 userInfo:@{NSLocalizedDescriptionKey:@"翻译接口没有返回最终译文。"}];
+        return nil;
+    }
     id choices = [decoded isKindOfClass:NSDictionary.class] ? decoded[@"choices"] : nil;
     id first = [choices isKindOfClass:NSArray.class] ? [choices firstObject] : nil;
     id message = [first isKindOfClass:NSDictionary.class] ? first[@"message"] : nil;

@@ -646,7 +646,8 @@ static void CheckTranslationModelSettingsMigration(void) {
     [NSUserDefaults.standardUserDefaults removeObjectForKey:SettingsKey]; FYTestLocalAPIKeyValue=nil;
     TracePipelineApp *a=TraceApp(); a.learningAnalyzer=[FYLearningAnalyzer new];
     a.modelField.stringValue=@""; [a syncLearningAnalyzerConfig];
-    Require([a.learningAnalyzer.model isEqual:@"gpt-4.1-mini"], @"learning fallback matches the translation transport when the field is empty");
+    Require(a.learningAnalyzer.model.length==0 && [a configuredTranslationModel].length==0,
+        @"clearing a current model stays empty in translation and learning; defaults apply only during old-settings migration");
     a.learningModelField.stringValue=@"separate-study-model"; [a syncLearningAnalyzerConfig];
     Require([a.learningAnalyzer.model isEqual:@"separate-study-model"], @"optional learning model remains independent");
     for (NSUInteger preset=0;preset<3;preset++) {

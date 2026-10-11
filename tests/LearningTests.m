@@ -506,10 +506,46 @@ int main(void) {
         PumpUntil(^BOOL { return malformedError != nil; });
         Check(malformedError != nil, @"malformed output should be an error");
 
+        FYLearningAnalyzer *emptyModel = MockAnalyzerWithJSON(@"{}");
+        emptyModel.model = @" \n ";
+        __block BOOL emptyModelSent = NO;
+        emptyModel.transport = ^(NSURLRequest *request, void (^done)(NSData *, NSURLResponse *, NSError *)) {
+            emptyModelSent = YES;
+            done(nil, OKResponse(), nil);
+        };
+        __block NSError *emptyModelError = nil;
+        [emptyModel analyzeSentence:@"テスト" translation:nil completion:^(FYAnalysisResult *r, NSError *e) { emptyModelError = e; }];
+        PumpUntil(^BOOL { return emptyModelError != nil; });
+        Check(!emptyModelSent && [emptyModelError.localizedDescription containsString:@"填写翻译模型"],
+              @"an empty model fails before transport without silently selecting a different service model");
+
+        // Claude learning uses the same adapter while keeping its JSON/truncation contract.
+        for (NSString *stopReason in @[@"end_turn",@"max_tokens"]) {
+            FYLearningAnalyzer *claude=[FYLearningAnalyzer new]; claude.baseURL=@"https://api.anthropic.com/v1";
+            claude.apiKey=@"synthetic-claude-key"; claude.model=@"fixture-claude";
+            __block NSUInteger calls=0;
+            claude.transport=^(NSURLRequest *request,void (^done)(NSData *,NSURLResponse *,NSError *)) {
+                calls++;
+                NSDictionary *payload=[NSJSONSerialization JSONObjectWithData:request.HTTPBody options:0 error:NULL];
+                Check([request.URL.path isEqual:@"/v1/messages"] && request.timeoutInterval==30 && payload[@"system"]!=nil,
+                    @"Claude learning receives Messages routing, separate system prompt and the original learning timeout");
+                Check(!payload[@"temperature"] && !payload[@"response_format"],@"Claude learning omits incompatible OpenAI parameters");
+                NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"type":@"message",@"stop_reason":stopReason,
+                    @"content":@[@{@"type":@"text",@"text":@"{\"schema_version\":1,\"grammar\":[],\"vocabulary\":[]}"}]} options:0 error:NULL];
+                done(data,[[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{}],nil);
+            };
+            __block FYAnalysisResult *result=nil; __block NSError *error=nil;
+            [claude analyzeSentence:@"今日は晴れです。" translation:nil completion:^(FYAnalysisResult *r,NSError *e){result=r;error=e;}];
+            PumpUntil(^BOOL { return result!=nil || error!=nil; });
+            Check(calls==1 && ([stopReason isEqual:@"end_turn"] ? result!=nil && error==nil : result==nil && error!=nil),
+                @"Claude complete JSON is accepted and truncated JSON is rejected through production learning logic");
+        }
+
         // 截断（content 为空 + finish_reason=length）
         FYLearningAnalyzer *truncated = [[FYLearningAnalyzer alloc] init];
         truncated.baseURL = @"https://example.com/v1";
         truncated.apiKey = @"test-key-not-real";
+        truncated.model = @"fixture-model";
         truncated.transport = ^(NSURLRequest *request, void (^done)(NSData *, NSURLResponse *, NSError *)) {
             NSDictionary *body = @{@"choices": @[@{@"message": @{@"content": @""}, @"finish_reason": @"length"}]};
             done([NSJSONSerialization dataWithJSONObject:body options:0 error:NULL], OKResponse(), nil);
@@ -524,6 +560,7 @@ int main(void) {
         for (id object in badEnvelopes) {
             FYLearningAnalyzer *bad = [[FYLearningAnalyzer alloc] init];
             bad.baseURL = @"https://example.com/v1"; bad.apiKey = @"test-key-not-real";
+            bad.model = @"fixture-model";
             bad.transport = ^(NSURLRequest *req, void (^done)(NSData *, NSURLResponse *, NSError *)) {
                 done([NSJSONSerialization dataWithJSONObject:object options:0 error:NULL], OKResponse(), nil);
             };
@@ -534,6 +571,7 @@ int main(void) {
         }
         FYLearningAnalyzer *nonEmptyTruncated = [[FYLearningAnalyzer alloc] init];
         nonEmptyTruncated.baseURL = @"https://example.com/v1"; nonEmptyTruncated.apiKey = @"test-key-not-real";
+        nonEmptyTruncated.model = @"fixture-model";
         nonEmptyTruncated.transport = ^(NSURLRequest *req, void (^done)(NSData *, NSURLResponse *, NSError *)) {
             NSDictionary *body = @{@"choices": @[@{@"message": @{@"content": @"{\"schema_version\":1,\"grammar\":[],\"vocabulary\":[]}"}, @"finish_reason": @"length"}]};
             done([NSJSONSerialization dataWithJSONObject:body options:0 error:NULL], OKResponse(), nil);
@@ -560,6 +598,7 @@ int main(void) {
         FYLearningAnalyzer *cancellable = [[FYLearningAnalyzer alloc] init];
         cancellable.baseURL = @"https://example.com/v1";
         cancellable.apiKey = @"test-key-not-real";
+        cancellable.model = @"fixture-model";
         cancellable.transport = ^(NSURLRequest *request, void (^done)(NSData *, NSURLResponse *, NSError *)) {
             capturedDone = done;
         };
@@ -620,6 +659,7 @@ int main(void) {
         // 11. 网络结果回主线程（R04）
         FYLearningAnalyzer *backgroundAnalyzer = [[FYLearningAnalyzer alloc] init];
         backgroundAnalyzer.baseURL = @"https://example.com/v1"; backgroundAnalyzer.apiKey = @"test-key-not-real";
+        backgroundAnalyzer.model = @"fixture-model";
         backgroundAnalyzer.transport = ^(NSURLRequest *req, void (^done)(NSData *, NSURLResponse *, NSError *)) {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
                 NSDictionary *body = @{@"choices": @[@{@"message": @{@"content": @"{\"schema_version\":1,\"grammar\":[],\"vocabulary\":[]}"}, @"finish_reason": @"stop"}]};

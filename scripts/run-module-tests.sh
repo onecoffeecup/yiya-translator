@@ -47,6 +47,16 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
   "$ROOT_DIR/tests/TranslationManagerTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/TranslationManagerTests"
 "$OUT/TranslationManagerTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/AnthropicTranslationTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
+  -framework Foundation -o "$OUT/AnthropicTranslationTests"
+"$OUT/AnthropicTranslationTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/TranslationServiceSettingsTests.m" "$ROOT_DIR/objc/FYTranslationServiceSettings.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
+  -framework Foundation -o "$OUT/TranslationServiceSettingsTests"
+"$OUT/TranslationServiceSettingsTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-unused-function \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/LocalAPIKeyStoreTests.m" \
