@@ -2,6 +2,37 @@
 
 2026-10-11，用户确认奶油棕圆体预览及紧凑空状态并授权接入。阅读布局已随功能提交 `4956d21` 推送至 Mac 分支 `dev0.2.1_261009`，前一集成包为 0.2.1 build 59；公开 Release / Sparkle 仍为 build 17。
 
+## 2026-10-11：查看原句共用实时页悬停词卡
+
+用户确认原生悬停预览并授权接入；预览保留于维护者工作区的内部资料 `docs/design/quick-sentence-hover-preview-20261011/word-hover.png`，不随公开源码分发。原查句使用普通 `NSTextField` 原文标签，无法命中 `FYSourceHoverAttributeName`；新增 `QuickSentenceHoverTests` 在修改前因缺少原生悬停文本视图退出 2，证据 `.build/quick-sentence-hover-20261011/baseline.log`。
+
+`FYImmersiveUI.inc` 将非空原文改为 `FYSourceReadingView` 内的原生 `FYSelectableSourceTextView`，保留 19 pt 圆体、选择／复制及完整字符。容器按实际栏宽测量原文高度，外层查句文档负责滚动，短句不保留固定视口空白；空原句仍显示原提示。新增辅助文字为「悬停查看词义 · 按住拖拽可选择原文」。
+
+`FYSourceHoverUI.inc` 让实时页和查句共用分词、本机词典缓存与解析覆盖顺序。已有解析的中文词义优先于 JMdict 英文释义，已验证的语法范围优先于重叠词语；沿用 320 pt 奶油棕词卡、0.45 秒停留、长说明摘要和真实来源标记，不增加 API 请求。查句使用独立代次、不可变文字快照、句子 ID／版本与视图身份守卫，不依赖主窗口固定句。关闭、切换 AI、开始区域选择或隐藏查句时明确收起；原生组件监听所有外层滚动视口，避免整体文档滚动留下旧词卡。
+
+新增回归实际调用生产渲染、鼠标移动和定时器，并覆盖词典读音、中文词义／语法覆盖、无焦点夺取、原生选择与独立剪贴板复制、440 → 680 → 440 pt 自然高度、外层滚动收起、关闭及迟到分词／词典回调、同长度原位改写和身份变化。`.build/quick-sentence-hover-20261011/production.log` 退出 0；真实游戏、设备和长期体验另行验收。
+
+用户已安排本次桌面测试时段，以下命令均在维护仓库运行并退出 0：
+
+```bash
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh QuickSentenceHoverTests .build/quick-sentence-hover-20261011/production
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh SourceHoverTests .build/quick-sentence-hover-20261011/SourceHoverTests
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh QuickSentenceAnalysisTests .build/quick-sentence-hover-20261011/QuickSentenceAnalysisTests
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh ImmersiveLearningTests .build/quick-sentence-hover-20261011/ImmersiveLearningTests
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh DragSelectionTests .build/quick-sentence-hover-20261011/DragSelectionTests
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh PreviewLayoutTests .build/quick-sentence-hover-20261011/PreviewLayoutTests
+python3 scripts/debug.py check
+FY_BUILD_NUMBER=61 bash scripts/install-app.sh
+```
+
+五组相关 UI 日志及 `related-results.json` 保存于 `.build/quick-sentence-hover-20261011/`。工作区联合核心报告 `.build/debug/20261011T114238Z-2cbb71/summary.json` 记录 115 项执行全部通过，包含同工作区的姓名排除修补；安装前后核对的 65 个生产源码散列一致。隔离测试使用临时数据库、独立剪贴板、合成对白与模拟服务；只读本机随包词典，不连接真实设备、读取真实 Key / 学习库或消耗真实 API Token。正式组件合成截图保留于工作区内部资料 `docs/design/quick-sentence-hover-preview-20261011/production/word-hover.png`，沿用已确认的词卡外观。
+
+正式应用 `/Users/nanami/Applications/译芽.app` 已安装并打开，为 **0.2.1 build 61**。双架构构建、严格深层签名、安装与打包二进制 UUID 一致；x86_64 为 `2D955078-3FEE-3818-A67D-C1299A6129D9`，arm64 为 `B0F38657-BE5D-302E-840D-230C1076882C`。`install.log` 与 `installed-verification.json` 记录安装身份和比对结果。Key 文件仅检查元数据，权限 `0600` / 目录 `0700`、大小及修改时间保持不变。正式应用打开后处于暂停空状态，没有开始真实采集或翻译。本轮悬停代码提交至 Mac 开发分支，公开 Release / Sparkle 保持 build 17。
+
+提交前另从 Git 暂存区导出独立源码快照，排除并行姓名过滤代码及新夹具后重新执行 `QuickSentenceHoverTests` 与 `python3 scripts/debug.py check`，均退出 0；核心 111 项执行记录全部通过。UI 日志为 `.build/quick-sentence-hover-20261011/commit-ui.log`，核心日志为 `commit-core.log`，报告位于该目录 `staged-tree/.build/debug/20261011T115457Z-914696/summary.json`。暂存区全部生产源码、测试及脚本与此快照相同，文档另行补充结果；本次提交只包含查句悬停相关改动。
+
+最短体验验收：在已有对白上打开「查看原句」，将鼠标停在词语上约半秒，确认词义卡显示；移开或滚动后收起，再拖选原文并复制，确认字号与文字完整。切换另一句后确认词卡对应新句。真实鼠标、游戏输入与长期体验仍由用户验收，隔离生产 UI 回归不能替代这些范围。
+
 ## 2026-10-11：正文统一 19 pt，点击后保持字号（本机 build 60）
 
 用户要求中文正文与当前对白同大，并指出点击后文字缩小。原生生产视图失败回归中，中文显示为 23 pt，进入 AppKit field editor 后变为 14 pt；控件沿用了等待提示的默认字体，且 `allowsEditingTextAttributes=NO`。证据为 `.build/reading-font-20261011/before.log` 的 `displayed=23.0 selected=14.0 rich=0`，该字号保持断言退出 2。

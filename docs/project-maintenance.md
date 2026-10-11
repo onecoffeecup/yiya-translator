@@ -15,12 +15,16 @@
 | 事实面 | 状态与依据 |
 | --- | --- |
 | 代码与远端 | `verified-current`：Mac 分支 `dev0.2.1_261009` 的功能提交 `4956d21` 与服务组件提交 `73c306e` 已推送；iPadOS / Windows 独立维护。后续文档提交不改变这些功能提交的验证范围。 |
-| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 59；签名、二进制 SHA-256 与双架构 UUID 已重新核对。[安装及回归记录](window-resize.md)保存产物身份。 |
+| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 61；含 19 pt 字号修补与查句悬停，也包含同工作区的其他并行修补。严格签名、安装 / 打包双架构 UUID 与 Key 元数据已核对。[查句安装及回归记录](live-reading-layout.md)保存当前身份；安装不表示其他并行修改已纳入本次提交。 |
 | 公开交付 | `verified-current`：GitHub 最新 Release 仍为 v0.2.1，Sparkle 清单仍为 build 17；dev 推送和本机安装没有更新公开附件。 |
 | 文档与规则 | `changed-and-verified`：源码 README、两层 AGENTS 与内部视觉规范同步手动侧栏、原生窗口尺寸和阅读布局规则；具体合同分别在[窗口缩放](window-resize.md)、[阅读布局](live-reading-layout.md)、[服务组件](translation-service-settings.md)。 |
 | 用户体验 | `pending`：正式 build 59 的右边缘 / 右下角真实鼠标体验、另一台 Mac、Intel 实机、采集卡及长时间运行尚未验收；完整视觉套件仍有修改前已复现的「已选中」徽标失败。 |
 | Agent 记忆 | `out-of-scope`：本次只更新项目文件与约束，不手改平台生成记忆。 |
-| 工作区 | `pending`：现役仓库只有一个 worktree；文档收尾时另发现 `objc/LiveCaptionTranslator.m` 与 `tests/PreviewLayoutTests.m` 的未提交字体 / 原生选择改动，已保留，不纳入本次文档提交或 build 59 验证。历史分支、日志、签名产物和备份未删除。 |
+| 工作区 | `pending`：现役仓库只有一个 worktree；字号 / 原生选择修补已提交为 `94174ac`，查句悬停本轮单独提交至 Mac 开发分支。其他未提交的并行修改保留，不纳入本次查句提交。工作区联合核心检查 115 项记录通过，查句回归与安装范围见[阅读布局](live-reading-layout.md)。历史分支、日志、签名产物和备份保留。 |
+
+查句悬停在用户确认预览后共用实时页的生产组件。新增 `QuickSentenceHoverTests` 与五组相关原生 UI 回归通过，覆盖词义／语法优先级、选择复制、自然高度、外层滚动、关闭及迟到回调隔离；安装前后 65 个生产源码散列一致，正式应用打开后为暂停空状态。命令、build 61 安装 UUID、Key 元数据及最短手动验收见[阅读布局](live-reading-layout.md)。真实游戏、设备与物理鼠标体验仍待确认。
+
+### build 59 文档收尾的历史范围
 
 本次文档收尾只检查内容、链接、源码证据与安装身份，不重跑桌面 / 核心套件，也不递增 build 或重新安装。111 项核心检查与相关 UI 的通过记录对应功能提交 `4956d21` 的代码；文档变动及随后出现的未提交源码不能被写成一次新的运行验收。阅读文档中的 23 pt 中文字号描述的是已提交 / 已安装 build 59；未提交的 19 pt 调整须在其验证与交付完成后另行同步。
 

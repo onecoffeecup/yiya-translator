@@ -77,6 +77,12 @@ FOUNDATION_EXPORT NSAttributedStringKey const FYSourceHoverAttributeName;
 @property(nonatomic, copy, nullable) void (^didClickAtCharacterIndex)(NSUInteger characterIndex);
 @end
 
+// A native, selectable source block that wraps to its actual width and lets the
+// surrounding reading document scroll. No fixed empty viewport for short text.
+@interface FYSourceReadingView : NSView
+@property(nonatomic, strong, readonly) FYSelectableSourceTextView *textView;
+@end
+
 // NSTextView document sizing follows its clip view, including after window resize.
 FOUNDATION_EXPORT void FYConfigureSourceTextView(NSTextView *textView, NSScrollView *scrollView, CGFloat fontSize);
 NS_ASSUME_NONNULL_END

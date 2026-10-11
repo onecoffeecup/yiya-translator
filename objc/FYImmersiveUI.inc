@@ -229,11 +229,12 @@
         __weak typeof(self) weakSelf=self;self.studyChatPanel.onEscape=^{[weakSelf closeStudyOverlay:nil];};
     }
     [self updateInlineReturnButtonVisibility];
-    self.studyChatOverlayRequested=YES;self.quickSentenceRequested=NO;self.quickSentenceGeneration++;[self cancelQuickSentenceAnalysis];[self.quickSentencePanel orderOut:nil];
+    self.studyChatOverlayRequested=YES;self.quickSentenceRequested=NO;self.quickSentenceGeneration++;[self.quickSourceTextView dismissSourceHover];[self cancelQuickSentenceAnalysis];[self.quickSentencePanel orderOut:nil];
     [self refreshStudyChatViews];[self.studyChatPanel orderFrontRegardless];[self.studyChatPanel makeKeyWindow];[self.overlayStudyChatView focusInput];
 }
 - (void)closeStudyOverlay:(id)sender {
     self.studyChatOverlayRequested=NO;self.quickSentenceRequested=NO;self.quickSentenceGeneration++;[self cancelQuickSentenceAnalysis];
+    [self.quickSourceTextView dismissSourceHover];
     [self.studyChatPanel orderOut:nil];[self.quickSentencePanel orderOut:nil];
     // 关闭/Esc 回到游戏，清除「返回语法」关系，避免残留指向旧块的返回入口。
     self.inlineReturnSnapshot=nil;[self updateInlineReturnButtonVisibility];
@@ -499,6 +500,8 @@
     return card;
 }
 - (void)renderQuickSentence {
+    [self.quickSourceTextView dismissSourceHover];
+    self.quickSourceHoverGeneration++;self.quickSourceTextView=nil;
     // 结构图整体重建前先记下横向偏移，构建完立刻恢复（避免跳回最左、也不用延时跳回）。
     CGFloat keptStructureOffset=[self structureScrollOffsetForQuick:YES];
     self.quickGrammarStack=nil;self.quickGrammarDetailCard=nil;self.quickGrammarChoices=@[];
@@ -543,7 +546,19 @@
     NSStackView *content=[self verticalStack];content.spacing=18;
     NSStackView *source=[self verticalStack];source.spacing=8;
     [source addArrangedSubview:[self quickReadingLabel:inlineBlock?@"原文":@"日文原句" size:10 weight:NSFontWeightRegular color:self.uiMuted]];
-    [source addArrangedSubview:[self quickReadingLabel:self.quickSentenceSource.length?self.quickSentenceSource:(inlineBlock?@"尚未选中内容":@"尚未识别到对白") size:19 weight:NSFontWeightRegular color:self.uiInk]];
+    if(self.quickSentenceSource.length){
+        FYSourceReadingView *reading=[[FYSourceReadingView alloc] initWithFrame:NSMakeRect(0,0,400,26)];
+        NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.lineSpacing=6;
+        reading.textView.font=FYFontForText(self.quickSentenceSource,19,NSFontWeightRegular);
+        reading.textView.textColor=self.uiInk;
+        reading.textView.defaultParagraphStyle=paragraph;
+        [reading.textView.textStorage setAttributedString:[[NSAttributedString alloc] initWithString:self.quickSentenceSource attributes:@{
+            NSFontAttributeName:FYFontForText(self.quickSentenceSource,19,NSFontWeightRegular),NSForegroundColorAttributeName:self.uiInk,NSParagraphStyleAttributeName:paragraph}]];
+        [source addArrangedSubview:reading];self.quickSourceTextView=reading.textView;
+        [source addArrangedSubview:[self quickReadingLabel:@"悬停查看词义 · 按住拖拽可选择原文" size:11 weight:NSFontWeightRegular color:self.uiMuted]];
+    }else{
+        [source addArrangedSubview:[self quickReadingLabel:inlineBlock?@"尚未选中内容":@"尚未识别到对白" size:19 weight:NSFontWeightRegular color:self.uiInk]];
+    }
     [content addArrangedSubview:source];
     NSStackView *translation=[self verticalStack];translation.spacing=5;
     [translation addArrangedSubview:[self quickReadingLabel:self.quickSentenceTranslation.length?self.quickSentenceTranslation:@"暂无译文" size:14 weight:NSFontWeightRegular color:self.uiInk]];
@@ -644,6 +659,7 @@
         [footer.trailingAnchor constraintEqualToAnchor:host.trailingAnchor constant:-20],
         [footer.bottomAnchor constraintEqualToAnchor:host.bottomAnchor constant:-16]]];
     self.quickSentencePanel.contentView=host;
+    [self refreshQuickSentenceHoverTips];
     [self refreshOverlayVisibility:nil];
     [self restoreStructureScrollOffset:keptStructureOffset quick:YES];
 }

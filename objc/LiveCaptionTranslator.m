@@ -595,6 +595,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic) BOOL chatResolvingSource;
 @property(nonatomic) NSInteger quickSentenceGeneration;
 @property(nonatomic, copy) NSString *quickSentenceSource;
+@property(nonatomic, strong) FYSelectableSourceTextView *quickSourceTextView;
+@property(nonatomic) NSUInteger quickSourceHoverGeneration;
 @property(nonatomic, copy) NSString *quickSentenceTranslation;
 @property(nonatomic, copy) NSString *quickSentenceID;
 @property(nonatomic) NSInteger quickSentenceVersion;
@@ -3801,7 +3803,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         if(![overlay isKindOfClass:NSPanel.class]){continue;}
         overlay.level = overlayLevel;
         BOOL requested=overlay==self.studyChatPanel?self.studyChatOverlayRequested:self.quickSentenceRequested;
-        if(targetActive && requested){[overlay orderFrontRegardless];}else{[overlay orderOut:nil];}
+        if(targetActive && requested){[overlay orderFrontRegardless];}else{
+            if(overlay==self.quickSentencePanel){[self.quickSourceTextView dismissSourceHover];}
+            [overlay orderOut:nil];
+        }
     }
     NSMutableArray<NSPanel *> *overlays = [[self.inlineTranslationPanels arrayByAddingObjectsFromArray:self.inlineLongCardPanels] mutableCopy];
     if (self.inlineOverflowPanel) { [overlays addObject:self.inlineOverflowPanel]; }
@@ -5361,6 +5366,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [self.ocrPreviewPanel orderOut:nil];
     [self.captionDockPanel orderOut:nil];
     [self.studyChatPanel orderOut:nil];
+    [self.quickSourceTextView dismissSourceHover];
     [self.quickSentencePanel orderOut:nil];
 }
 

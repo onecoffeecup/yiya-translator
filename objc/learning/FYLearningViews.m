@@ -522,9 +522,14 @@ NSAttributedStringKey const FYSourceHoverAttributeName = @"FYSourceHover";
         for(NSString *name in @[NSWindowDidResignKeyNotification,NSWindowWillCloseNotification,NSWindowDidMoveNotification,NSWindowDidResizeNotification]){
             [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sourceHoverGeometryChanged:) name:name object:self.window];
         }
-        NSClipView *clip=self.enclosingScrollView.contentView;
-        clip.postsBoundsChangedNotifications=YES;
-        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sourceHoverGeometryChanged:) name:NSViewBoundsDidChangeNotification object:clip];
+        // A source block may live in the quick-sentence reading document rather
+        // than its own scroll view. Any enclosing scroll must dismiss the card.
+        for(NSView *ancestor=self.superview;ancestor;ancestor=ancestor.superview){
+            if(![ancestor isKindOfClass:NSScrollView.class]){continue;}
+            NSClipView *clip=((NSScrollView *)ancestor).contentView;
+            clip.postsBoundsChangedNotifications=YES;
+            [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(sourceHoverGeometryChanged:) name:NSViewBoundsDidChangeNotification object:clip];
+        }
     }
 }
 - (void)sourceHoverGeometryChanged:(NSNotification *)note { [self dismissSourceHover]; }
@@ -665,6 +670,40 @@ NSAttributedStringKey const FYSourceHoverAttributeName = @"FYSourceHover";
         if (self.willBeginSelection) { self.willBeginSelection(); }
     }
     [super keyDown:event];
+}
+@end
+
+#pragma mark - Naturally sized source reading
+@implementation FYSourceReadingView
+- (instancetype)initWithFrame:(NSRect)frame {
+    if((self=[super initWithFrame:frame])){
+        _textView=[[FYSelectableSourceTextView alloc] initWithFrame:self.bounds];
+        _textView.editable=NO;_textView.selectable=YES;_textView.richText=NO;
+        _textView.drawsBackground=NO;_textView.verticallyResizable=NO;_textView.horizontallyResizable=NO;
+        _textView.textContainerInset=NSZeroSize;_textView.textContainer.lineFragmentPadding=0;
+        _textView.textContainer.widthTracksTextView=YES;
+        _textView.textContainer.containerSize=NSMakeSize(MAX(1,NSWidth(frame)),CGFLOAT_MAX);
+        _textView.automaticQuoteSubstitutionEnabled=NO;
+        [self addSubview:_textView];
+        [self setContentHuggingPriority:999 forOrientation:NSLayoutConstraintOrientationVertical];
+        [self setContentCompressionResistancePriority:999 forOrientation:NSLayoutConstraintOrientationVertical];
+    }
+    return self;
+}
+- (void)setFrameSize:(NSSize)size {
+    CGFloat previousWidth=NSWidth(self.bounds);[super setFrameSize:size];
+    self.textView.frame=self.bounds;
+    if(fabs(previousWidth-size.width)>.1){[self invalidateIntrinsicContentSize];}
+}
+- (NSSize)intrinsicContentSize {
+    CGFloat width=MAX(1,NSWidth(self.bounds));
+    self.textView.textContainer.containerSize=NSMakeSize(width,CGFLOAT_MAX);
+    [self.textView.layoutManager ensureLayoutForTextContainer:self.textView.textContainer];
+    CGFloat height=ceil(NSHeight([self.textView.layoutManager usedRectForTextContainer:self.textView.textContainer]))+2;
+    return NSMakeSize(NSViewNoIntrinsicMetric,MAX(26,height));
+}
+- (void)layout {
+    [super layout];self.textView.frame=self.bounds;
 }
 @end
 
