@@ -392,6 +392,41 @@ NSInteger DetectContentModeForBlocks(NSArray<OCRTextItem *> *blocks, NSInteger f
 - (BOOL)isFlipped { return YES; }
 @end
 
+// Window geometry drives the layout canvas. Its size constraints are internal
+// to that canvas, so page fitting cannot become the native window's min/max.
+@interface FYFrameDrivenContentView : NSView
+@property(nonatomic, strong) NSView *layoutContent;
+@property(nonatomic, strong) NSLayoutConstraint *layoutWidth;
+@property(nonatomic, strong) NSLayoutConstraint *layoutHeight;
+@end
+@implementation FYFrameDrivenContentView
+- (instancetype)initWithFrame:(NSRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.autoresizesSubviews = NO;
+        _layoutContent = [[NSView alloc] initWithFrame:self.bounds];
+        _layoutContent.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:_layoutContent];
+        _layoutWidth = [_layoutContent.widthAnchor constraintEqualToConstant:NSWidth(self.bounds)];
+        _layoutHeight = [_layoutContent.heightAnchor constraintEqualToConstant:NSHeight(self.bounds)];
+        [NSLayoutConstraint activateConstraints:@[_layoutWidth, _layoutHeight]];
+    }
+    return self;
+}
+- (void)syncLayoutGeometry {
+    self.layoutWidth.constant = NSWidth(self.bounds);
+    self.layoutHeight.constant = NSHeight(self.bounds);
+    self.layoutContent.frame = self.bounds;
+}
+- (void)setFrameSize:(NSSize)size {
+    [super setFrameSize:size];
+    [self syncLayoutGeometry];
+}
+- (void)layout {
+    [self syncLayoutGeometry];
+    [super layout];
+}
+@end
+
 typedef void (^RegionSelectionCompletion)(CGRect selectedRect, CGSize viewSize, BOOL cancelled);
 
 @interface FYRegionSelectionPanel : NSPanel
@@ -551,6 +586,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSLayoutConstraint *workspaceWidth;
 @property(nonatomic, strong) NSLayoutConstraint *mainChatWidth;
 @property(nonatomic, strong) NSLayoutConstraint *mainWindowContentWidth;
+@property(nonatomic, strong) NSLayoutConstraint *mainWindowMinimumWidth;
 @property(nonatomic) BOOL mainChatWantsVisible;
 @property(nonatomic, strong) NSButton *mainChatToggle;
 @property(nonatomic) BOOL studyChatOverlayRequested;
@@ -913,6 +949,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSTextField *grammarQuestionField;
 @property(nonatomic) BOOL learningAnalysisBusy;
 @property(nonatomic, strong) NSLayoutConstraint *sourceReadingHeight;
+@property(nonatomic, strong) NSLayoutConstraint *translationReadingMinimumHeight;
+@property(nonatomic, strong) NSLayoutConstraint *sourceReadingMinimumHeight;
+@property(nonatomic, strong) NSTextField *liveSourceEmptyLabel;
+@property(nonatomic, strong) NSTextField *liveSourceSelectionHintLabel;
 @property(nonatomic, strong) NSStackView *sentenceInsightStack;
 @property(nonatomic, strong) NSTextField *sentenceInsightLabel;
 @property(nonatomic, strong) NSArray<NSControl *> *grammarFollowupControls;
@@ -1086,23 +1126,11 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     return NO;
 }
 
-- (void)windowWillStartLiveResize:(NSNotification *)notification {
-    if (notification.object != self.mainWindow) { return; }
-    // Page fitting widths must not become the user's fixed resize boundary.
-    self.mainWindowContentWidth.active = NO;
-}
-
-- (void)windowDidEndLiveResize:(NSNotification *)notification {
-    if (notification.object != self.mainWindow) { return; }
-    self.mainWindowContentWidth.constant = NSWidth(self.mainWindow.contentView.bounds);
-    self.mainWindowContentWidth.active = YES;
-}
-
 - (void)windowDidResize:(NSNotification *)notification {
     if (notification.object != self.mainWindow) { return; }
-    self.mainWindowContentWidth.constant=NSWidth(self.mainWindow.contentView.bounds);
     [self updateMainChatForWindowWidth];
     [self.mainWindow.contentView layoutSubtreeIfNeeded];
+    [self updateLiveSourceReadingHeight];
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)visible {
@@ -1257,14 +1285,9 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.mainChatWidth=[self.mainStudyChatView.widthAnchor constraintEqualToConstant:320];
 
     self.mainWorkspaceRoot=root;
-    // Preserve the chosen width when pages mount. Release this equality for
-    // native live resizing, then commit the final width when the gesture ends.
-    // Keep it optional so AppKit can also apply programmatic frame changes.
-    NSView *windowHost=[[NSView alloc] initWithFrame:self.mainWindow.contentView.bounds];
-    windowHost.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
-    self.mainWindowContentWidth=[windowHost.widthAnchor constraintEqualToConstant:NSWidth(windowHost.bounds)];
-    self.mainWindowContentWidth.priority=NSLayoutPriorityRequired-1;
-    self.mainWindowContentWidth.active=YES;
+    FYFrameDrivenContentView *frameHost=[[FYFrameDrivenContentView alloc] initWithFrame:self.mainWindow.contentView.bounds];
+    NSView *windowHost=frameHost.layoutContent;
+    self.mainWindowContentWidth=frameHost.layoutWidth;
     windowHost.wantsLayer=YES;windowHost.layer.backgroundColor=FYAdventureColor(@"canvas").CGColor;
     FYAdventureBanner *banner=[FYAdventureBanner new];
     banner.translatesAutoresizingMaskIntoConstraints=NO;
@@ -1274,7 +1297,12 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         [banner.trailingAnchor constraintEqualToAnchor:windowHost.trailingAnchor],
         [banner.topAnchor constraintEqualToAnchor:windowHost.topAnchor],
         [banner.heightAnchor constraintEqualToConstant:72]]];
-    self.mainWindow.contentView = windowHost;
+    self.mainWindow.contentView = frameHost;
+    self.mainWindowMinimumWidth = [frameHost.widthAnchor constraintGreaterThanOrEqualToConstant:1100];
+    [NSLayoutConstraint activateConstraints:@[
+        self.mainWindowMinimumWidth,
+        [frameHost.heightAnchor constraintGreaterThanOrEqualToConstant:660]
+    ]];
     [NSLayoutConstraint activateConstraints:@[
         [root.leadingAnchor constraintEqualToAnchor:windowHost.leadingAnchor],
         [root.trailingAnchor constraintEqualToAnchor:windowHost.trailingAnchor],
@@ -1402,10 +1430,13 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     if (index < 0 || index >= self.pages.count) { return; }
     FYMountLearningPage(self.pages, self.learningPageHost, index);
     self.selectedPage = index;
+    [self updateMainChatForWindowWidth];
     if (index != 4) { [self.captionAppearancePreviewPanel orderOut:nil]; }
     self.headerTitleLabel.stringValue = @[@"实时翻译", @"最近台词", @"单词学习", @"运行设置", @"字幕外观", @"翻译服务"][index];
     self.headerDescriptionLabel.stringValue = @[@"读懂当前对白，再看懂它的语法。", @"把之前没看懂的对白，再读一遍。", @"收藏词语，带着原句复习", @"选择画面来源并调整识别方式", @"选一种配色，看看它在游戏里的样子。", @"配置翻译与学习分析服务"][index];
-    [self.headerDescriptionLabel setContentCompressionResistancePriority:index==4?750:249 forOrientation:NSLayoutConstraintOrientationHorizontal];
+    // This one-line hint may truncate on every page; it must not enlarge the
+    // window when the appearance page is mounted in a narrow workspace.
+    [self.headerDescriptionLabel setContentCompressionResistancePriority:249 forOrientation:NSLayoutConstraintOrientationHorizontal];
     self.currentWindowLabel.hidden = index != 0;
     if (index == 1) { [self refreshHistory]; }
     if (index == 2) { [self refreshVocabularyList]; }
@@ -1414,7 +1445,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
 - (NSView *)makeLivePage {
     NSStackView *page = [self verticalStack];
-    page.spacing = 16;
+    page.spacing = 12;
     page.alignment = NSLayoutAttributeWidth;
 
     // 1) 游戏实时画面区
@@ -1489,9 +1520,28 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [screen addArrangedSubview:self.liveErrorLabel];
     [page addArrangedSubview:[self cardWithStack:screen]];
 
-    // 2) 当前对白卡片
+    // 2) 中文翻译卡片：先读译文，再按需看原文。
+    NSStackView *translationBlock = [self verticalStack];
+    translationBlock.spacing = 12;
+    NSStackView *translationTitleRow = [self horizontalStack];
+    [translationTitleRow addArrangedSubview:[self mutedLabel:@"中文翻译"]];
+    [translationTitleRow addArrangedSubview:[self spacer]];
+    [translationBlock addArrangedSubview:translationTitleRow];
+    self.learningTranslationLabel = [self label:@"开始翻译后，译文会显示在这里。" font:FYUIFont(14, NSFontWeightRegular) color:self.uiMuted];
+    self.learningTranslationLabel.selectable = YES;
+    self.learningTranslationLabel.maximumNumberOfLines = 0;
+    self.learningTranslationLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    [translationBlock addArrangedSubview:self.learningTranslationLabel];
+    NSView *translationCardOuter = [self cardWithStack:translationBlock];
+    ((FYAdventurePanel *)translationCardOuter).fillColor = FYAdventureColor(@"cream");
+    ((FYAdventurePanel *)translationCardOuter).edgeColor = FYAdventureColor(@"line");
+    self.translationReadingMinimumHeight = [translationCardOuter.heightAnchor constraintGreaterThanOrEqualToConstant:104];
+    self.translationReadingMinimumHeight.active = YES;
+    [page addArrangedSubview:translationCardOuter];
+
+    // 3) 当前对白卡片：保留完整原文与原生字符索引。
     NSStackView *sentence = [self verticalStack];
-    sentence.spacing = 12;
+    sentence.spacing = 8;
     NSStackView *sentenceTitleRow = [self horizontalStack];
     [sentenceTitleRow addArrangedSubview:[self mutedLabel:@"当前对白"]];
     [sentenceTitleRow addArrangedSubview:[self spacer]];
@@ -1499,12 +1549,15 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.liveLevelTag.hidden = YES;
     [sentenceTitleRow addArrangedSubview:self.liveLevelTag];
     [sentence addArrangedSubview:sentenceTitleRow];
+    self.liveSourceEmptyLabel = [self label:@"等待识别当前对白，识别后可选词学习。" font:FYUIFont(14, NSFontWeightRegular) color:self.uiMuted];
+    [sentence addArrangedSubview:self.liveSourceEmptyLabel];
     NSScrollView *learningScroll = [[NSScrollView alloc] init];
     self.learningSourceTextView = [[FYSelectableSourceTextView alloc] init];
-    FYConfigureSourceTextView(self.learningSourceTextView, learningScroll, 20);
-    NSMutableParagraphStyle *sourceStyle = [NSMutableParagraphStyle new]; sourceStyle.lineSpacing = 7;
+    FYConfigureSourceTextView(self.learningSourceTextView, learningScroll, 19);
+    NSMutableParagraphStyle *sourceStyle = [NSMutableParagraphStyle new]; sourceStyle.lineSpacing = 0;
     self.learningSourceTextView.defaultParagraphStyle = sourceStyle;
     [sentence addArrangedSubview:learningScroll];
+    learningScroll.hidden = YES;
     self.sourceReadingHeight = [learningScroll.heightAnchor constraintEqualToConstant:48];
     self.sourceReadingHeight.active = YES;
     __weak typeof(self) weakSelf = self;
@@ -1525,22 +1578,21 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         weakSelf.vocabSelectionGeneration += 1;
         [weakSelf updateWordPickForSelection];
     }];
-    [sentence addArrangedSubview:[self label:@"点击选词，或按住拖拽选择词语／短语" font:FYUIFont(11, NSFontWeightRegular) color:self.uiMuted]];
+    self.liveSourceSelectionHintLabel = [self label:@"点击选词，或按住拖拽选择词语／短语" font:FYUIFont(11, NSFontWeightRegular) color:self.uiMuted];
+    self.liveSourceSelectionHintLabel.hidden = YES;
+    [sentence addArrangedSubview:self.liveSourceSelectionHintLabel];
     // 固定此句 / 跟随最新：真正可点击的入口。
     // 未固定显示「固定此句」；固定后显示「跟随最新」，点击解除固定并切回最新识别内容。
     // 固定期间有新台词由 learningPinnedLabel 提示「已固定 · 有新台词」。
-    NSStackView *sentenceActions = [self horizontalStack];
-    sentenceActions.spacing = 10;
     self.pinSentenceButton = [self workspaceButton:@"固定此句" action:@selector(toggleLearningPin:) primary:NO];
     self.pinSentenceButton.bezelStyle = NSBezelStyleRounded;
+    self.pinSentenceButton.enabled = NO;
     self.followLatestButton = [NSButton buttonWithTitle:@"跟随最新" target:self action:@selector(followLatestSentence:)];
     self.followLatestButton.bezelStyle = NSBezelStyleRounded;
     self.followLatestButton.hidden = YES;
     self.learningPinnedLabel = [self mutedLabel:@"跟随最新"];
-    [sentenceActions addArrangedSubview:self.pinSentenceButton];
-    [sentenceActions addArrangedSubview:self.learningPinnedLabel];
-    [sentenceActions addArrangedSubview:[self spacer]];
-    [sentence addArrangedSubview:sentenceActions];
+    [sentenceTitleRow addArrangedSubview:self.pinSentenceButton];
+    [sentenceTitleRow addArrangedSubview:self.learningPinnedLabel];
     self.wordPickArea = [self verticalStack];
     self.wordPickArea.spacing = 10;
     self.wordPickArea.hidden = YES;
@@ -1574,27 +1626,27 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.vocabularyStatusLabel = [self label:@"" font:FYUIFont(12, NSFontWeightRegular) color:self.uiMuted];
     [self.wordPickArea addArrangedSubview:self.vocabularyStatusLabel];
     [sentence addArrangedSubview:self.wordPickArea];
+    // Minimum card heights leave their spare space below the reading content,
+    // rather than stretching the heading row toward the middle.
+    for (NSStackView *readingStack in @[translationBlock, sentence]) {
+        for (NSView *view in readingStack.arrangedSubviews) {
+            [view setContentHuggingPriority:999 forOrientation:NSLayoutConstraintOrientationVertical];
+        }
+        NSView *space = [NSView new];
+        NSView *lastContent = readingStack.arrangedSubviews.lastObject;
+        [readingStack addArrangedSubview:space];
+        [readingStack setCustomSpacing:0 afterView:lastContent];
+        [space.heightAnchor constraintGreaterThanOrEqualToConstant:0].active = YES;
+        NSLayoutConstraint *collapsedSpace = [space.heightAnchor constraintEqualToConstant:0];
+        collapsedSpace.priority = 1;
+        collapsedSpace.active = YES;
+    }
     NSView *sourceCard = [self cardWithStack:sentence];
     ((FYAdventurePanel *)sourceCard).fillColor = FYAdventureColor(@"paper");
     ((FYAdventurePanel *)sourceCard).edgeColor = FYAdventureColor(@"line");
+    self.sourceReadingMinimumHeight = [sourceCard.heightAnchor constraintGreaterThanOrEqualToConstant:104];
+    self.sourceReadingMinimumHeight.active = YES;
     [page addArrangedSubview:sourceCard];
-
-    // 3) 中文翻译卡片
-    NSStackView *translationBlock = [self verticalStack];
-    translationBlock.spacing = 12;
-    NSStackView *translationTitleRow = [self horizontalStack];
-    [translationTitleRow addArrangedSubview:[self mutedLabel:@"中文翻译"]];
-    [translationTitleRow addArrangedSubview:[self spacer]];
-    [translationBlock addArrangedSubview:translationTitleRow];
-    self.learningTranslationLabel = [self label:@"（暂无译文）" font:FYUIFont(16, NSFontWeightRegular) color:self.uiInk];
-    self.learningTranslationLabel.selectable = YES;
-    self.learningTranslationLabel.maximumNumberOfLines = 8;
-    self.learningTranslationLabel.lineBreakMode = NSLineBreakByWordWrapping;
-    [translationBlock addArrangedSubview:self.learningTranslationLabel];
-    NSView *translationCardOuter = [self cardWithStack:translationBlock];
-    ((FYAdventurePanel *)translationCardOuter).fillColor = FYAdventureColor(@"cream");
-    ((FYAdventurePanel *)translationCardOuter).edgeColor = FYAdventureColor(@"line");
-    [page addArrangedSubview:translationCardOuter];
 
     [page addArrangedSubview:[self makeInlineTranslationListCard]];
 
@@ -2352,6 +2404,40 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     }];
 }
 
+- (NSAttributedString *)liveReadingText:(NSString *)text japanese:(BOOL)japanese {
+    NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
+    style.lineSpacing = japanese ? 0 : 5;
+    NSMutableAttributedString *reading = [[NSMutableAttributedString alloc] initWithString:text ?: @"" attributes:@{
+        NSFontAttributeName:japanese ? FYJapaneseFont(19) : FYUIFont(23, NSFontWeightRegular),
+        NSForegroundColorAttributeName:self.uiInk, NSParagraphStyleAttributeName:style}];
+    NSString *speaker = nil, *body = nil;
+    [self splitSpeakerAndBody:text speaker:&speaker body:&body];
+    if (!japanese && speaker.length) {
+        NSString *sourceSpeaker = nil;
+        [self splitSpeakerAndBody:self.displayedSourceText speaker:&sourceSpeaker body:NULL];
+        // Chinese short sentences also look like CJK names to the OCR helper.
+        // Only a matching source label may receive secondary speaker styling.
+        if (![speaker isEqualToString:sourceSpeaker]) { speaker = nil; }
+    }
+    if (speaker.length && body.length && body.length < text.length) {
+        // Style the existing prefix without deleting or inserting characters.
+        [reading addAttributes:@{NSFontAttributeName:FYUIFont(13, NSFontWeightRegular),
+            NSForegroundColorAttributeName:self.uiMuted} range:NSMakeRange(0, text.length-body.length)];
+    }
+    return reading;
+}
+
+- (void)updateLiveSourceReadingHeight {
+    NSScrollView *scroll = self.learningSourceTextView.enclosingScrollView;
+    if (!scroll || NSWidth(scroll.contentView.bounds) <= 0) { return; }
+    // Measure the actual styled text after layout; a pre-layout narrow width
+    // must not leave a short sentence with a tall viewport after resizing.
+    CGFloat width = MAX(1, NSWidth(scroll.contentView.bounds)-2*self.learningSourceTextView.textContainer.lineFragmentPadding);
+    CGFloat height = [self.learningSourceTextView.textStorage boundingRectWithSize:NSMakeSize(width, CGFLOAT_MAX)
+        options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading].size.height;
+    self.sourceReadingHeight.constant = MIN(190, MAX(42, ceil(height)+12));
+}
+
 - (void)refreshLearningSource {
     [self refreshHistory];
     NSString *source = self.learningCoordinator.currentSourceText ?: @"";
@@ -2367,14 +2453,23 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.displayedSourceText = source;
     self.displayedTranslation = translation;
     BOOL sourceChanged=![self.learningSourceTextView.string isEqualToString:source];
-    if (sourceChanged) { self.learningSourceTextView.string = source; }
-    CGFloat readingWidth = MAX(200, self.learningSourceTextView.enclosingScrollView.contentView.bounds.size.width - 10);
-    NSDictionary *readingAttributes = @{NSFontAttributeName:self.learningSourceTextView.font,
-        NSParagraphStyleAttributeName:self.learningSourceTextView.defaultParagraphStyle ?: NSParagraphStyle.defaultParagraphStyle};
-    CGFloat readingHeight = [source boundingRectWithSize:NSMakeSize(readingWidth, CGFLOAT_MAX) options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading attributes:readingAttributes].size.height;
-    self.sourceReadingHeight.constant = MIN(190, MAX(42, ceil(readingHeight) + 20));
+    if (sourceChanged) { [self.learningSourceTextView.textStorage setAttributedString:[self liveReadingText:source japanese:YES]]; }
     if (![self.grammarSourceTextView.string isEqualToString:source]) { self.grammarSourceTextView.string = source; }
-    self.learningTranslationLabel.stringValue = translation.length ? translation : (source.length ? @"等待该句译文" : @"开始翻译后，当前台词会显示在这里。");
+    BOOL hasSource = source.length > 0;
+    self.liveSourceEmptyLabel.hidden = hasSource;
+    self.learningSourceTextView.enclosingScrollView.hidden = !hasSource;
+    self.liveSourceSelectionHintLabel.hidden = !hasSource;
+    self.sourceReadingMinimumHeight.constant = hasSource ? 156 : 104;
+    self.translationReadingMinimumHeight.constant = (hasSource || translation.length) ? 156 : 104;
+    if (translation.length) {
+        self.learningTranslationLabel.attributedStringValue = [self liveReadingText:translation japanese:NO];
+    } else {
+        NSString *hint = hasSource ? @"等待该句译文" : @"开始翻译后，译文会显示在这里。";
+        self.learningTranslationLabel.attributedStringValue = [[NSAttributedString alloc] initWithString:hint attributes:@{
+            NSFontAttributeName:FYUIFont(14, NSFontWeightRegular), NSForegroundColorAttributeName:self.uiMuted}];
+    }
+    [self.mainWindow.contentView layoutSubtreeIfNeeded];
+    [self updateLiveSourceReadingHeight];
     [self refreshLiveDialoguePresentation:source];
     self.grammarSourceLabel.stringValue = translation.length ? translation : (source.length ? @"暂无该句译文" : @"还没有选择要分析的句子。");
     [self refreshLearningStatus];

@@ -138,6 +138,7 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     Require(NSWidth(resizedChat.contentView.bounds)>500,@"AI message viewport expands with manual resize");
     [app closeStudyOverlay:nil];[app showStudyChatOverlay:nil];Tick();
     for(NSUInteger cycle=0;cycle<20;cycle++){[app refreshStudyChatViews];Tick();Require(fabs(NSWidth(app.studyChatPanel.frame)-600)<1 && fabs(NSHeight(app.studyChatPanel.frame)-800)<1,@"AI reopen and refresh keep resized frame stable");}
+    if (!app.mainStudyChatView.hidden) { [app toggleMainStudyChat:nil]; Tick(); }
     [app.mainWindow setContentSize:NSMakeSize(1000,660)];Tick();
     CGFloat compactWorkspaceWidth=NSWidth(app.mainWorkspaceRoot.frame);
     [app.mainWindow setContentSize:NSMakeSize(1150,740)];Tick();

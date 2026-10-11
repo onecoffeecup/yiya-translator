@@ -47,10 +47,11 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     app.learningCoordinator=[[FYLearningCoordinator alloc] initWithStore:store analyzer:Analyzer(catalog) tokenizer:[FYJapaneseTokenizer new] catalog:catalog];
     [app createMainWindow];[app createCaptionWindow];
     [app.mainWindow makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
+    [app toggleMainStudyChat:nil];Tick();
     [app.mainWindow setContentSize:NSMakeSize(720,700)];[app selectPageAtIndex:4];Tick();
     NSScrollView *narrowAppearance=(NSScrollView *)app.pages[4];
     Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-720)<2 && app.mainStudyChatView.hidden &&
-            !app.mainChatToggle.enabled && NSWidth(narrowAppearance.frame)>500,@"narrow window keeps its requested width and releases AI space for readable settings");
+            app.mainChatToggle.enabled && NSWidth(narrowAppearance.frame)>500,@"manual collapse releases AI space for readable narrow settings and keeps expansion available");
     Require(app.appearanceModeControl.selectedSegment==1 && app.appearanceEditors[0].hidden && !app.appearanceEditors[1].hidden,@"concentrated settings start with inline appearance without the other editor taking space");
     for(NSButton *choice in app.batchThemeSwatches){
         NSRect themeFrame=[choice convertRect:choice.bounds toView:narrowAppearance.contentView];
@@ -58,9 +59,11 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     }
     CheckShortPreview(app.appearanceSamples[1]);
     Snapshot(app.appearanceSamples[1],[output stringByAppendingPathComponent:@"appearance-inline-concentrated-narrow.png"]);
-    Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-narrow-with-ai-auto-collapsed.png"]);
+    Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-narrow-with-ai-manually-collapsed.png"]);
     [app.mainWindow setContentSize:NSMakeSize(1320,800)];Tick();
-    Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-1320)<2 && !app.mainStudyChatView.hidden && app.mainChatToggle.enabled,@"window regains its requested width and AI sidebar returns");
+    Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-1320)<2 && app.mainStudyChatView.hidden && app.mainChatToggle.enabled,@"widening preserves the manually closed sidebar");
+    [app toggleMainStudyChat:nil];Tick();
+    Require(!app.mainStudyChatView.hidden,@"the user can explicitly reopen the sidebar after widening");
     if(!app.mainStudyChatView.hidden){[app toggleMainStudyChat:nil];}
     [app.mainWindow setContentSize:NSMakeSize(720,700)];Tick();
     [app.mainWindow setContentSize:NSMakeSize(1320,800)];Tick();

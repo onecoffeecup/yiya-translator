@@ -29,7 +29,9 @@
     [common addArrangedSubview:opacityLabels];[common addArrangedSubview:self.captionOpacitySlider];
     [self.captionOpacitySlider.widthAnchor constraintLessThanOrEqualToConstant:260].active=YES;
     [self.captionOpacitySlider.widthAnchor constraintGreaterThanOrEqualToConstant:60].active=YES;
-    NSLayoutConstraint *opacityWidth=[self.captionOpacitySlider.widthAnchor constraintEqualToConstant:260];opacityWidth.priority=750;opacityWidth.active=YES;
+    // 260 pt is preferred; narrow windows may shorten the slider to its 60 pt
+    // minimum instead of making the outer window grow to fit this row.
+    NSLayoutConstraint *opacityWidth=[self.captionOpacitySlider.widthAnchor constraintEqualToConstant:260];opacityWidth.priority=NSLayoutPriorityDefaultLow;opacityWidth.active=YES;
     NSTextField *opacityValue=[self label:@"58%" font:FYUIFont(14,NSFontWeightRegular) color:self.uiInk];
     [opacityValue.widthAnchor constraintEqualToConstant:44].active=YES;[self.appearanceValueLabels setObject:opacityValue forKey:self.captionOpacitySlider];
     [common addArrangedSubview:opacityValue];[common addArrangedSubview:[self spacer]];

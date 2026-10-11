@@ -171,29 +171,35 @@
 }
 - (void)toggleMainStudyChat:(id)sender {
     // 单一显隐状态：隐藏侧栏不销毁会话，聊天记录和草稿保持原样。
-    if (NSWidth(self.mainWindow.contentView.bounds) < 960) { return; }
     self.mainChatWantsVisible = self.mainStudyChatView.hidden;
     [self updateMainChatForWindowWidth];
     [self.mainWindow.contentView layoutSubtreeIfNeeded];
 }
 - (void)updateMainChatForWindowWidth {
     if (!self.mainWindow || !self.mainStudyChatView || !self.workspaceWidth) { return; }
-    BOOL roomy = NSWidth(self.mainWindow.contentView.bounds) >= 960;
-    BOOL showChat = roomy && self.mainChatWantsVisible;
+    // Resizing never changes the chosen layout. With the rail open, a shared
+    // minimum keeps reading and settings usable without page-dependent jumps.
+    BOOL showChat = self.mainChatWantsVisible;
     if (self.mainStudyChatView.hidden != !showChat) {
         self.mainStudyChatView.hidden = !showChat;
     }
     self.mainChatWidth.active = showChat;
     self.workspaceWidth.constant = showChat ? -510 : -190;
+    CGFloat minimumWidth = showChat ? 1100 : 720;
+    self.mainWindowMinimumWidth.constant = minimumWidth;
+    NSSize contentMinimum = self.mainWindow.contentMinSize;
+    if (contentMinimum.width != minimumWidth) {
+        contentMinimum.width = minimumWidth;
+        self.mainWindow.contentMinSize = contentMinimum;
+    }
     [self updateMainChatToggle];
 }
 // 按钮标题始终跟随同一份状态；侧栏内已无第二个入口。
 - (void)updateMainChatToggle {
     if (!self.mainChatToggle) { return; }
     self.mainChatToggle.title = self.mainStudyChatView.hidden ? @"展开 AI 伙伴" : @"收起 AI 伙伴";
-    BOOL roomy = NSWidth(self.mainWindow.contentView.bounds) >= 960;
-    self.mainChatToggle.enabled = roomy;
-    self.mainChatToggle.toolTip = roomy ? nil : @"放大窗口后可展开 AI 伙伴";
+    self.mainChatToggle.enabled = YES;
+    self.mainChatToggle.toolTip = self.mainStudyChatView.hidden ? @"展开 AI 伙伴；空间不足时会放宽窗口" : @"收起后可把窗口缩得更窄";
 }
 - (void)configureStudyOverlay:(NSPanel *)panel {
     panel.hidesOnDeactivate=NO;panel.releasedWhenClosed=NO;panel.level=NSFloatingWindowLevel;

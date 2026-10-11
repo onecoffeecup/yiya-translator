@@ -452,14 +452,15 @@ int main(int argc,const char *argv[]) {
                 @"the pending reply still arrives complete with no duplicate send");
 
         // 窄窗口下同样可见、可展开
-        [app.mainWindow setContentSize:NSMakeSize(980,660)];Tick();
         [app toggleMainStudyChat:nil];Tick();
+        [app.mainWindow setContentSize:NSMakeSize(980,660)];Tick();
         NSRect toggleFrame=[chatToggle convertRect:chatToggle.bounds toView:app.mainWindow.contentView];
         Require(chatToggle.superview!=nil && !chatToggle.hidden && NSWidth(toggleFrame)>10 &&
                 NSMaxX(toggleFrame)<=NSWidth(app.mainWindow.contentView.bounds)+1,
                 @"the toggle stays inside the visible header in a narrow window");
         [app toggleMainStudyChat:nil];Tick();
-        Require(!app.mainStudyChatView.hidden,@"the narrow window can expand the sidebar again");
+        Require(!app.mainStudyChatView.hidden && NSWidth(app.mainWindow.frame)>=1100,
+            @"manual expansion widens a narrow window for the same readable three-column layout");
         [app.mainWindow setContentSize:NSMakeSize(1440,1000)];Tick();
 
         // —— 贴译视觉：短贴片必须是奶油棕，不能是旧字幕的灰黑框 ——

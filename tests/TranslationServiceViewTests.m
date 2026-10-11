@@ -14,16 +14,14 @@ static void ServiceSnapshot(NSView *view,NSString *path) {
     Require([[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES],@"native service screenshot saved");
 }
 static void ServiceResize(AppDelegate *app,CGFloat width) {
-    // Exercise the live-resize delegates as well as AppKit's layout pressure;
-    // setContentSize alone skips the boundary that releases the idle width lock.
+    // Apply AppKit drag-priority layout pressure, then release it. Production
+    // geometry and constraints remain in charge without simulated callbacks.
     NSLayoutConstraint *drag=[app.mainWindow.contentView.widthAnchor constraintEqualToConstant:width];
     drag.priority=NSLayoutPriorityDragThatCanResizeWindow;
-    [app windowWillStartLiveResize:[NSNotification notificationWithName:NSWindowWillStartLiveResizeNotification object:app.mainWindow]];
     drag.active=YES;
     Tick(); [app.mainWindow.contentView layoutSubtreeIfNeeded]; Tick();
     NSLog(@"SERVICE_RESIZE desired=%.0f actual=%.0f preferred=%.0f",width,NSWidth(app.mainWindow.contentView.bounds),app.mainWindowContentWidth.constant);
     Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-width)<2,@"service controls allow the native drag-priority window width");
-    [app windowDidEndLiveResize:[NSNotification notificationWithName:NSWindowDidEndLiveResizeNotification object:app.mainWindow]];
     drag.active=NO;
     Tick(); [app.mainWindow.contentView layoutSubtreeIfNeeded]; Tick();
     NSLog(@"SERVICE_WINDOW requested=%.0f actual=%.0f",width,NSWidth(app.mainWindow.contentView.bounds));
@@ -34,6 +32,12 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     NSString *output=argc>1 ? @(argv[1]) : @".build/test-results/TranslationServiceViewTests";
     AppDelegate *app=[AppDelegate new]; [app createMainWindow]; [app loadSettings];
     [app selectPageAtIndex:5]; [app.mainWindow makeKeyAndOrderFront:nil]; Tick();
+    [app toggleMainStudyChat:nil]; Tick();
+    FYTranslationServiceView *compactComponent=[[FYTranslationServiceView alloc] initWithLicenseView:[NSView new]];
+    compactComponent.view.frame=NSMakeRect(0,0,400,900);
+    [compactComponent.view layoutSubtreeIfNeeded];
+    Require(((NSStackView *)compactComponent.modelField.superview).orientation==NSUserInterfaceLayoutOrientationVertical,
+        @"an independently hosted compact service component still puts the model picker below its editable field");
     NSView *service=app.translationServiceView.view;
     Require(service && app.baseURLField==app.translationServiceView.baseURLField && app.modelField.delegate==app.translationServiceView,@"service component owns its fields and input handling");
     for(NSString *identifier in @[@"service-mode-preset",@"service-mode-custom"]) {
@@ -68,7 +72,8 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
             NSRect rect=[control convertRect:control.bounds toView:content];
             Require(NSMinX(rect)>=-1 && NSMaxX(rect)<=NSWidth(content.bounds)+1 && NSWidth(rect)>100,@"native service inputs fit narrow and wide windows");
         }
-        if(width.integerValue==960) Require(((NSStackView *)app.modelField.superview).orientation==NSUserInterfaceLayoutOrientationVertical,@"compact service form moves the model picker below the editable field while AI remains visible");
+        Require(app.mainStudyChatView.hidden && app.mainChatToggle.enabled,
+            @"service resizing preserves the manually closed sidebar and leaves explicit expansion available");
         if(width.integerValue==1320) ServiceSnapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"service-custom-native.png"]);
     }
     [(NSButton *)FindServiceView(service,@"service-mode-preset") performClick:nil]; [(NSButton *)FindServiceView(service,@"deepseek") performClick:nil];

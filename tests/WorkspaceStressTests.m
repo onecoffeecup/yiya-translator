@@ -5,6 +5,7 @@ int main(void) { @autoreleasepool {
     FYLearningStore *store = Store([directory stringByAppendingPathComponent:@"stress.sqlite3"]);
     FYGrammarCatalog *catalog = [[FYGrammarCatalog alloc] initWithURL:[NSURL fileURLWithPath:@"resources/learning/grammar-catalog.json"]]; Require([catalog loadWithError:NULL], @"catalog failed");
     AppDelegate *app = App(store, Analyzer(catalog), catalog);
+    [app toggleMainStudyChat:nil];
     [app refreshLearningSource]; [app freezeLearningSentenceForSelection]; [app.learningCoordinator pinCurrent];
     Require(!app.learningCoordinator.isPinned && !app.pinSentenceButton.enabled && !app.grammarPageAnalyzeButton.enabled, @"empty source must not become pinned or expose analysis actions");
     FYRequestIdentity *identity = [app.learningCoordinator recordText:@"名前\n雨が降っても行きます。\n一緒に行きましょう。\nここで待っていてください。" kind:FYSentenceKindDialogue];
