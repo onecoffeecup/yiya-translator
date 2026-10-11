@@ -7,6 +7,47 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <description>译芽应用内更新清单</description>
         <language>zh-CN</language>
         <item>
+            <title>0.2.2</title>
+            <pubDate>Sun, 11 Oct 2026 23:12:30 +0800</pubDate>
+            <link>https://github.com/onecoffeecup/yiya-translator/releases</link>
+            <sparkle:version>74</sparkle:version>
+            <sparkle:shortVersionString>0.2.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="plain-text"># 译芽 0.2.2 · 对白识别、阅读与翻译服务（2026-10-11）
+
+本版本包含 Mac 开发分支截至 `66b19fb` 的改动，保留 macOS 13+、Apple Silicon 与 Intel 双架构支持。
+
+## 这次更新
+
+- 翻译请求进行时继续识别画面；新对白确认后取消旧请求，迟到的译文不会覆盖当前内容。画面预览独立刷新，不再等待 OCR 或翻译完成。
+- 改善短对白、省略号、引用词与双遍 OCR 抖动处理；独立姓名栏确认后从对白和最近台词中排除，正文里的姓名仍保留。混合对白与选项分别交付。
+- 最近台词只收录已有非空译文的记录；失败、取消和等待翻译不挤占最近 5 条。旧学习记录与收藏保留。
+- 主窗口缩放跟随原生外框；AI 侧栏只手动开关。展开时最小内容宽度 1100 pt，收起后 720 pt，拖动和切页保持选择。
+- 实时页优先显示中文；原文和译文统一 19 pt，保留原生选择、复制与换行。「查看原句」增加悬停词卡，展示读音、词义和来源。
+- 翻译服务提供 10 个预设及自定义 URL，模型名可直接编辑。Claude 拒答或截断响应不作为译文保存；明确拒答只显示原因，其余服务失败继续提示测试当前服务。模型框按 Enter 只保存一次。
+- API Key 跨应用版本保留：从已有版本升级到 0.2.2 后自动读取本机原 Key，无需为版本变化重新填写；不访问钥匙串。
+- 改善界面长正文请求保留、采集画面映射、贴译高度限制与离线字体回退；发布包剥除二进制中的本机构建路径，崩溃符号独立留在维护者本机。
+
+## 下载和升级
+
+普通使用者下载 **`yiya-0.2.2.zip`**，已包含离线词典、App 和首次使用说明。源码构建下载 `fuyi-source-0.2.2.zip` 与 `fuyi-reference-20261004.zip`，各附件提供 SHA-256 校验文件。
+
+已安装包含 Sparkle 的版本，可在「译芽 → 检查更新…」更新；0.2.0 用户需先手动安装一次。`yiya-0.2.2-build-74-update.zip` 供应用内更新使用，首次安装请下载普通安装包。设置、学习资料、收藏和本机 API Key 继续保存在原应用数据目录。
+
+安装包需要 macOS 13 或更高版本，采用 ad-hoc 签名，尚未经过 Apple 公证。解压后先读「首次打开说明.txt」；首次打开步骤随包提供。翻译接口费用由使用者自己的服务商账户承担。
+
+## 已知限制与验证范围
+
+一个 OCR 块同时包含对白和粘连的按钮文字时，按钮文字可能仍进入翻译；这一缺口已登记，尚未修复。小画面长贴译卡继续按高度上限显示，超出内容在卡内滚动。
+
+完整检查结果与既有桌面验收差异见[发布检查记录](https://github.com/onecoffeecup/yiya-translator/blob/main/docs/发布检查结果.md)。自动回归和隔离更新安装不代替真实游戏设备、Intel 实机、另一台 Mac 或长时间运行验收。AI 翻译与语法解释可能有误。
+</description>
+            <enclosure url="https://github.com/onecoffeecup/yiya-translator/releases/download/v0.2.2/yiya-0.2.2-build-74-update.zip" length="39469906" type="application/octet-stream" sparkle:edSignature="NWxbBVkM+gvtQ0IUlTMQrgZwBKa/1TqGEapPx9iTln6sM36PC+bBBpO8ay5q4UKIcVUA8eFwyv45kbkMSR/ODg=="></enclosure>
+            <sparkle:deltas>
+                <enclosure url="https://github.com/onecoffeecup/yiya-translator/releases/download/v0.2.2/yiya-74-17.delta" sparkle:deltaFrom="17" length="963982" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="976240" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="sxqBgTybGsS50Ire6MUlMKxKCRZ78kfbaXYkAFo5KnTQJrI5X8z5P6doKrMIn/tQRfSuJFkEJ5OMc/M8/M11BQ=="></enclosure>
+            </sparkle:deltas>
+        </item>
+        <item>
             <title>0.2.1</title>
             <pubDate>Thu, 08 Oct 2026 08:50:45 +0800</pubDate>
             <link>https://github.com/onecoffeecup/yiya-translator/releases</link>
@@ -53,6 +94,6 @@ AI 翻译、语法解释和参考等级可能有误；复核不保证找全所�
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: RBm2UWpSDwlO5z3XRwWaJgZIOwS0mQQxwagGfgQF3zdpAgKqlTKMzeXZ53KHAwJiN//hGFeOLAViDwwqA//jBw==
-length: 5357
+edSignature: I1u4j2dh5yOfFnQIGZ3A1GwCFi431hkgJpHw9pu7J98TgOIul8aeXQJb0PyXrbMWnx/cFU126oExUJpDFaEhBA==
+length: 9640
 -->
