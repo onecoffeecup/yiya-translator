@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "name": "known-gap-fused-trailing-button",
+  "mode": "dialogue",
+  "source": "window",
+  "responses": [{"translation": "想起来了。"}],
+  "steps": [
+    {"at_ms": 0, "action": "frame", "text": "思い出した。使用", "expect": {"requests": 0}},
+    {"at_ms": 500, "action": "frame", "text": "思い出した。使用", "expect": {"sources": ["思い出した。"]}}
+  ],
+  "known_gap": {
+    "step": 1,
+    "message": "检查点字段 sources 不符合预期",
+    "expected": ["思い出した。"],
+    "actual": ["思い出した。使用"]
+  },
+  "notes": "Synthetic reproduction of the previously observed fused-button boundary: the desired spoken source excludes 使用 when it belongs to a button in the same OCR item. Text alone cannot prove that role; a6ad14b deliberately removed the unsafe trailing-kanji heuristic. Separately observed controls can still be filtered geometrically. This fixture records the remaining gap, not a request to restore text-only truncation."
+}
