@@ -13,7 +13,7 @@
     {"at_ms": 0, "action": "frame", "text": "明日はみんなで図書館に行きましょう。", "expect": {"requests": 0}},
     {"at_ms": 500, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
      "expect": {"requests": 1, "errors": 1, "history": [], "in_flight": false,
-                "caption_contains": "翻译模型拒绝翻译这段内容。"}},
+                "captions": ["翻译失败：翻译模型拒绝翻译这段内容。"]}},
     {"at_ms": 1000, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
      "expect": {"requests": 1, "errors": 1, "history": [], "has_reason": "submission_throttle"}},
     {"at_ms": 4500, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",

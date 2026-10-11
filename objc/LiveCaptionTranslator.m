@@ -187,6 +187,15 @@ static NSString *Shorten(NSString *value, NSUInteger limit) {
     return [[trimmed substringToIndex:limit] stringByAppendingString:@"..."];
 }
 
+static NSString *FYTranslationFailureMessage(NSError *error, NSUInteger reasonLimit) {
+    NSString *reason = error.localizedDescription ?: @"未知错误";
+    // Code 204 also covers truncation and empty responses; only an explicit
+    // model refusal is unrelated to the service's availability/configuration.
+    BOOL refusal = error.code == 204 && [reason isEqualToString:@"翻译模型拒绝翻译这段内容。"];
+    if (reasonLimit) { reason = Shorten(reason, reasonLimit); }
+    return refusal ? reason : [NSString stringWithFormat:@"%@\n%@", FYTranslationServiceRetestHint, reason];
+}
+
 static double SimilarityRatio(NSString *left, NSString *right) {
     return [FYContentRouter similarityRatio:left comparedTo:right];
 }
@@ -3643,8 +3652,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         }
         if (translationError) {
             FYTrace(trace, @"inline_drop", @{@"reason": @"translation_error", @"error_code": @(translationError.code)});
-            [self showError:[NSString stringWithFormat:@"%@\n%@", FYTranslationServiceRetestHint,
-                translationError.localizedDescription ?: @"未知错误"]];
+            [self showError:FYTranslationFailureMessage(translationError, 0)];
             [self setStatus:failureStatus];
             return;
         }
@@ -4489,11 +4497,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                             self.translationDurationLabel.stringValue = [NSString stringWithFormat:@"翻译耗时  %.2f 秒", translationDuration];
                             NSTimeInterval totalDuration = [[NSDate date] timeIntervalSinceDate:cycleStart];
                             if (translationError) {
-                                NSString *errorText = translationError.localizedDescription ?: @"未知错误";
-                                [self showError:[NSString stringWithFormat:@"%@\n%@", FYTranslationServiceRetestHint, errorText]];
+                                [self showError:FYTranslationFailureMessage(translationError, 0)];
                                 NSString *status = [NSString stringWithFormat:@"翻译出错 · OCR %.1fs 翻译 %.1fs", ocrDuration, translationDuration];
                                 [self setStatus:status];
-                                [self updateCaptionWindowWithText:[NSString stringWithFormat:@"翻译失败：%@\n%@", FYTranslationServiceRetestHint, Shorten(errorText, 110)] status:status];
+                                [self updateCaptionWindowWithText:[@"翻译失败：" stringByAppendingString:FYTranslationFailureMessage(translationError, 110)] status:status];
                                 FYTrace(dialogueTrace, @"caption_apply", @{@"reason": @"translation_error", @"error_code": @(translationError.code), @"success": @NO});
                             } else {
                                 [self.learningCoordinator setTranslation:translated forIdentity:dialogueIdentity];

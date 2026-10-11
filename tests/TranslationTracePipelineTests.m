@@ -735,47 +735,77 @@ static void CheckServiceConfigurationCancellation(void) {
 static void CheckTranslationFailureServiceGuidance(void) {
     NSString *hint = @"请前往「翻译服务」，点击「测试翻译」重新检查当前模型服务。";
     NSString *body = [@"synthetic model unavailable " stringByPaddingToLength:300 withString:@"x" startingAtIndex:0];
-    for (NSUInteger route=0; route<3; route++) {
-        TracePipelineApp *a=TraceApp(); a.allowsErrors=YES;
-        FYLearningStore *history = AttachHistoryStore(a);
-        a.liveErrorLabel=(id)TextControl(@"");
-        a.fixtureMode=route==0 ? ContentModeDialogue : ContentModeUI;
-        ((TraceControl *)(id)a.stableTextCheckbox).state=NSControlStateValueOff;
-        a.serviceTestResultLabel.stringValue=@"existing service result";
-        MockRequests=0; SubmittedSources=[NSMutableArray new]; HoldResponse=NO;
-        MockResponseStatus=404; MockResponseData=[body dataUsingEncoding:NSUTF8StringEncoding];
-        a.fixture=Fixture(route==0 ? @"明日はみんなで図書館に行きましょう。" : @"設定メニュー", .65);
-        if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
-        else { TraceCycle(a,a.fixture); TraceCycle(a,a.fixture); }
-        Pump(^BOOL { return a.liveErrorLabel.stringValue.length>0; });
-        Require(TraceHistory(history).count == 0, @"failed dialogue, realtime interface and manual snapshot translations cannot enter recent history");
-        Require([a.liveErrorLabel.stringValue containsString:@"404"] &&
-            [a.liveErrorLabel.stringValue containsString:body] && [a.liveErrorLabel.stringValue hasPrefix:hint] &&
-            !a.liveErrorLabel.hidden, @"translation failure retains full details and visibly directs the player to retest the model service");
-        if (route==0) {
-            NSString *caption=a.captions.lastObject;
-            Require([caption hasPrefix:[@"翻译失败：" stringByAppendingString:hint]] && ![caption containsString:body],
-                @"dialogue caption keeps the service guidance outside the shortened error details");
-        } else { Require(a.inlineApplies==0 && a.captions.count==0, @"failed inline translation does not create a game caption or apply a panel"); }
-        Require(MockRequests==1 && [a.apiKeyField.stringValue isEqual:@"TRACE_CREDENTIAL_SENTINEL"] &&
-            [a.modelField.stringValue isEqual:@"test-model"] &&
-            [a.serviceTestResultLabel.stringValue isEqual:@"existing service result"],
-            @"guidance does not automatically test, change the model/key or overwrite service test results");
-        MockResponseStatus=200; MockResponseData=nil;
-        a.fixture=Fixture(route==0 ? @"今日は公園で犬と一緒に遊びます。" : @"保存メニュー", .65);
-        if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
-        else { for (NSUInteger frame=0; frame<4; frame++) { TraceCycle(a,a.fixture); } }
-        Pump(^BOOL { return a.liveErrorLabel.hidden; });
-        Require(a.liveErrorLabel.stringValue.length==0 && MockRequests==2,
-            @"successful translation clears the prior failure guidance through the production callback");
-        NSArray<FYSentenceRecord *> *rows = TraceHistory(history);
-        Require(rows.count == 1 && rows.firstObject.latestTranslation.length > 0, @"only the successful recovery enters recent history on each production route");
-        [a showError:@"合成 OCR 错误"];
-        Require([a.liveErrorLabel.stringValue isEqual:@"合成 OCR 错误"], @"non-translation errors do not receive model-service guidance");
-        [a stop];
-        CloseHistoryStore(history);
+    NSArray<NSDictionary *> *cases = @[
+        @{@"status":@404, @"body":body, @"reason":body, @"refusal":@NO},
+        @{@"status":@200, @"body":@"{\"stop_reason\":\"refusal\",\"content\":[{\"type\":\"text\",\"text\":\"synthetic refusal\"}]}",
+          @"reason":@"翻译模型拒绝翻译这段内容。", @"refusal":@YES},
+        @{@"status":@200, @"body":@"{\"stop_reason\":\"max_tokens\",\"content\":[{\"type\":\"text\",\"text\":\"synthetic incomplete translation\"}]}",
+          @"reason":@"翻译接口输出被截断，没有返回完整译文。", @"refusal":@NO},
+        @{@"status":@200, @"body":@"{\"content\":[]}",
+          @"reason":@"翻译接口没有返回最终译文。", @"refusal":@NO}
+    ];
+    for (NSDictionary *testCase in cases) {
+        for (NSUInteger route=0; route<3; route++) {
+            TracePipelineApp *a=TraceApp(); a.allowsErrors=YES;
+            FYLearningStore *history = AttachHistoryStore(a);
+            a.liveErrorLabel=(id)TextControl(@"");
+            a.fixtureMode=route==0 ? ContentModeDialogue : ContentModeUI;
+            ((TraceControl *)(id)a.stableTextCheckbox).state=NSControlStateValueOff;
+            a.serviceTestResultLabel.stringValue=@"existing service result";
+            MockRequests=0; SubmittedSources=[NSMutableArray new]; HoldResponse=NO;
+            MockResponseStatus=[testCase[@"status"] integerValue];
+            MockResponseData=[testCase[@"body"] dataUsingEncoding:NSUTF8StringEncoding];
+            a.fixture=Fixture(route==0 ? @"明日はみんなで図書館に行きましょう。" : @"設定メニュー", .65);
+            if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
+            else { TraceCycle(a,a.fixture); TraceCycle(a,a.fixture); }
+            Pump(^BOOL { return a.liveErrorLabel.stringValue.length>0; });
+            Require(TraceHistory(history).count == 0, @"failed dialogue, realtime interface and manual snapshot translations cannot enter recent history");
+            NSString *reason=testCase[@"reason"];
+            BOOL refusal=[testCase[@"refusal"] boolValue];
+            Require(!a.liveErrorLabel.hidden && [a.liveErrorLabel.stringValue containsString:reason],
+                @"translation failure retains the full reason in the visible error field");
+            if (refusal) {
+                Require([a.liveErrorLabel.stringValue isEqual:reason],
+                    @"model refusal shows its reason without misleading service-retest guidance");
+            } else {
+                Require([a.liveErrorLabel.stringValue hasPrefix:hint],
+                    @"service failures, truncation and empty responses still direct the player to retest");
+            }
+            if (MockResponseStatus==404) {
+                Require([a.liveErrorLabel.stringValue containsString:@"404"], @"HTTP failure retains its status code");
+            }
+            if (route==0) {
+                NSString *caption=a.captions.lastObject;
+                if (refusal) {
+                    Require([caption isEqual:@"翻译失败：翻译模型拒绝翻译这段内容。"],
+                        @"refusal caption contains only the refusal reason without service-retest guidance");
+                } else {
+                    Require([caption hasPrefix:[@"翻译失败：" stringByAppendingString:hint]],
+                        @"dialogue caption retains service guidance for other translation failures");
+                    Require(MockResponseStatus==404 ? ![caption containsString:body] : [caption containsString:reason],
+                        @"dialogue caption shortens long details and preserves short reasons");
+                }
+            } else { Require(a.inlineApplies==0 && a.captions.count==0, @"failed inline translation does not create a game caption or apply a panel"); }
+            Require(MockRequests==1 && [a.apiKeyField.stringValue isEqual:@"TRACE_CREDENTIAL_SENTINEL"] &&
+                [a.modelField.stringValue isEqual:@"test-model"] &&
+                [a.serviceTestResultLabel.stringValue isEqual:@"existing service result"],
+                @"guidance does not automatically test, change the model/key or overwrite service test results");
+            MockResponseStatus=200; MockResponseData=nil;
+            a.fixture=Fixture(route==0 ? @"今日は公園で犬と一緒に遊びます。" : @"保存メニュー", .65);
+            if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
+            else { for (NSUInteger frame=0; frame<4; frame++) { TraceCycle(a,a.fixture); } }
+            Pump(^BOOL { return a.liveErrorLabel.hidden; });
+            Require(a.liveErrorLabel.stringValue.length==0 && MockRequests==2,
+                @"successful translation clears the prior failure guidance through the production callback");
+            NSArray<FYSentenceRecord *> *rows = TraceHistory(history);
+            Require(rows.count == 1 && rows.firstObject.latestTranslation.length > 0, @"only the successful recovery enters recent history on each production route");
+            [a showError:@"合成 OCR 错误"];
+            Require([a.liveErrorLabel.stringValue isEqual:@"合成 OCR 错误"], @"non-translation errors do not receive model-service guidance");
+            [a stop];
+            CloseHistoryStore(history);
+        }
     }
-    puts("PASS translation failure guidance: dialogue, realtime inline and manual snapshot; full details, visible hint, recovery and unchanged configuration");
+    puts("PASS translation failure guidance: refusal skips retest; HTTP, truncation and empty responses retain it on all three routes; recovery and unchanged configuration");
 }
 static void CheckInlineRequestTimeouts(void) {
     TracePipelineApp *a=TraceApp(); HoldResponse=NO; SubmittedSources=[NSMutableArray new];

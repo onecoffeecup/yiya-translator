@@ -57,6 +57,20 @@ Claude 的系统提示放在独立 `system` 字段，使用 `x-api-key` 与 `ant
 
 本次没有重建安装正式应用或更新 Release／Sparkle；真实 Claude 服务、游戏设备和跨机器体验待验收。下次安装包含修复的构建后，最短复查是修改模型名、按 Enter、重新打开设置确认值保留；实际拒答或截断应显示固定错误，恢复成功后不显示旧错误译文。无需为这两个回归开启原始画面／文字诊断。
 
+## 2026年10月11日拒答展示提示修补
+
+用户指出拒答经过字幕展示时仍被附加「测试翻译」指引。生产解码已经返回 `code == 204` 和固定描述「翻译模型拒绝翻译这段内容。」，误导首次发生在宿主错误展示边界：对白错误栏、字幕和共用的界面结果处理均无条件添加服务重测提示。
+
+`LiveCaptionTranslator.m` 的 `FYTranslationFailureMessage` 统一这三处展示，仅在错误码和固定拒答描述同时匹配时省略指引；同为 204 的输出截断、空响应及其他服务失败继续保留指引。错误栏保留完整原因，字幕仍只截短原因至 110 字符；不改变请求、失败节流、缓存、历史、模型或凭据，也不增加自动服务测试。
+
+修复前运行 `bash scripts/run-translation-trace-tests.sh` 退出 2，新增断言失败于拒答错误栏附带重测提示；`python3 scripts/debug.py replay tests/fixtures/replay/anthropic-refusal-recovery.json` 退出 1，第二帧（step 1）期望「翻译失败：翻译模型拒绝翻译这段内容。」，实际还包含服务重测提示。修复后两条命令均退出 0，拒答 Replay 的两遍结果一致。前后日志保存在本机忽略目录 `.build/refusal-hint-fix/`。
+
+`TranslationTracePipelineTests` 覆盖拒答、截断、空响应和 HTTP 404 在对白、实时贴译、手动界面三条生产路径的 12 组组合；错误原因、失败不入历史、成功恢复后清除错误和配置保持均通过。两个既有恢复 Replay 改为精确断言错误字幕，分别要求拒答没有重测指引、截断仍有指引，保留节流、恢复、历史与缓存断言。
+
+统一核心命令 `python3 scripts/debug.py check` 退出 0，报告 `.build/debug/20261011T144129Z-abcaf6/summary.json`：168 条记录中 166 条通过、2 条 `known_gap_reproduced`，整体 `baseline_passed_with_known_gaps`，`source_unchanged=true`；380 个源码／夹具／媒体散列在完成后与当前文件一致。两条已知失败是同一 `known-gaps/fused-trailing-button.json` 的两遍回放，与本次拒答提示无关，仍未修复。模块、字幕外观、生产链路与拒答／截断精确字幕回归通过；桌面、真实服务及设备没有执行。完整命令、前后失败与通过日志和散列见 `.build/refusal-hint-fix/evidence.json`。
+
+本次只修改源码、回归和约定，未安装应用或更新公开附件，未请求真实 API、读取真实 Key 或启用原始文字／画面诊断。安装含本次修改的构建后，最短手动验收为在下一次实际拒答时核对字幕及错误栏只显示拒答原因，后续成功翻译时旧错误消失；无需为验收而反复测试服务。
+
 ## 服务组件初次交付检查
 
 - `AnthropicTranslationTests`：修改前失败于认证/版本头断言，修改后 8 项合成检查通过，覆盖请求字段、超时、多文本块、思考块和畸形返回。

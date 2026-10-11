@@ -13,7 +13,7 @@
     {"at_ms": 0, "action": "frame", "text": "明日はみんなで図書館に行きましょう。", "expect": {"requests": 0}},
     {"at_ms": 500, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
      "expect": {"requests": 1, "errors": 1, "history": [], "in_flight": false,
-                "caption_contains": "翻译接口输出被截断，没有返回完整译文。"}},
+                "captions": ["翻译失败：请前往「翻译服务」，点击「测试翻译」重新检查当前模型服务。\n翻译接口输出被截断，没有返回完整译文。"]}},
     {"at_ms": 1000, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
      "expect": {"requests": 1, "errors": 1, "history": [], "has_reason": "submission_throttle"}},
     {"at_ms": 4500, "action": "frame", "text": "明日はみんなで図書館に行きましょう。",
