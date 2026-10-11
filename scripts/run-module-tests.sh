@@ -47,6 +47,11 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
   "$ROOT_DIR/tests/TranslationManagerTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/TranslationManagerTests"
 "$OUT/TranslationManagerTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-unused-function \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/LocalAPIKeyStoreTests.m" \
+  -framework Foundation -o "$OUT/LocalAPIKeyStoreTests"
+"$OUT/LocalAPIKeyStoreTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/InlineTextPolicyTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \

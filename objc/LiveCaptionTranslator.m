@@ -3060,7 +3060,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [advanced addArrangedSubview:[self settingsRowWithLabel:@"学习模型（可选）" view:self.learningModelField]];
     [advanced addArrangedSubview:[self mutedLabel:@"语法分析默认使用翻译模型；需要时可单独指定学习模型。"]];
     [stack addArrangedSubview:[self disclosureWithTitle:@"高级选项" content:advanced]];
-    [stack addArrangedSubview:[self mutedLabel:@"API Key 保存在本机应用数据文件；同一版本自动读取，新版本需重新填写。"]];
+    [stack addArrangedSubview:[self mutedLabel:@"API Key 保存在本机应用数据文件；重开、重装和跨版本更新均自动读取。"]];
     [stack addArrangedSubview:[self separator]];
     [stack addArrangedSubview:[self cardTitle:@"离线学习资料"]];
     [stack addArrangedSubview:[self mutedLabel:@"词义来自 JMdict，日文例句来自 Tatoeba，参考等级来自 OpenJLPT。下面说明资料的作者和使用许可，与翻译接口配置无关。"]];

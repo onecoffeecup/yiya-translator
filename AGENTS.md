@@ -15,7 +15,7 @@
 
 ## 凭据与已有功能
 
-遵循 `docs/api-key-storage.md`：API Key 存当前 macOS 账户的应用数据私有文件，不使用 Keychain；版本身份只使用 CFBundleShortVersionString，同版本重启、重建、重装或 build 递增不清空；保存失败保留旧文件，清空删除凭据。真实 Key 不进入 Git、应用包、附件、诊断或截图。
+遵循 `docs/api-key-storage.md`：API Key 存当前 macOS 账户的应用数据私有文件，不使用 Keychain。用户于 2026-10-11 明确改为跨应用版本保留：重启、重建、重装、CFBundleShortVersionString 改变或 build 递增均自动读取已有 Key，不清空或按版本拒读；记录的 version 仅为保存时元数据，兼容原版本及版本/build 文件且不因读取改写文件。保存失败保留旧文件，清空删除凭据；首次未配置、主动清空或服务要求更换 Key 时再填写。真实 Key 不进入 Git、应用包、附件、诊断或截图。
 
 保持 OCR、翻译、学习、数据、快捷键、窗口行为和原生文本选择 / 复制 / 换行。涉及视觉改动时先阅读维护者工作区的 `docs/design/pixel-adventure-spec.md` 与实施交付说明；当前为用户确认的「译芽 · 奶油棕花境」，不要用历史探索替代当前设计。
 

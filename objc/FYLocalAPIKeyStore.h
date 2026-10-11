@@ -12,8 +12,8 @@ typedef NS_ENUM(NSInteger, FYAPIKeyStatus) {
     FYAPIKeySuccess, FYAPIKeyNotFound, FYAPIKeyReadError, FYAPIKeyWriteError
 };
 
-// Credentials live outside the app/source tree and are scoped to a released
-// marketing version. Development builds of one release reuse the key.
+// Credentials live outside the app/source tree and persist across releases.
+// The marketing version is recorded only as save-time metadata.
 static NSString *FYAPIKeyVersion(void) {
     NSDictionary *info = NSBundle.mainBundle.infoDictionary;
     return info[@"CFBundleShortVersionString"] ?: @"development";
@@ -48,10 +48,8 @@ static FYAPIKeyStatus FYReadAPIKeyFile(NSString *path, NSString *version, NSStri
     id record = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
     if (![record isKindOfClass:NSDictionary.class] || ![record[@"version"] isKindOfClass:NSString.class] ||
         ![record[@"apiKey"] isKindOfClass:NSString.class]) { return FYAPIKeyReadError; }
-    // Accept files produced briefly by the version/build implementation too.
-    // A later release still cannot reuse an earlier release's key.
-    NSString *storedVersion = [record[@"version"] componentsSeparatedByString:@"/"].firstObject;
-    if (![storedVersion isEqualToString:version]) { return FYAPIKeyNotFound; }
+    // The saved version (including historical version/build values) is metadata,
+    // not a credential validity condition. Reading never migrates the file.
     if (value) { *value = record[@"apiKey"]; }
     return FYAPIKeySuccess;
 }

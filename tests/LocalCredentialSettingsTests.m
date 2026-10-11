@@ -17,7 +17,7 @@ int main(void) { @autoreleasepool {
     FYTestLocalAPIKeyValue = nil;
     AppDelegate *app = NewSettingsApp();
     Check(app.apiKeyField.stringValue.length == 0 && !app.credentialLoadFailed, @"first run requests a key without Keychain access");
-    Check([defaults objectForKey:SettingsKey][@"apiKey"] == nil, @"legacy key is not reused for a new version");
+    Check([defaults objectForKey:SettingsKey][@"apiKey"] == nil, @"legacy preferences credential is removed instead of reused");
     app.apiKeyField.stringValue = @"synthetic-local-key";
     FYTestLocalAPIKeyFailWrites = YES;
     [app saveSettings:nil];
