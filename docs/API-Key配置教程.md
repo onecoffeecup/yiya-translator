@@ -27,7 +27,7 @@
 
 - API Key 随认证请求发送给你配置的服务；OCR 文字、问题和相关上下文也会发送给它。
 - 识别画面在本机处理，当前翻译请求发送文字。
-- Key 保存在当前用户的 `~/Library/Application Support/com.nanami.fuyi/credentials/api-key.json`，目录权限为 0700、文件权限为 0600。包含 2026-10-11 跨版本保留改动的应用包在重开、重装、build 递增和应用版本升级后均自动读取原 Key；已发布 0.2.1 build 17 仍按旧规则匹配版本，公开附件尚未更新。不会访问钥匙串或要求电脑密码，也不会随源码或应用包分发。升级前的备份可能仍有旧 Key。完整规则见 [API Key 本机保存约定](api-key-storage.md)。
+- Key 保存在当前用户的 `~/Library/Application Support/com.nanami.fuyi/credentials/api-key.json`，目录权限为 0700、文件权限为 0600。0.2.2 在重开、重装、build 递增和应用版本升级后均自动读取原 Key，兼容此前保存的凭据，不因升级要求重新填写。不会访问钥匙串或要求电脑密码，也不会随源码或应用包分发。升级前的备份可能仍有旧 Key。完整规则见 [API Key 本机保存约定](api-key-storage.md)。
 - 如果怀疑 Key 泄露，到服务商平台撤销并新建。分享求助截图时隐藏 Key 和个人内容。
 
 ## 失败时先检查

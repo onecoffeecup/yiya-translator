@@ -1,20 +1,8 @@
 # 译芽 · Yiya!
 
-**Mac 开发分支 `dev0.2.1_261009`：Claude 拒答／截断响应及服务输入框 Enter 重复保存修复 `8dbf649` 已推送。** 合成翻译、学习、生产链路 Replay 和三组原生设置回归通过；拒答解释及部分输出不作为译文缓存，Enter 只保存一次。本机仍为 0.2.1 build 67，尚未安装这两个修复；后续本机审查提交与已知缺口见[维护状态](docs/project-maintenance.md)。机制、前后失败证据及验收边界见[服务组件](docs/translation-service-settings.md)。
+**译芽 0.2.2** 汇总 Mac 开发分支的对白识别、窗口与阅读、翻译服务及跨版本 API Key 保留改进。下载与更新说明见 [v0.2.2 Release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.2) 和[发布说明](docs/发布说明.md)。
 
-AI 侧栏只手动开关，展开 / 收起时最小内容宽度为 1100 / 720 pt；拖动和切页保持显隐选择。实时页先读中文，再查看原文，空状态收紧；中文与当前对白正文统一 19 pt，点击选中保持字号；翻译服务支持 10 个预设、自定义 URL 与可直接输入的模型名。行为与证据见[窗口缩放](docs/window-resize.md)、[阅读布局](docs/live-reading-layout.md)、[服务组件](docs/translation-service-settings.md)。
-
-build 59 集成代码的新增缩放回归、五组相关 UI、111 项核心检查及双架构打包通过，安装身份已核对。完整视觉套件仍有修改前已复现的「已选中」徽标失败，正式 build 59 的真实鼠标体验、设备及跨机器验收待完成。本轮字号修补的三组原生 UI 回归通过，完整核心结果见[阅读布局记录](docs/live-reading-layout.md)，本轮字号修补提交至 Mac 开发分支。当前交付与规则入口见[维护约定](docs/project-maintenance.md)。
-
-2026-10-11 本机 build 66 追加最近台词修补：历史代表选择曾把纯正文当作缺行，重新显示带姓名的旧记录；现保存确切版本的姓名栏证据，正文完整对应时选择纯正文原文、译文及点击身份。学习套件及 121 项核心记录通过；正式应用重启后，最近列表、点击打开后的原句及恢复运行的实时页均已观察到不带姓名，用户随后复测确认通过并授权提交、推送。正文正常提到的人名与旧快照保留。完整检查、安装身份和现场范围见 [对白姓名排除记录](docs/dialogue-speaker-exclusion.md)。本轮 Mac 修补已提交并推送为 `163e48f`。
-
-2026-10-11 后续六条代码审查：已修补边缘姓名栏采样和自报姓名录入身份，减少关闭诊断时的重复计算，补过滤主线程约定；阈值命名保持现有风格。句尾粘连按钮登记为一个仍失败的已知缺口。最终统一检查为 168 条记录：166 条通过、同一缺口两遍复现，整体 `baseline_passed_with_known_gaps`。五个审查提交尚未安装或发布；逐条判断、提交、命令与后续定向验收见[六条审查记录](docs/review-speaker-routing-20261011.md)。
-
-此前 build 61 已按确认的预览接入「查看原句」悬停词卡：停留约半秒显示读音、词义与来源，原文保留原生选择、复制及自然换行。新增查句悬停回归、五组相关原生 UI 回归和 115 项核心执行记录通过；本轮查句悬停提交至 Mac 开发分支，真实游戏体验待确认。行为、命令与安装证据见[阅读布局记录](docs/live-reading-layout.md)。
-
-**公开版本仍为 [v0.2.1 正式版](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1)（2026-10-08，build 17）。** 开发分支推送与本机安装没有更新 Release 附件或 Sparkle 清单。build 17 的 55 步完整本机回归和独立应用手动升级验收通过；新开发版的安装不能替代公开更新或跨机器验收。
-
-0.2.1 已提供「译芽 → 检查更新…」，首次手动安装后可通过 Sparkle 安装后续公开版本。开发源码及本机 build 67 已跨版本保留 API Key，公开 build 17 从不同版本升级时仍使用旧重填规则。机制见[自动更新](docs/automatic-updates.md)和[Key 保存合同](docs/api-key-storage.md)，已发布内容和验证范围见[发布说明](docs/发布说明.md)及[检查记录](docs/发布检查结果.md)。
+AI 侧栏只手动开关，原文和译文保留原生选择、复制与换行；最近台词只收录已有译文的记录。发布验证、已知的粘连按钮缺口和桌面旧验收差异分别记录在[发布检查](docs/发布检查结果.md)与[维护状态](docs/project-maintenance.md)。
 
 在游戏里，读懂日语。一个 macOS 实时字幕翻译与日语学习工具。
 
@@ -31,7 +19,7 @@ build 59 集成代码的新增缩放回归、五组相关 UI、111 项核心检�
 - 识别输入源可选「窗口截图」或「采集卡」：采集卡直接读外接采集设备，绕开 QuickTime 录制条对台词的遮挡；字幕仍显示在你选中的 QuickTime／OBS 窗口上。详见 [采集卡输入](docs/采集卡输入.md)。
 - 用「翻译当前界面」识别菜单、选项和公告；也可开启实时贴译。
 - 查看最近台词、固定原句、点击或拖选词语、按需分析语法及追问 AI。
-- 当前开发源码的「翻译服务」提供预设与自定义地址，预设模型名仍可自由输入；界面和预设列表独立维护。实现、迁移与验证范围见 [服务设置组件](docs/translation-service-settings.md)。
+- 0.2.2的「翻译服务」提供预设与自定义地址，预设模型名仍可自由输入；界面和预设列表独立维护。实现、迁移与验证范围见 [服务设置组件](docs/translation-service-settings.md)。
 - 语法先返回简短分析；「展开解释」按需补充所选条目的用法与例句，「深度复核」主动补查整句，失败保留已有结果。见 [语法分析与按需解释](docs/grammar-analysis-actions.md)。
 - 收藏词语、语法和句子，保留语境并进行遮义复习。
 - 在收藏词详情里离线查看词典读音、英文释义、日文例句及社区 JLPT 参考等级。
@@ -49,19 +37,19 @@ build 59 集成代码的新增缩放回归、五组相关 UI、111 项核心检�
 
 ## 下载后怎么用
 
-1. 在 [v0.2.1 Release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1) 下载 `yiya-0.2.1.zip`。
+1. 在 [v0.2.2 Release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.2) 下载 `yiya-0.2.2.zip`。
 2. 解压后先读「先读我.txt」，把「译芽.app」拖到应用程序文件夹。
 3. 按 [首次打开说明](docs/首次打开说明.md) 打开应用并授权屏幕录制。当前包使用 ad-hoc 签名，尚未经过 Apple 公证。
 4. 按 [API Key 配置教程](docs/API-Key配置教程.md) 配置服务，点「测试翻译」。
 5. 在「运行设置」选择目标窗口和文字区域，再点「开始翻译」。
 
-下载版已内置词典；不需要额外下载资料包或安装开发工具。现有 0.2.0 用户先手动安装一次包含 Sparkle 的版本，之后可使用应用内更新。已发布 0.2.1 build 17 从不同版本升级时仍需重填一次 Key；后续包含跨版本保留改动的包可直接沿用旧 Key。
+下载版已内置词典；不需要额外下载资料包或安装开发工具。现有 0.2.0 用户先手动安装一次包含 Sparkle 的版本，之后可使用应用内更新。升级到 0.2.2 后自动沿用本机原 API Key，版本变化不要求重填。
 
 ## 隐私与资料
 
-画面识别在本机完成；翻译与 AI 学习会把相关文字、问题和上下文发送到你填写的接口地址。API Key 会随认证请求发送给该服务。远程服务地址须使用 HTTPS；明文 HTTP 仅允许本机回环地址。API Key 保存在当前用户的本机应用数据文件 `~/Library/Application Support/com.nanami.fuyi/credentials/api-key.json`，文件权限为 0600；当前开发源码在重启、重建、重装、build 递增和跨应用版本更新后均自动读取。此文件不在源码或应用包中，不会随安装包分发。升级前生成的设置备份可能仍含旧 Key，若曾分享备份请到服务商撤销并重建。 详细规则见 [API Key 本机保存约定](docs/api-key-storage.md)。
+画面识别在本机完成；翻译与 AI 学习会把相关文字、问题和上下文发送到你填写的接口地址。API Key 会随认证请求发送给该服务。远程服务地址须使用 HTTPS；明文 HTTP 仅允许本机回环地址。API Key 保存在当前用户的本机应用数据文件 `~/Library/Application Support/com.nanami.fuyi/credentials/api-key.json`，文件权限为 0600；0.2.2在重启、重建、重装、build 递增和跨应用版本更新后均自动读取。此文件不在源码或应用包中，不会随安装包分发。升级前生成的设置备份可能仍含旧 Key，若曾分享备份请到服务商撤销并重建。 详细规则见 [API Key 本机保存约定](docs/api-key-storage.md)。
 
-设置和学习记录留在本机。学习数据库位于 `~/Library/Application Support/com.nanami.fuyi/learning.sqlite3`，最近台词最多保留 5 条，收藏及其语境另行持久保存。当前开发源码只把已有非空译文的记录计入最近台词，等待或失败的翻译不占这 5 条；实现与验证见 [最近台词收录规则](docs/dialogue-history-translated-only.md)，公开附件尚未更新。公开资料包不包含用户的台词、收藏或凭据。
+设置和学习记录留在本机。学习数据库位于 `~/Library/Application Support/com.nanami.fuyi/learning.sqlite3`，最近台词最多保留 5 条，收藏及其语境另行持久保存。0.2.2只把已有非空译文的记录计入最近台词，等待或失败的翻译不占这 5 条；实现与验证见 [最近台词收录规则](docs/dialogue-history-translated-only.md)，0.2.2 已包含此行为。公开资料包不包含用户的台词、收藏或凭据。
 
 离线资料由 JMdict、Tatoeba 和 OpenJLPT 整理而来，词典释义为英文，中文语境解释可能由 AI 或用户提供。JLPT 等级属于社区参考，资料和 AI 解析都未经过完整人工审校。来源及许可见 [第三方资料说明](THIRD_PARTY_NOTICES.md)。
 
