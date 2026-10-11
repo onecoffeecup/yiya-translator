@@ -116,7 +116,7 @@ void FYUpdateLearningPageSelection(NSArray<NSView *> *pages, NSArray<NSButton *>
         self.columnWidths = @[[left.widthAnchor constraintEqualToAnchor:self.widthAnchor multiplier:fraction constant:-self.spacing * fraction],
                               [right.widthAnchor constraintEqualToAnchor:self.widthAnchor multiplier:1-fraction constant:-self.spacing * (1-fraction)]];
         // Allow the window to shrink first; the compact layout then takes over.
-        for (NSLayoutConstraint *constraint in self.columnWidths) { constraint.priority = 749; }
+        for (NSLayoutConstraint *constraint in self.columnWidths) { constraint.priority = self.columnWidthPriority > 0 ? self.columnWidthPriority : 749; }
     }
     [NSLayoutConstraint activateConstraints:self.columnWidths];
 }
@@ -169,6 +169,268 @@ void FYUpdateLearningPageSelection(NSArray<NSView *> *pages, NSArray<NSButton *>
     [self.title drawAtPoint:NSMakePoint(textX,NSMidY(rect)-size.height/2-(pressed?1:0)) withAttributes:attributes];
     if(self.window.firstResponder==self){[NSGraphicsContext saveGraphicsState];NSSetFocusRingStyle(NSFocusRingOnly);[shape fill];[NSGraphicsContext restoreGraphicsState];}
 
+}
+@end
+
+static NSColor *FYSubtitleUIColor(NSUInteger rgb) {
+    return [NSColor colorWithSRGBRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:1];
+}
+NSColor *FYSubtitleThemeBackground(NSInteger index, CGFloat alpha) {
+    NSColor *color = FYSubtitleUIColor(index == 0 ? 0x000000 : index == 1 ? 0xFFFFFF : index == 2 ? 0xFFDBED : 0xFFF8EC);
+    return [color colorWithAlphaComponent:MIN(MAX(alpha, 0), 1)];
+}
+NSColor *FYSubtitleThemeText(NSInteger index) {
+    return FYSubtitleUIColor(index == 0 ? 0xFFFFFF : index == 1 ? 0x141414 : index == 2 ? 0x381A2E : 0x593E2B);
+}
+NSColor *FYSubtitleThemeBorder(NSInteger index) {
+    NSUInteger rgb = index == 0 ? 0x747474 : index == 1 ? 0xADA69C : index == 2 ? 0xD39DB4 : 0xBAA181;
+    return [NSColor colorWithSRGBRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:.85];
+}
+
+@implementation FYSubtitleModeButton
+- (BOOL)isFlipped { return YES; }
+- (NSSize)intrinsicContentSize { return NSMakeSize(120,40); }
+- (void)setState:(NSControlStateValue)state { [super setState:state]; self.needsDisplay=YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    NSBezierPath *shape=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,.5,.5) xRadius:8 yRadius:8];
+    BOOL selected=self.state==NSControlStateValueOn;
+    if(selected){[FYAdventureColor(@"paper") setFill];[shape fill];[FYSubtitleUIColor(0xD9CBB9) setStroke];[shape stroke];}
+    NSDictionary *attributes=@{NSFontAttributeName:FYUIFont(14,NSFontWeightBold),NSForegroundColorAttributeName:FYAdventureColor(selected?@"ink":@"muted")};
+    NSSize size=[self.title sizeWithAttributes:attributes];
+    [self.title drawAtPoint:NSMakePoint((NSWidth(self.bounds)-size.width)/2,(NSHeight(self.bounds)-size.height)/2) withAttributes:attributes];
+    if(self.highlighted){[[FYAdventureColor(@"ink") colorWithAlphaComponent:.06] setFill];[shape fill];}
+    if(self.window.firstResponder==self){[NSGraphicsContext saveGraphicsState];NSSetFocusRingStyle(NSFocusRingOnly);[shape fill];[NSGraphicsContext restoreGraphicsState];}
+}
+@end
+@implementation FYSubtitleDisclosureButton
+- (BOOL)isFlipped { return YES; }
+- (NSSize)intrinsicContentSize { return NSMakeSize(105,28); }
+- (void)setState:(NSControlStateValue)state { [super setState:state];self.needsDisplay=YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    NSBezierPath *chevron=[NSBezierPath bezierPath];chevron.lineWidth=1.4;chevron.lineCapStyle=NSLineCapStyleRound;
+    if(self.state==NSControlStateValueOn){[chevron moveToPoint:NSMakePoint(4,11)];[chevron lineToPoint:NSMakePoint(8,15)];[chevron lineToPoint:NSMakePoint(12,11)];}
+    else {[chevron moveToPoint:NSMakePoint(5,9)];[chevron lineToPoint:NSMakePoint(9,13)];[chevron lineToPoint:NSMakePoint(5,17)];}
+    [FYAdventureColor(@"ink") setStroke];[chevron stroke];
+    [self.title drawAtPoint:NSMakePoint(20,4) withAttributes:@{NSFontAttributeName:FYUIFont(13,NSFontWeightRegular),NSForegroundColorAttributeName:FYAdventureColor(@"ink")}];
+    if(self.window.firstResponder==self){[NSGraphicsContext saveGraphicsState];NSSetFocusRingStyle(NSFocusRingOnly);NSRectFill(self.bounds);[NSGraphicsContext restoreGraphicsState];}
+}
+@end
+@implementation FYSubtitleSliderCell
+- (void)drawBarInside:(NSRect)rect flipped:(BOOL)flipped {
+    NSRect track=NSMakeRect(NSMinX(rect),NSMidY(rect)-3.5,NSWidth(rect),7);
+    [FYSubtitleUIColor(0x3B3B3B) setFill];[[NSBezierPath bezierPathWithRoundedRect:track xRadius:3.5 yRadius:3.5] fill];
+    CGFloat fraction=(self.doubleValue-self.minValue)/MAX(.001,self.maxValue-self.minValue);
+    track.size.width*=MIN(1,MAX(0,fraction));[FYSubtitleUIColor(0x8B9C62) setFill];[[NSBezierPath bezierPathWithRoundedRect:track xRadius:3.5 yRadius:3.5] fill];
+}
+- (void)drawKnob:(NSRect)rect {
+    NSRect knob=NSMakeRect(NSMidX(rect)-7,NSMidY(rect)-7,14,14);
+    [FYSubtitleUIColor(0x8B9C62) setFill];[[NSBezierPath bezierPathWithOvalInRect:knob] fill];
+}
+@end
+@implementation FYSubtitleColorWell
+- (NSEdgeInsets)alignmentRectInsets { return NSEdgeInsetsMake(0,0,0,0); }
+- (void)drawRect:(NSRect)dirtyRect {
+    NSBezierPath *outline=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,.5,.5) xRadius:7 yRadius:7];
+    [FYAdventureColor(@"paper") setFill];[outline fill];[FYSubtitleUIColor(0xBAA181) setStroke];[outline stroke];
+    [self.color setFill];[[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,4,4) xRadius:3 yRadius:3] fill];
+    if(self.window.firstResponder==self){[NSGraphicsContext saveGraphicsState];NSSetFocusRingStyle(NSFocusRingOnly);[outline fill];[NSGraphicsContext restoreGraphicsState];}
+}
+@end
+@implementation FYSubtitleFollowButton
+- (NSEdgeInsets)alignmentRectInsets { return NSEdgeInsetsMake(0,0,0,0); }
+@end
+
+@implementation FYSubtitleStyleButton
+- (BOOL)isFlipped { return YES; }
+- (NSSize)intrinsicContentSize { return NSMakeSize(110, 92); }
+- (void)setState:(NSControlStateValue)state { [super setState:state]; self.needsDisplay = YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    BOOL selected = self.state == NSControlStateValueOn;
+    NSRect frame = NSInsetRect(self.bounds, 2, 2);
+    NSBezierPath *outline = [NSBezierPath bezierPathWithRoundedRect:frame xRadius:12 yRadius:12];
+    [(selected ? FYSubtitleUIColor(0xF5F6EB) : FYAdventureColor(@"paper")) setFill]; [outline fill];
+    [FYSubtitleUIColor(selected ? 0x82935A : 0xDED7CD) setStroke]; outline.lineWidth = selected ? 2 : 1; [outline stroke];
+    NSRect sample = NSMakeRect(10, 10, MAX(1, NSWidth(self.bounds)-20), 49);
+    [FYSubtitleThemeBackground(self.themeIndex, 1) setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:sample xRadius:7 yRadius:7] fill];
+    NSDictionary *attributes = @{NSFontAttributeName:FYUIFont(15, NSFontWeightRegular), NSForegroundColorAttributeName:FYSubtitleThemeText(self.themeIndex)};
+    NSSize size = [@"读懂这一句" sizeWithAttributes:attributes];
+    [@"读懂这一句" drawAtPoint:NSMakePoint(NSMidX(sample)-size.width/2, NSMidY(sample)-size.height/2) withAttributes:attributes];
+    [self.title drawInRect:NSMakeRect(10, 66, MAX(1, NSWidth(self.bounds)-34), 20) withAttributes:@{NSFontAttributeName:FYUIFont(12, NSFontWeightRegular),NSForegroundColorAttributeName:FYAdventureColor(@"ink")}];
+    if (selected) {
+        NSRect mark = NSMakeRect(NSWidth(self.bounds)-25, 67, 16, 16);
+        [FYSubtitleUIColor(0x667840) setFill]; [[NSBezierPath bezierPathWithOvalInRect:mark] fill];
+        NSBezierPath *check = [NSBezierPath bezierPath]; check.lineWidth = 1.5;
+        [check moveToPoint:NSMakePoint(NSMinX(mark)+3, NSMinY(mark)+8)];
+        [check lineToPoint:NSMakePoint(NSMinX(mark)+6, NSMinY(mark)+11)];
+        [check lineToPoint:NSMakePoint(NSMinX(mark)+12, NSMinY(mark)+4)];
+        [NSColor.whiteColor setStroke]; [check stroke];
+    }
+    if (self.highlighted) { [[FYAdventureColor(@"ink") colorWithAlphaComponent:.06] setFill]; [outline fill]; }
+    if (self.window.firstResponder == self) { [NSGraphicsContext saveGraphicsState]; NSSetFocusRingStyle(NSFocusRingOnly); [outline fill]; [NSGraphicsContext restoreGraphicsState]; }
+}
+@end
+
+// These sample surfaces mirror the approved HTML's scene/source/card hierarchy.
+// They contain native selectable text and never enter the OCR or translation pipeline.
+@interface FYSubtitleSampleSurface : FYAdventurePanel
+@end
+@implementation FYSubtitleSampleSurface
+- (BOOL)isFlipped { return YES; }
+- (void)drawRect:(NSRect)dirtyRect {
+    NSBezierPath *shape=[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,.5,.5) xRadius:8 yRadius:8];
+    [self.fillColor setFill];[shape fill];[self.edgeColor setStroke];[shape stroke];
+}
+@end
+@interface FYSubtitleAppearancePreview ()
+@property(nonatomic, strong) NSTextField *sceneLabel;
+@property(nonatomic, strong) NSTextField *sampleFlag;
+@property(nonatomic, strong) FYSubtitleSampleSurface *sampleFlagSurface;
+@property(nonatomic, strong) NSTextField *sourceLabel;
+@property(nonatomic, strong) NSTextField *noteLabel;
+@property(nonatomic, strong) NSTextField *brandLabel;
+@property(nonatomic, strong) NSTextField *translationLabel;
+@property(nonatomic, strong) NSScrollView *translationScroll;
+@property(nonatomic, copy) NSArray<NSTextField *> *shortLabels;
+@property(nonatomic, copy) NSArray<FYAdventurePanel *> *sourcePanels;
+@property(nonatomic, copy) NSArray<FYAdventurePanel *> *translationSurfaces;
+@end
+@implementation FYSubtitleAppearancePreview
+- (BOOL)isFlipped { return YES; }
+- (instancetype)initWithFrame:(NSRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.fillColor=FYSubtitleUIColor(0xDBE4D3);self.edgeColor=FYSubtitleUIColor(0xB7C3AD);
+        _subtitleFill=FYSubtitleThemeBackground(3,.58);_subtitleInk=FYSubtitleThemeText(3);_subtitleBorder=FYSubtitleThemeBorder(3);
+        _subtitleSize=16;_subtitleWidth=560;_subtitleHeight=330;
+        self.sceneLabel=[self sampleLabel:@"" japanese:YES];[self addSubview:self.sceneLabel];
+        self.sampleFlagSurface=[FYSubtitleSampleSurface new];self.sampleFlagSurface.fillColor=[FYSubtitleUIColor(0xFAFCF6) colorWithAlphaComponent:.84];self.sampleFlagSurface.edgeColor=NSColor.clearColor;
+        self.sampleFlag=[self sampleLabel:@"示例画面" japanese:NO];self.sampleFlag.font=FYUIFont(11,NSFontWeightRegular);self.sampleFlag.textColor=FYSubtitleUIColor(0x4D5D45);
+        [self.sampleFlagSurface addSubview:self.sampleFlag];[self addSubview:self.sampleFlagSurface];
+        NSMutableArray *sources=[NSMutableArray array];
+        for(NSUInteger i=0;i<2;i++){
+            FYSubtitleSampleSurface *panel=[FYSubtitleSampleSurface new];panel.fillColor=[FYSubtitleUIColor(0xFCFCF7) colorWithAlphaComponent:.56];panel.edgeColor=[FYSubtitleUIColor(0x839774) colorWithAlphaComponent:.4];
+            [self addSubview:panel];[sources addObject:panel];
+        }
+        self.sourcePanels=sources;
+        self.sourceLabel=[self sampleLabel:@"" japanese:YES];[sources[0] addSubview:self.sourceLabel];
+        self.noteLabel=[self sampleLabel:@"今日のメモ" japanese:YES];self.noteLabel.font=FYJapaneseFont(11);self.noteLabel.textColor=FYSubtitleUIColor(0x64715C);[sources[1] addSubview:self.noteLabel];
+        NSMutableArray *surfaces=[NSMutableArray array];
+        for(NSUInteger i=0;i<3;i++){FYSubtitleSampleSurface *panel=[FYSubtitleSampleSurface new];[surfaces addObject:panel];}
+        self.translationSurfaces=surfaces;
+        self.translationLabel=[self sampleLabel:@"放学后去图书馆吧。\n上次借的书，也该还了。" japanese:NO];
+        self.translationScroll=[NSScrollView new];self.translationScroll.drawsBackground=NO;self.translationScroll.hasVerticalScroller=YES;self.translationScroll.autohidesScrollers=YES;
+        self.translationScroll.scrollerStyle=NSScrollerStyleOverlay;self.translationScroll.documentView=self.translationLabel;[surfaces.lastObject addSubview:self.translationScroll];
+        self.brandLabel=[self sampleLabel:@"译芽 · 当前译文" japanese:NO];[surfaces.lastObject addSubview:self.brandLabel];
+        self.shortLabels=@[[self sampleLabel:@"回家" japanese:NO],[self sampleLabel:@"去图书馆" japanese:NO]];
+        for(NSUInteger i=0;i<2;i++){[surfaces[i] addSubview:self.shortLabels[i]];[sources[0] addSubview:surfaces[i]];}
+        [self refreshSample];
+    }
+    return self;
+}
+- (NSTextField *)sampleLabel:(NSString *)text japanese:(BOOL)japanese {
+    NSTextField *label=[NSTextField wrappingLabelWithString:text];label.font=japanese?FYJapaneseFont(13):FYUIFont(13,NSFontWeightRegular);
+    label.textColor=FYAdventureColor(@"ink");label.selectable=YES;label.maximumNumberOfLines=0;label.lineBreakMode=NSLineBreakByCharWrapping;return label;
+}
+- (void)setFrameSize:(NSSize)size {
+    BOOL changed=fabs(NSWidth(self.frame)-size.width)>1;[super setFrameSize:size];
+    if(changed)[self invalidateIntrinsicContentSize];self.needsLayout=YES;
+}
+- (CGFloat)previewCardFraction {
+    CGFloat minimum=self.inlineMode?240:360,maximum=self.inlineMode?720:1200;
+    return .6+MIN(1,MAX(0,(self.subtitleWidth-minimum)/(maximum-minimum)))*.4;
+}
+- (CGFloat)bodyWidthForWidth:(CGFloat)width {
+    CGFloat inner=MAX(1,width-34);
+    if(self.inlineMode)inner=MAX(1,(inner-12)*1.2/2.2-24);
+    return MAX(1,inner*[self previewCardFraction]);
+}
+- (CGFloat)textHeight:(NSTextField *)label width:(CGFloat)width {
+    return ceil([label.cell cellSizeForBounds:NSMakeRect(0,0,MAX(1,width),CGFLOAT_MAX)].height);
+}
+- (CGFloat)bodyHeightForWidth:(CGFloat)width {
+    CGFloat padding=self.inlineMode?11:15;
+    CGFloat textHeight=[self textHeight:self.translationLabel width:[self bodyWidthForWidth:width]-padding*2];
+    CGFloat natural=textHeight+(self.inlineMode?20:50);
+    return self.inlineMode?MIN(natural,MAX(60,self.subtitleHeight*.46)):MAX(natural,self.subtitleHeight*.46);
+}
+- (CGFloat)shortHeight:(NSTextField *)label { return ceil(label.cell.cellSize.height)+12; }
+- (CGFloat)inlineSourceHeightForWidth:(CGFloat)width {
+    CGFloat shortHeight=[self shortHeight:self.shortLabels[0]]+[self shortHeight:self.shortLabels[1]]+10;
+    return MAX(38+shortHeight+12,40+[self bodyHeightForWidth:width]+12);
+}
+- (NSSize)intrinsicContentSize {
+    CGFloat width=NSWidth(self.bounds)>0?NSWidth(self.bounds):380;
+    CGFloat height=self.inlineMode?65+[self inlineSourceHeightForWidth:width]+17:
+        67+[self textHeight:self.sourceLabel width:width-60]+24+25+[self bodyHeightForWidth:width]+17;
+    return NSMakeSize(NSViewNoIntrinsicMetric,MAX(self.inlineMode?275:294,height));
+}
+- (void)refreshSample {
+    self.fillColor=FYSubtitleUIColor(0xDBE4D3);
+    BOOL heightExample=self.inlineMode && self.showsHeightLimitExample;
+    self.sampleFlag.stringValue=heightExample?@"长文示例":@"示例画面";
+    // A maximum cannot be demonstrated with text shorter than its smallest limit.
+    // Keep the approved two-sentence scene unless the user opens size settings.
+    self.translationLabel.stringValue=heightExample?
+        @"放学后去图书馆吧。\n上次借的书，也该还了。\n先把书放进书包里，\n再检查一下借书卡。\n如果图书馆还没关门，\n我们就去看看新书。\n你可以挑一本小说，\n我想找找旅行的书。\n读到喜欢的段落时，\n记得把页码记下来。\n等到夕阳照进窗边，\n我们再一起回家吧。":
+        @"放学后去图书馆吧。\n上次借的书，也该还了。";
+    self.sceneLabel.stringValue=self.inlineMode?@"春 · 4月10日":@"放課後 · 図書室";self.sceneLabel.font=FYJapaneseFont(12);self.sceneLabel.textColor=FYSubtitleUIColor(0x465844);
+    self.sourceLabel.stringValue=self.inlineMode?@"放課後の予定":@"放課後、図書館に寄って帰ろう。\n前に借りた本も、そろそろ返さないとね。";
+    self.sourceLabel.font=FYJapaneseFont(self.inlineMode?11:13);self.sourceLabel.textColor=FYSubtitleUIColor(self.inlineMode?0x64715C:0x40533E);
+    NSMutableParagraphStyle *sourceStyle=[NSMutableParagraphStyle new];sourceStyle.minimumLineHeight=sourceStyle.maximumLineHeight=self.inlineMode?16.5:22.1;
+    self.sourceLabel.attributedStringValue=[[NSAttributedString alloc] initWithString:self.sourceLabel.stringValue attributes:@{NSFontAttributeName:self.sourceLabel.font,NSForegroundColorAttributeName:self.sourceLabel.textColor,NSParagraphStyleAttributeName:sourceStyle}];
+    self.sourcePanels[1].hidden=!self.inlineMode;self.noteLabel.hidden=!self.inlineMode;
+    self.brandLabel.hidden=self.inlineMode;self.brandLabel.font=FYUIFont(11,NSFontWeightRegular);self.brandLabel.textColor=[self.subtitleInk colorWithAlphaComponent:.78];
+    // The agreed demo is scaled to fit the sample, independently of real game font measurement.
+    CGFloat size=self.inlineMode?self.subtitleSize:MAX(18,self.subtitleSize*.72);
+    NSMutableParagraphStyle *paragraph=[NSMutableParagraphStyle new];paragraph.minimumLineHeight=size*1.55;paragraph.maximumLineHeight=size*1.55;
+    self.translationLabel.attributedStringValue=[[NSAttributedString alloc] initWithString:self.translationLabel.stringValue attributes:@{NSFontAttributeName:FYUIFont(size,NSFontWeightRegular),NSForegroundColorAttributeName:self.subtitleInk,NSParagraphStyleAttributeName:paragraph}];
+    self.translationLabel.font=FYUIFont(size,NSFontWeightRegular);self.translationLabel.textColor=self.subtitleInk;
+    for(NSUInteger i=0;i<3;i++){FYAdventurePanel *surface=self.translationSurfaces[i];surface.fillColor=self.subtitleFill;surface.edgeColor=self.subtitleBorder;surface.hidden=!self.inlineMode&&i<2;}
+    for(NSTextField *label in self.shortLabels){
+        NSMutableParagraphStyle *shortStyle=[NSMutableParagraphStyle new];shortStyle.minimumLineHeight=self.subtitleSize*1.55;shortStyle.maximumLineHeight=self.subtitleSize*1.55;
+        label.attributedStringValue=[[NSAttributedString alloc] initWithString:label.stringValue attributes:@{NSFontAttributeName:FYUIFont(self.subtitleSize,NSFontWeightRegular),NSForegroundColorAttributeName:self.subtitleInk,NSParagraphStyleAttributeName:shortStyle}];
+        label.font=FYUIFont(self.subtitleSize,NSFontWeightRegular);label.textColor=self.subtitleInk;
+    }
+    NSView *bodyParent=self.inlineMode?self.sourcePanels[1]:self;
+    if(self.translationSurfaces.lastObject.superview!=bodyParent){[self.translationSurfaces.lastObject removeFromSuperview];[bodyParent addSubview:self.translationSurfaces.lastObject];}
+    [self invalidateIntrinsicContentSize];self.needsLayout=YES;
+}
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+    if(!self.inlineMode){
+        NSGradient *gradient=[[NSGradient alloc] initWithColorsAndLocations:FYSubtitleUIColor(0xCFDFD0),0.0,FYSubtitleUIColor(0xE7E7D4),.45,FYSubtitleUIColor(0xD4D7CB),1.0,nil];
+        [gradient drawInBezierPath:[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds,1,1) xRadius:12 yRadius:12] angle:145];
+    }
+    [[FYSubtitleUIColor(0x4E6244) colorWithAlphaComponent:.22] setStroke];
+    NSBezierPath *rule=[NSBezierPath bezierPath];[rule moveToPoint:NSMakePoint(17,49)];[rule lineToPoint:NSMakePoint(NSWidth(self.bounds)-17,49)];[rule stroke];
+}
+- (void)layout {
+    [super layout];CGFloat width=NSWidth(self.bounds),inner=MAX(1,width-34);
+    self.sceneLabel.frame=NSMakeRect(17,17,MAX(1,inner-90),20);
+    self.sampleFlagSurface.frame=NSMakeRect(width-77,17,60,20);self.sampleFlag.frame=NSMakeRect(6,2,48,16);
+    CGFloat bodyWidth=[self bodyWidthForWidth:width],bodyHeight=[self bodyHeightForWidth:width];FYAdventurePanel *body=self.translationSurfaces.lastObject;
+    if(self.inlineMode){
+        CGFloat left=(inner-12)/2.2,right=(inner-12)*1.2/2.2,sourceHeight=[self inlineSourceHeightForWidth:width];
+        self.sourcePanels[0].frame=NSMakeRect(17,65,left,sourceHeight);self.sourcePanels[1].frame=NSMakeRect(17+left+12,65,right,sourceHeight);
+        self.sourceLabel.frame=NSMakeRect(12,12,MAX(1,left-24),17);self.noteLabel.frame=NSMakeRect(12,12,MAX(1,right-24),17);
+        CGFloat y=38;
+        for(NSUInteger i=0;i<2;i++){
+            NSTextField *label=self.shortLabels[i];CGFloat shortWidth=MIN(left-24,ceil(label.cell.cellSize.width)+22),height=[self shortHeight:label];
+            self.translationSurfaces[i].frame=NSMakeRect(12,y,shortWidth,height);label.frame=NSMakeRect(10,5,MAX(1,shortWidth-20),height-10);y+=height+10;
+        }
+        body.frame=NSMakeRect(12,40,bodyWidth,bodyHeight);
+    }else{
+        CGFloat sourceHeight=[self textHeight:self.sourceLabel width:inner-24]+24;
+        self.sourcePanels[0].frame=NSMakeRect(17,67,inner,sourceHeight);self.sourceLabel.frame=NSMakeRect(12,12,inner-24,sourceHeight-24);
+        body.frame=NSMakeRect((width-bodyWidth)/2,67+sourceHeight+25,bodyWidth,bodyHeight);
+    }
+    CGFloat padding=self.inlineMode?11:15,top=self.inlineMode?9:36;
+    self.brandLabel.frame=NSMakeRect(15,12,MAX(1,bodyWidth-30),17);
+    self.translationScroll.frame=NSMakeRect(padding,top,MAX(1,bodyWidth-padding*2),MAX(1,bodyHeight-top-(self.inlineMode?9:12)));
+    CGFloat textWidth=NSWidth(self.translationScroll.contentView.bounds);
+    self.translationLabel.frame=NSMakeRect(0,0,textWidth,MAX(NSHeight(self.translationScroll.contentView.bounds),[self textHeight:self.translationLabel width:textWidth]));
+    CGFloat topOrigin=self.translationLabel.isFlipped?0:MAX(0,NSHeight(self.translationLabel.frame)-NSHeight(self.translationScroll.contentView.bounds));
+    [self.translationScroll.contentView scrollToPoint:NSMakePoint(0,topOrigin)];
 }
 @end
 

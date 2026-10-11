@@ -28,6 +28,16 @@ static void Snapshot(NSView *view,NSString *path) {
     [view cacheDisplayInRect:view.bounds toBitmapImageRep:rep];
     Require([[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES],@"screenshot save failed");
 }
+static void CheckShortPreview(FYSubtitleAppearancePreview *sample) {
+    [sample layoutSubtreeIfNeeded];
+    for(NSView *surface in [sample.translationSurfaces subarrayWithRange:NSMakeRange(0,2)]){
+        NSTextField *label=(NSTextField *)Find(surface,^BOOL(NSView *view){return [view isKindOfClass:NSTextField.class];});
+        NSSize natural=label.cell.cellSize;
+        NSSize fitted=[label.cell cellSizeForBounds:label.bounds];
+        Require(label.selectable && fitted.height<=natural.height+1 && NSHeight(label.frame)>=natural.height-1,
+            @"short preview translations fit one complete selectable line");
+    }
+}
 
 int main(int argc,const char *argv[]){@autoreleasepool{
     [NSApplication sharedApplication];[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -39,10 +49,15 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     [app.mainWindow makeKeyAndOrderFront:nil];[NSApp activateIgnoringOtherApps:YES];
     [app.mainWindow setContentSize:NSMakeSize(720,700)];[app selectPageAtIndex:4];Tick();
     NSScrollView *narrowAppearance=(NSScrollView *)app.pages[4];
-    NSRect themeFrame=[app.captionThemeControl convertRect:app.captionThemeControl.bounds toView:narrowAppearance.contentView];
     Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-720)<2 && app.mainStudyChatView.hidden &&
             !app.mainChatToggle.enabled && NSWidth(narrowAppearance.frame)>500,@"narrow window keeps its requested width and releases AI space for readable settings");
-    Require(NSMinX(themeFrame)>=0 && NSMaxX(themeFrame)<=NSWidth(narrowAppearance.contentView.bounds)+1,@"all caption theme choices remain inside the visible settings column");
+    Require(app.appearanceModeControl.selectedSegment==1 && app.appearanceEditors[0].hidden && !app.appearanceEditors[1].hidden,@"concentrated settings start with inline appearance without the other editor taking space");
+    for(NSButton *choice in app.batchThemeSwatches){
+        NSRect themeFrame=[choice convertRect:choice.bounds toView:narrowAppearance.contentView];
+        Require(NSMinX(themeFrame)>=0 && NSMaxX(themeFrame)<=NSWidth(narrowAppearance.contentView.bounds)+1 && NSWidth(themeFrame)>80,@"all four inline palette cards remain usable inside narrow settings");
+    }
+    CheckShortPreview(app.appearanceSamples[1]);
+    Snapshot(app.appearanceSamples[1],[output stringByAppendingPathComponent:@"appearance-inline-concentrated-narrow.png"]);
     Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-narrow-with-ai-auto-collapsed.png"]);
     [app.mainWindow setContentSize:NSMakeSize(1320,800)];Tick();
     Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-1320)<2 && !app.mainStudyChatView.hidden && app.mainChatToggle.enabled,@"window regains its requested width and AI sidebar returns");
@@ -51,9 +66,87 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     [app.mainWindow setContentSize:NSMakeSize(1320,800)];Tick();
     Require(app.mainStudyChatView.hidden,@"manual AI collapse remains the user's choice after a narrow/wide resize");
     [app selectPageAtIndex:4];[app.mainWindow.contentView layoutSubtreeIfNeeded];Tick();
+    FYLearningColumnsView *workbench=(FYLearningColumnsView *)Find(app.pages[4],^BOOL(NSView *view){return [view.identifier isEqualToString:@"appearance-inline-columns"];});
+    CGFloat controlsWidth=NSWidth(workbench.arrangedSubviews[0].frame), previewWidth=NSWidth(workbench.arrangedSubviews[1].frame);
+    NSDictionary *metrics=@{@"workbench_width":@(NSWidth(workbench.frame)),@"controls_width":@(controlsWidth),@"preview_width":@(previewWidth),@"controls_fraction":@(controlsWidth/(controlsWidth+previewWidth)),@"inline_body_font":@(app.appearanceSamples[1].translationLabel.font.pointSize)};
+    [[NSJSONSerialization dataWithJSONObject:metrics options:NSJSONWritingPrettyPrinted error:NULL] writeToFile:[output stringByAppendingPathComponent:@"appearance-fidelity-metrics.json"] atomically:YES];
+    NSLog(@"APPEARANCE_FIDELITY %@",metrics);
+    Require(fabs(controlsWidth/(controlsWidth+previewWidth)-1.0/3)<.02,@"approved preview keeps settings and preview columns at one to two");
+    Require(app.appearanceSamples[1].translationLabel.font.pointSize==16,@"approved inline preview uses the selected 16 pt without an extra size offset");
+    FYSubtitleAppearancePreview *inlineSample=app.appearanceSamples[1];
+    Require(inlineSample.sourcePanels.count==2 && inlineSample.translationSurfaces[0].superview==inlineSample.sourcePanels[0] && inlineSample.translationSurfaces[2].superview==inlineSample.sourcePanels[1],@"approved sample retains two separate source panels instead of a fixed sidebar");
+    Require(fabs(NSWidth(inlineSample.sourcePanels[1].frame)/NSWidth(inlineSample.sourcePanels[0].frame)-1.2)<.02,@"source panel proportions follow the approved one to 1.2 grid");
+    Require(fabs(NSWidth(inlineSample.translationSurfaces[2].frame)/(NSWidth(inlineSample.sourcePanels[1].frame)-24)-.8667)<.01,@"default card width follows the approved range mapping inside the right source panel");
+    NSParagraphStyle *sampleParagraph=[inlineSample.translationLabel.attributedStringValue attribute:NSParagraphStyleAttributeName atIndex:0 effectiveRange:NULL];
+    Require(fabs(sampleParagraph.minimumLineHeight-24.8)<.01 && [inlineSample.translationLabel.font.fontName containsString:@"Regular"],@"approved inline demo uses regular 16 pt with 1.55 line height");
+    NSView *opacityCard=Find(app.pages[4],^BOOL(NSView *view){return [view.identifier isEqualToString:@"appearance-opacity-row"];});
+    NSRect sliderAlignment=[app.captionOpacitySlider alignmentRectForFrame:app.captionOpacitySlider.frame];
+    NSLog(@"OPACITY_FIDELITY card=%@ slider_alignment=%@",NSStringFromRect(opacityCard.frame),NSStringFromRect(sliderAlignment));
+    Require(NSHeight(opacityCard.frame)<=74 && NSWidth(sliderAlignment)<=261 && NSHeight(sliderAlignment)==22,@"shared opacity remains a compact horizontal strip with a bounded slider alignment rect");
+    Require([app.captionOpacitySlider.accessibilityLabel isEqualToString:@"背景不透明度"],@"shared opacity slider preserves its native accessibility name");
+    Require(NSEqualSizes(app.batchTextColorWell.frame.size,NSMakeSize(48,32)) && NSHeight(app.appearanceModeButtons[0].frame)==40,@"color swatch and mode buttons match approved sizes");
+    NSButton *follow=Button(app.appearanceEditors[1],@selector(resetBatchTextColor:));
+    Require(fabs(NSWidth(follow.frame)-70)<1,@"follow-style button keeps its compact width when the control column grows");
+    CheckShortPreview(app.appearanceSamples[1]);
+    Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-inline-concentrated-wide.png"]);
+    // Same 836 pt settings width as the approved 1028 px HTML screenshot.
+    [app.mainWindow setContentSize:NSMakeSize(1058,900)];Tick();
+    NSLog(@"REFERENCE_WINDOW frame=%@ content=%@ editor=%@ width_lock=%g",NSStringFromRect(app.mainWindow.frame),NSStringFromRect(app.mainWindow.contentView.bounds),NSStringFromRect(app.appearanceEditors[1].frame),app.mainWindowContentWidth.constant);
+    Require(fabs(NSWidth(app.mainWindow.contentView.bounds)-1058)<2 && fabs(NSWidth(app.appearanceEditors[1].frame)-836)<2,@"reference screenshot uses the approved 836 pt settings width");
+    Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-inline-reference-width.png"]);
+    Snapshot(app.appearanceEditors[1],[output stringByAppendingPathComponent:@"appearance-inline-editor-reference-width.png"]);
+    [app.mainWindow setContentSize:NSMakeSize(1320,900)];Tick();
+    NSButton *inlineDimensions=(NSButton *)Find(app.appearanceEditors[1],^BOOL(NSView *view){return [view isKindOfClass:FYSubtitleDisclosureButton.class];});
+    [inlineDimensions performClick:nil];Tick();
+    for(NSNumber *windowWidth in @[@1320,@720]){
+        [app.mainWindow setContentSize:NSMakeSize(windowWidth.doubleValue,900)];Tick();
+        for(NSNumber *fontSize in @[@13,@16,@30]){
+            app.batchFontSizeSlider.doubleValue=fontSize.doubleValue;
+            [NSApp sendAction:app.batchFontSizeSlider.action to:app from:app.batchFontSizeSlider];Tick();
+            app.batchHeightSlider.doubleValue=160;
+            [NSApp sendAction:app.batchHeightSlider.action to:app from:app.batchHeightSlider];Tick();
+            CGFloat smallHeight=NSHeight(inlineSample.translationSurfaces.lastObject.frame);
+            app.batchHeightSlider.doubleValue=500;
+            [NSApp sendAction:app.batchHeightSlider.action to:app from:app.batchHeightSlider];Tick();
+            CGFloat largeHeight=NSHeight(inlineSample.translationSurfaces.lastObject.frame);
+            NSLog(@"HEIGHT_PREVIEW width=%@ font=%@ small=%g large=%g",windowWidth,fontSize,smallHeight,largeHeight);
+            Require(fabs(smallHeight-160*.46)<1 && fabs(largeHeight-500*.46)<1,
+                @"expanded dimensions use a long example so both height limits visibly resize the native card");
+            NSScrollView *heightScroll=(NSScrollView *)Find(inlineSample.translationSurfaces.lastObject,^BOOL(NSView *view){return [view isKindOfClass:NSScrollView.class];});
+            Require(inlineSample.translationLabel.selectable && NSHeight(inlineSample.translationLabel.frame)>NSHeight(heightScroll.contentView.bounds),
+                @"height demo keeps the complete selectable text in a scrollable viewport");
+            CGFloat topOrigin=inlineSample.translationLabel.isFlipped?0:NSHeight(inlineSample.translationLabel.frame)-NSHeight(heightScroll.contentView.bounds);
+            Require(fabs(NSMinY(heightScroll.contentView.bounds)-topOrigin)<1,
+                @"resized height example starts at its first sentence instead of the bottom of the document");
+        }
+    }
+    app.batchFontSizeSlider.doubleValue=16;app.batchHeightSlider.doubleValue=330;
+    [NSApp sendAction:app.batchHeightSlider.action to:app from:app.batchHeightSlider];Tick();
+    [app.mainWindow setContentSize:NSMakeSize(1320,900)];Tick();
+    Snapshot(inlineSample,[output stringByAppendingPathComponent:@"appearance-inline-height-limit.png"]);
+    [inlineDimensions performClick:nil];Tick();
+    Require([inlineSample.translationLabel.stringValue isEqualToString:@"放学后去图书馆吧。\n上次借的书，也该还了。"] && NSHeight(inlineSample.translationSurfaces.lastObject.frame)<330*.46,
+        @"closing dimensions restores the approved short example and its natural height");
+    app.batchFontSizeSlider.doubleValue=30;[app controlValueChanged:app.batchFontSizeSlider];Tick();
+    CheckShortPreview(app.appearanceSamples[1]);
+    Snapshot(app.appearanceSamples[1],[output stringByAppendingPathComponent:@"appearance-inline-large-font.png"]);
+    app.batchFontSizeSlider.doubleValue=16;[app controlValueChanged:app.batchFontSizeSlider];Tick();
+    for(NSButton *choice in app.batchThemeSwatches){
+        [choice performClick:nil];Tick();
+        Require([app inlineThemeIndex]==choice.tag && choice.state==NSControlStateValueOn &&
+                [app.appearanceSamples[1].subtitleInk isEqual:[app inlinePanelTextColor]],@"inline palette choice updates the selected card and native sample immediately");
+        Require(app.appearanceSamples[1].translationLabel.selectable && app.appearanceSamples[1].translationSurfaces.count==3,@"inline sample shows selectable short patches and a long translation card");
+        Snapshot(app.appearanceSamples[1],[output stringByAppendingPathComponent:[NSString stringWithFormat:@"appearance-inline-palette-%ld.png",choice.tag]]);
+    }
+    [app.appearanceModeButtons[0] performClick:nil];Tick();
+    Require(!app.appearanceEditors[0].hidden && app.appearanceEditors[1].hidden,@"switching types shows one complete editor at a time");
+    Snapshot(app.mainWindow.contentView,[output stringByAppendingPathComponent:@"appearance-dialogue-concentrated-wide.png"]);
     NSString *caption=app.captionTextLabel.stringValue;NSRect frame=app.captionPanel.frame;BOOL shown=app.captionPanelShownByUser;
     NSButton *preview=Button(app.pages[4],@selector(showCaptionAppearancePreview:));
     Require([preview.title isEqualToString:@"打开字幕预览"],@"appearance action clearly announces preview");
+    NSButton *dimensions=(NSButton *)Find(app.appearanceEditors[0],^BOOL(NSView *view){return [view isKindOfClass:FYSubtitleDisclosureButton.class];});
+    Require([preview isHiddenOrHasHiddenAncestor],@"standalone caption preview lives inside the collapsed dimensions section");
+    [dimensions performClick:nil];Tick();Require(![preview isHiddenOrHasHiddenAncestor],@"native disclosure reveals standalone caption preview");
     [preview performClick:nil];Tick();
     Require(app.captionAppearancePreviewPanel.isVisible && !app.captionPanel.isVisible,@"settings opens a visible preview outside the game without raising the real caption");
     Require([app.captionAppearancePreviewPanel.title containsString:@"示例文字"] && [app.captionAppearancePreviewBrand.stringValue containsString:@"示例"],@"sample content is explicitly identified");

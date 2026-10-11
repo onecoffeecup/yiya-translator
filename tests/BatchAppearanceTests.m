@@ -39,6 +39,8 @@ static BatchAppearanceTestApp *TestApp(void) {
     app.batchHeightSlider = [app sliderWithMin:160 max:500 value:330 action:@selector(controlValueChanged:)];
     app.batchTextColorWell = [NSColorWell new];
     app.batchTextColorWell.color = FYAdventureColor(@"ink");
+    app.batchThemeControl = [app segmentedWithLabels:@[@"黑底白字",@"白底黑字",@"粉底深字",@"译芽花境"] action:@selector(controlValueChanged:)];
+    app.batchThemeControl.selectedSegment = 3;
     [app applyBatchAppearanceToLayoutEngine];
     return app;
 }
@@ -143,10 +145,23 @@ int main(void) { @autoreleasepool {
     Require(shortPanel.contentView == shortView && longPanel.contentView == longView && NSEqualRects(shortPanel.frame,shortFrame) && NSEqualRects(longPanel.frame,longFrame), @"color changes preserve content views and window frames");
     Require(NSEqualPoints(scrollOrigin,scroll.contentView.bounds.origin) && shortLabel.font.pointSize == shortSize && bodyLabel.font.pointSize == bodySize, @"color changes preserve fonts and reading position");
     Require([shortLabel.textColor isEqual:real.batchTextColorWell.color] && [bodyLabel.textColor isEqual:real.batchTextColorWell.color], @"short and long text receive the selected color");
-    NSTextField *title = (NSTextField *)longPanel.contentView.subviews.firstObject;
-    Require(fabs(title.textColor.alphaComponent - .82) < .001, @"title keeps its secondary color alpha");
+    NSButton *palette=[NSButton buttonWithTitle:@"" target:nil action:nil];
+    for(NSInteger theme=0;theme<4;theme++){
+        palette.tag=theme;[real selectBatchSwatch:palette];TrackFor(.04);
+        NSColor *fill=[NSColor colorWithCGColor:shortPanel.contentView.layer.backgroundColor];
+        Require([FYAppearanceColorHex(fill) isEqual:FYAppearanceColorHex(FYSubtitleThemeBackground(theme,1))] && [shortLabel.textColor isEqual:FYSubtitleThemeText(theme)] && [bodyLabel.textColor isEqual:FYSubtitleThemeText(theme)],@"all palettes reach both real short and long panels");
+        Require(real.lastInlineLayoutResult==before && real.renderCount==count && NSEqualRects(shortPanel.frame,shortFrame) && NSEqualRects(longPanel.frame,longFrame) && NSEqualPoints(scrollOrigin,scroll.contentView.bounds.origin),@"palette changes preserve windows, geometry, identities and reading position");
+    }
+    Require([longPanel.contentView.subviews.firstObject isKindOfClass:NSScrollView.class], @"ordinary long translations keep the body-only layout");
     [real showInlineTranslations:text forItems:scene placementRect:NSMakeRect(0,0,1200,800)];
     Require(real.lastInlineLayoutResult == before, @"unchanged styles and text still use the cached layout");
+    NSRect expandedFrame=NSMakeRect(280,180,500,350);
+    FYInlinePlacement *expandedPlacement=[real inlinePlacementForLongCardFrame:expandedFrame translation:body expandedReading:YES];
+    real.inlineExpandedReadingPanel=[real inlineLongPanelForTranslation:body item:scene.lastObject frame:expandedFrame placement:expandedPlacement];
+    NSTextField *title=(NSTextField *)real.inlineExpandedReadingPanel.contentView.subviews.firstObject;
+    Require([title isKindOfClass:NSTextField.class], @"expanded reading fixture has its real title band");
+    NSButton *darkPalette=[NSButton buttonWithTitle:@"" target:nil action:nil];darkPalette.tag=0;[real selectBatchSwatch:darkPalette];
+    Require(fabs(title.textColor.alphaComponent-.82)<.001 && [FYAppearanceColorHex(title.textColor) isEqual:FYAppearanceColorHex(FYSubtitleThemeText(0))], @"expanded title receives the palette and keeps secondary alpha");
     [real clearInlineTranslationPanels];
     NSLog(@"PASS: same-text font updates, stable panel reuse, immediate color changes, preserved geometry and scroll, unchanged-layout fast path");
 } return 0; }

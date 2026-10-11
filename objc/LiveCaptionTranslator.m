@@ -775,6 +775,16 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSSlider *batchWidthSlider;
 @property(nonatomic, strong) NSSlider *batchHeightSlider;
 @property(nonatomic, strong) NSColorWell *batchTextColorWell;
+@property(nonatomic) BOOL batchTextColorCustomized;
+@property(nonatomic, strong) NSSegmentedControl *batchThemeControl;
+@property(nonatomic, strong) NSSegmentedControl *appearanceModeControl;
+@property(nonatomic, copy) NSArray<NSButton *> *appearanceModeButtons;
+@property(nonatomic, strong) NSArray<NSView *> *appearanceEditors;
+@property(nonatomic, strong) NSArray<FYSubtitleStyleButton *> *batchThemeSwatches;
+@property(nonatomic, strong) NSArray<FYSubtitleAppearancePreview *> *appearanceSamples;
+@property(nonatomic, strong) NSMapTable<NSControl *, NSTextField *> *appearanceValueLabels;
+@property(nonatomic, strong) NSArray<NSTextField *> *appearanceColorStateLabels;
+@property(nonatomic, strong) NSArray<NSTextField *> *appearanceThemeLabels;
 @property(nonatomic, strong) NSTimer *batchAppearanceTimer;
 @property(nonatomic, strong) NSSegmentedControl *captionThemeControl;
 #ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
@@ -1390,7 +1400,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.selectedPage = index;
     if (index != 4) { [self.captionAppearancePreviewPanel orderOut:nil]; }
     self.headerTitleLabel.stringValue = @[@"实时翻译", @"最近台词", @"单词学习", @"运行设置", @"字幕外观", @"翻译服务"][index];
-    self.headerDescriptionLabel.stringValue = @[@"读懂当前对白，再看懂它的语法。", @"把之前没看懂的对白，再读一遍。", @"收藏词语，带着原句复习", @"选择画面来源并调整识别方式", @"调整悬浮字幕的阅读体验", @"配置翻译与学习分析服务"][index];
+    self.headerDescriptionLabel.stringValue = @[@"读懂当前对白，再看懂它的语法。", @"把之前没看懂的对白，再读一遍。", @"收藏词语，带着原句复习", @"选择画面来源并调整识别方式", @"选一种配色，看看它在游戏里的样子。", @"配置翻译与学习分析服务"][index];
+    [self.headerDescriptionLabel setContentCompressionResistancePriority:index==4?750:249 forOrientation:NSLayoutConstraintOrientationHorizontal];
     self.currentWindowLabel.hidden = index != 0;
     if (index == 1) { [self refreshHistory]; }
     if (index == 2) { [self refreshVocabularyList]; }
@@ -1710,48 +1721,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     return page;
 }
 
-- (NSView *)makeAppearancePage {
-    NSStackView *page = [self verticalStack];
-    NSStackView *appearance = [self verticalStack];
-    appearance.spacing = 10;
-    [appearance addArrangedSubview:[self cardTitle:@"框选字幕 · 单条悬浮译文"]];
-    [appearance addArrangedSubview:[self captionCard]];
-    [appearance addArrangedSubview:[self workspaceButton:@"打开字幕预览" action:@selector(showCaptionAppearancePreview:) primary:NO]];
-    [appearance addArrangedSubview:[self mutedLabel:@"预览使用示例文字，调整字号、配色和透明度会即时更新。"]];
-    [appearance addArrangedSubview:[self mutedLabel:@"字幕仅在选中的 QuickTime／游戏应用位于前台时显示；切到其他应用会自动隐藏。"]];
-    NSStackView *styleRow = [self horizontalStack];
-    [styleRow addArrangedSubview:[self mutedLabel:@"配色"]];
-    NSMutableArray<NSButton *> *swatches = [NSMutableArray array];
-    NSArray<NSColor *> *colors = @[[NSColor colorWithWhite:0.15 alpha:1], [NSColor whiteColor],
-                                  [NSColor colorWithRed:0.94 green:0.68 blue:0.78 alpha:1], FYAdventureColor(@"shell")];
-    NSArray<NSString *> *names = @[@"黑底白字", @"白底黑字", @"粉底深字", @"译芽花境"];
-    for (NSInteger index = 0; index < colors.count; index++) {
-        NSButton *button = [NSButton buttonWithTitle:@"" target:self action:@selector(selectCaptionSwatch:)];
-        button.tag = index;
-        button.bordered = NO;
-        button.wantsLayer = YES;
-        button.layer.cornerRadius = 10;
-        button.layer.backgroundColor = colors[index].CGColor;
-        button.layer.borderWidth = 2;
-        button.toolTip = names[index];
-        [button.widthAnchor constraintEqualToConstant:22].active = YES;
-        [button.heightAnchor constraintEqualToConstant:22].active = YES;
-        [styleRow addArrangedSubview:button];
-        [swatches addObject:button];
-    }
-    self.themeSwatches = swatches;
-    self.themeSummaryLabel = [self label:@"30 pt / 58%" font:FYUIFont(12, NSFontWeightRegular) color:self.uiMuted];
-    [styleRow addArrangedSubview:self.themeSummaryLabel];
-    [appearance addArrangedSubview:styleRow];
-    [page addArrangedSubview:[self cardWithStack:appearance]];
-
-    NSStackView *batch = [self verticalStack];
-    [batch addArrangedSubview:[self cardTitle:@"批量字幕 · 界面贴译"]];
-    [batch addArrangedSubview:[self batchCaptionCard]];
-    [page addArrangedSubview:[self cardWithStack:batch]];
-
-    return page;
-}
+#include "FYAppearanceUI.inc"
 
 - (void)focusWindowSelection:(id)sender {
     [self selectPageAtIndex:3];
@@ -2820,6 +2790,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (void)selectCaptionSwatch:(NSButton *)sender {
+    self.captionTextColorCustomized = NO;
     self.captionThemeControl.selectedSegment = sender.tag;
     [self controlValueChanged:self.captionThemeControl];
 }
@@ -2834,11 +2805,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.themeSummaryLabel.stringValue = [NSString stringWithFormat:@"%.0f pt / %.0f%%",
                                            self.captionFontSizeSlider.doubleValue,
                                            self.captionOpacitySlider.doubleValue * 100];
-    for (NSButton *swatch in self.themeSwatches) {
-        swatch.layer.borderColor = swatch.tag == self.captionThemeControl.selectedSegment
-            ? [NSColor colorWithRed:0.04 green:0.47 blue:0.44 alpha:1].CGColor
-            : [NSColor colorWithWhite:0.7 alpha:1].CGColor;
-    }
+    [self updateSubtitleAppearancePage];
 }
 
 - (NSView *)permissionControls {
@@ -3116,50 +3083,35 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (NSView *)captionCard {
-    NSStackView *stack = [self verticalStack];
-
-    self.captionOpacitySlider = [self sliderWithMin:0 max:0.95 value:0.58 action:@selector(controlValueChanged:)];
     self.captionFontSizeSlider = [self sliderWithMin:18 max:56 value:30 action:@selector(controlValueChanged:)];
     self.captionHeightSlider = [self sliderWithMin:120 max:340 value:180 action:@selector(controlValueChanged:)];
     self.captionWidthSlider = [self sliderWithMin:360 max:1200 value:900 action:@selector(controlValueChanged:)];
     self.captionThemeControl = [self segmentedWithLabels:@[@"黑底白字", @"白底黑字", @"粉底深字", @"译芽花境"] action:@selector(controlValueChanged:)];
     self.captionThemeControl.selectedSegment = 3;
-    self.captionTextColorWell = [[NSColorWell alloc] init];
+    self.captionTextColorWell = [[FYSubtitleColorWell alloc] init];
     self.captionTextColorWell.color = FYAdventureColor(@"ink");
     self.captionTextColorWell.target = self;
     self.captionTextColorWell.action = @selector(controlValueChanged:);
-    [self.captionTextColorWell.widthAnchor constraintEqualToConstant:60].active = YES;
-    [self.captionTextColorWell.heightAnchor constraintEqualToConstant:30].active = YES;
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"背景透明度" view:self.captionOpacitySlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"字号" view:self.captionFontSizeSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"字幕框宽度" view:self.captionWidthSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"字幕框最小高度" view:self.captionHeightSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"样式" view:self.captionThemeControl]];
-    NSStackView *colorRow = [self horizontalStack];
-    [colorRow addArrangedSubview:self.captionTextColorWell];
-    [colorRow addArrangedSubview:[NSButton buttonWithTitle:@"跟随样式" target:self action:@selector(resetCaptionTextColor:)]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"译文字色" view:colorRow]];
-    [stack addArrangedSubview:[self mutedLabel:@"字号与字色控制单条悬浮译文和框选提示；字幕窗可直接拖动，长句会自动增高。"]];
-    return stack;
+    self.captionTextColorWell.colorWellStyle = NSColorWellStyleMinimal;
+    [self.captionTextColorWell.widthAnchor constraintEqualToConstant:48].active = YES;
+    [self.captionTextColorWell.heightAnchor constraintEqualToConstant:32].active = YES;
+    return [self subtitleAppearanceEditor:NO];
 }
 
 - (NSView *)batchCaptionCard {
-    NSStackView *stack = [self verticalStack];
     self.batchFontSizeSlider = [self sliderWithMin:13 max:30 value:16 action:@selector(controlValueChanged:)];
     self.batchWidthSlider = [self sliderWithMin:240 max:720 value:560 action:@selector(controlValueChanged:)];
     self.batchHeightSlider = [self sliderWithMin:160 max:500 value:330 action:@selector(controlValueChanged:)];
-    self.batchTextColorWell = [[NSColorWell alloc] init];
+    self.batchTextColorWell = [[FYSubtitleColorWell alloc] init];
     self.batchTextColorWell.color = FYAdventureColor(@"ink");
     self.batchTextColorWell.target = self;
     self.batchTextColorWell.action = @selector(controlValueChanged:);
-    [self.batchTextColorWell.widthAnchor constraintEqualToConstant:60].active = YES;
-    [self.batchTextColorWell.heightAnchor constraintEqualToConstant:30].active = YES;
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"译文字号" view:self.batchFontSizeSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"最大宽度" view:self.batchWidthSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"长卡最大高度" view:self.batchHeightSlider]];
-    [stack addArrangedSubview:[self settingsRowWithLabel:@"译文字色" view:self.batchTextColorWell]];
-    [stack addArrangedSubview:[self mutedLabel:@"批量贴译继续使用奶油底和圆体；短贴片、长卡共用这里的字号和字色。空间不足时仍会收起为查看入口。"]];
-    return stack;
+    self.batchTextColorWell.colorWellStyle = NSColorWellStyleMinimal;
+    [self.batchTextColorWell.widthAnchor constraintEqualToConstant:48].active = YES;
+    [self.batchTextColorWell.heightAnchor constraintEqualToConstant:32].active = YES;
+    self.batchThemeControl = [self segmentedWithLabels:@[@"黑底白字", @"白底黑字", @"粉底深字", @"译芽花境"] action:@selector(controlValueChanged:)];
+    self.batchThemeControl.selectedSegment = 3;
+    return [self subtitleAppearanceEditor:YES];
 }
 
 - (void)createCaptionWindow {
@@ -5113,17 +5065,23 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     if (sender == self.captionThemeControl && !self.captionTextColorCustomized) {
         self.captionTextColorWell.color = [self captionThemeTextColor];
     }
+    if (sender == self.batchTextColorWell) { self.batchTextColorCustomized = YES; }
+    if (sender == self.batchThemeControl && !self.batchTextColorCustomized) {
+        self.batchTextColorWell.color = [self inlineThemeTextColor];
+    }
     BOOL batchAppearanceChanged = sender && (sender == self.batchFontSizeSlider ||
-        sender == self.batchWidthSlider || sender == self.batchHeightSlider || sender == self.batchTextColorWell);
+        sender == self.batchWidthSlider || sender == self.batchHeightSlider || sender == self.batchTextColorWell || sender == self.batchThemeControl);
     if (batchAppearanceChanged) {
         // 连续滑条只提交最新尺寸；不要在每个鼠标事件里测量、避让并刷新所有窗口。
         // 字色只影响绘制，原位更新即可，保留字号、选区和滚动位置。
         [self applyBatchAppearanceToLayoutEngine];
-        if (sender == self.batchTextColorWell) {
+        if (sender == self.batchTextColorWell || sender == self.batchThemeControl) {
+            if (sender == self.batchThemeControl) { [self refreshInlinePanelAppearance]; }
             [self refreshInlinePanelTextAppearance];
         } else {
             [self scheduleBatchAppearanceLayout];
         }
+        [self updateSubtitleAppearancePage];
         [self scheduleSettingsSave];
         return;
     }
@@ -5687,23 +5645,12 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         }
         self.persistedAPIKey = apiKey;
     }
-    NSDictionary *settings = @{
+    NSMutableDictionary *settings = [@{
         @"language": @(self.languageControl.selectedSegment),
         @"regionX": @(self.regionXSlider.doubleValue),
         @"regionY": @(self.regionYSlider.doubleValue),
         @"regionWidth": @(self.regionWidthSlider.doubleValue),
         @"regionHeight": @(self.regionHeightSlider.doubleValue),
-        @"captionOpacity": @(self.captionOpacitySlider.doubleValue),
-        @"captionFontSize": @(self.captionFontSizeSlider.doubleValue),
-        @"captionHeight": @(self.captionHeightSlider.doubleValue),
-        @"captionWidth": @(self.captionWidthSlider.doubleValue),
-        @"captionTextColor": FYAppearanceColorHex(self.captionTextColorWell.color),
-        @"captionTextColorCustomized": @(self.captionTextColorCustomized),
-        @"batchFontSize": @(self.batchFontSizeSlider.doubleValue),
-        @"batchMaxWidth": @(self.batchWidthSlider.doubleValue),
-        @"batchMaxHeight": @(self.batchHeightSlider.doubleValue),
-        @"batchTextColor": FYAppearanceColorHex(self.batchTextColorWell.color),
-        @"captionTheme": @(self.captionThemeControl.selectedSegment),
         @"manualOCRScope": @(self.manualOCRScopeCheckbox.state == NSControlStateValueOn),
         @"autoFitRegion": @(self.autoFitRegionCheckbox.state == NSControlStateValueOn),
         @"baseURL": self.baseURLField.stringValue ?: @"",
@@ -5715,7 +5662,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         @"captureDeviceID": self.selectedCaptureDeviceID ?: @"",
         // 采集卡画面区域校准（只存几何与设备标识，不存画面）。
         @"captureVideoRects": self.captureCardVideoRects ?: @{}
-    };
+    } mutableCopy];
+    [settings addEntriesFromDictionary:[self subtitleAppearanceSettings]];
     [[NSUserDefaults standardUserDefaults] setObject:settings forKey:SettingsKey];
 }
 
@@ -5788,20 +5736,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.regionYSlider.doubleValue = settings[@"regionY"] ? [settings[@"regionY"] doubleValue] : 0.52;
     self.regionWidthSlider.doubleValue = settings[@"regionWidth"] ? [settings[@"regionWidth"] doubleValue] : 0.90;
     self.regionHeightSlider.doubleValue = settings[@"regionHeight"] ? [settings[@"regionHeight"] doubleValue] : 0.42;
-    self.captionOpacitySlider.doubleValue = settings[@"captionOpacity"] ? [settings[@"captionOpacity"] doubleValue] : 0.58;
-    self.captionFontSizeSlider.doubleValue = settings[@"captionFontSize"] ? [settings[@"captionFontSize"] doubleValue] : 30;
-    self.captionHeightSlider.doubleValue = settings[@"captionHeight"] ? [settings[@"captionHeight"] doubleValue] : 180;
-    self.captionWidthSlider.doubleValue = settings[@"captionWidth"] ? [settings[@"captionWidth"] doubleValue] : 900;
-    self.captionThemeControl.selectedSegment = settings[@"captionTheme"] ? [settings[@"captionTheme"] integerValue] : 3;
-    self.captionTextColorCustomized = [settings[@"captionTextColorCustomized"] boolValue];
-    self.captionTextColorWell.color = self.captionTextColorCustomized
-        ? FYAppearanceColorFromHex(settings[@"captionTextColor"], [self captionThemeTextColor])
-        : [self captionThemeTextColor];
-    self.batchFontSizeSlider.doubleValue = settings[@"batchFontSize"] ? [settings[@"batchFontSize"] doubleValue] : 16;
-    self.batchWidthSlider.doubleValue = settings[@"batchMaxWidth"] ? [settings[@"batchMaxWidth"] doubleValue] : 560;
-    self.batchHeightSlider.doubleValue = settings[@"batchMaxHeight"] ? [settings[@"batchMaxHeight"] doubleValue] : 330;
-    self.batchTextColorWell.color = FYAppearanceColorFromHex(settings[@"batchTextColor"], FYAdventureColor(@"ink"));
-    [self applyBatchAppearanceToLayoutEngine];
+    [self loadSubtitleAppearanceSettings:settings];
     self.manualOCRScopeCheckbox.state=[settings[@"manualOCRScope"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff;
     self.autoFitRegionCheckbox.state = settings[@"autoFitRegion"] ? ([settings[@"autoFitRegion"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
     self.baseURLField.stringValue = settings[@"baseURL"] ?: @"https://api.openai.com/v1";
@@ -6837,7 +6772,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     NSView *container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
     CGFloat inset = 12;
     NSFont *choiceFont = [self.inlineLayoutEngine compactEntryFont];
-    NSTextField *header = [self label:@"选择要读的译文" font:choiceFont color:[self inlinePanelTextColor]];
+    NSTextField *header = [self label:@"选择要读的译文" font:choiceFont color:FYAdventureColor(@"ink")];
     header.frame = NSMakeRect(inset, height - inset - headerHeight + 6, width - inset * 2, headerHeight - 6);
     header.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
     [container addSubview:header];
@@ -6890,6 +6825,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [container addSubview:hint];
 
     [self applyInlineChromeToContent:container cornerRadius:14];
+    // The chooser is a native reading list with its own cream surface; retain
+    // its button contrast and frozen identities while overlay palettes change.
+    container.layer.backgroundColor = FYAdventureColor(@"cream").CGColor;
+    container.layer.borderColor = FYAdventureColor(@"line").CGColor;
     panel.contentView = container;
     [panel setContentSize:NSMakeSize(width, height)];
     self.inlineOverflowChoicePanel = panel;
@@ -7191,7 +7130,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
             : (placement.block ? ([FYInlineLayoutEngine shortTitleForBlockText:placement.block.text] ?: nil) : nil);
         if (cardTitle.length == 0) { cardTitle = self.inlineLayoutEngine.foldedEntryFallbackTitle ?: @"这段译文"; }
         NSTextField *title = [self label:cardTitle font:[self inlinePanelFontOfSize:14 weight:NSFontWeightSemibold] color:[self inlinePanelTitleColor]];
-        NSTextField *badge = [self label:@"已选中" font:[self inlinePanelFontOfSize:13] color:[self inlinePanelTextColor]];
+        NSTextField *badge = [self label:@"已选中" font:[self inlinePanelFontOfSize:13] color:FYAdventureColor(@"ink")];
         FYInstallInlineLongCardHeader(card, cardWidth, padding, titleBand, selected, title, badge,
                                      FYAdventureColor(@"mint"), [FYAdventureColor(@"rim") colorWithAlphaComponent:0.95]);
     }
@@ -7207,7 +7146,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     // 底部提示：明确"其他贴译已暂时隐藏"和"Esc 收起"，不必靠猜。
     NSTextField *footer = [self label:@"其他贴译已暂时隐藏　·　Esc 收起"
                                  font:[self.inlineLayoutEngine foldedEntryHintFont]
-                                color:self.uiMuted];
+                                color:[self inlinePanelTitleColor]];
     footer.lineBreakMode = NSLineBreakByTruncatingTail;
     FYInstallInlineLongCardFooter(card, footer, padding, cardHeight, textWidth);
     return card;
@@ -7739,28 +7678,11 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 }
 
 - (NSColor *)captionBackgroundColorWithAlpha:(CGFloat)alpha {
-    alpha = MIN(MAX(alpha, 0), 0.98);
-    switch ([self captionThemeIndex]) {
-        case 3: return [FYAdventureColor(@"cream") colorWithAlphaComponent:alpha];
-        case 1:
-            return [NSColor colorWithWhite:1 alpha:alpha];
-        case 2:
-            return [NSColor colorWithCalibratedRed:1.00 green:0.86 blue:0.93 alpha:alpha];
-        default:
-            return [NSColor colorWithWhite:0 alpha:alpha];
-    }
+    return FYSubtitleThemeBackground([self captionThemeIndex], MIN(alpha, .98));
 }
 
 - (NSColor *)captionThemeTextColor {
-    switch ([self captionThemeIndex]) {
-        case 3: return FYAdventureColor(@"ink");
-        case 1:
-            return [NSColor colorWithWhite:0.08 alpha:1];
-        case 2:
-            return [NSColor colorWithCalibratedRed:0.22 green:0.10 blue:0.18 alpha:1];
-        default:
-            return NSColor.whiteColor;
-    }
+    return FYSubtitleThemeText([self captionThemeIndex]);
 }
 
 - (NSColor *)captionTextColor {
@@ -7781,21 +7703,12 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 }
 
 - (NSColor *)captionBorderColor {
-    switch ([self captionThemeIndex]) {
-        case 3: return FYAdventureColor(@"line");
-        case 1:
-            return [NSColor colorWithWhite:0 alpha:0.14];
-        case 2:
-            return [NSColor colorWithCalibratedRed:0.88 green:0.28 blue:0.52 alpha:0.32];
-        default:
-            return [NSColor colorWithWhite:1 alpha:0.18];
-    }
+    return FYSubtitleThemeBorder([self captionThemeIndex]);
 }
 
-#pragma mark - 贴译主题（与字幕外观设置完全分开）
+#pragma mark - 贴译主题（配色与长对白独立，不透明度共用）
 
-// 贴译（原位短贴片 + 长阅读卡）使用固定的「奶油棕花境」主题。
-// 用户改字幕配色 / 主题 / 透明度时，贴译不能再跟着变成灰黑底白字。
+// 贴译默认奶油棕，使用自身的主题选择；长对白切换主题不改变贴译。
 // 分组器：几何判定在独立组件里，这里只注入“按钮词”这一项项目内约定。
 - (FYInlineOCRFrameStabilizer *)inlineFrameStabilizer {
     if (!_inlineFrameStabilizer) { _inlineFrameStabilizer = [FYInlineOCRFrameStabilizer new]; }
@@ -7854,7 +7767,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 }
 
 - (NSColor *)inlinePanelFillColor {
-    return [FYAdventureColor(@"cream") colorWithAlphaComponent:[self inlinePanelFillAlpha]];
+    return FYSubtitleThemeBackground([self inlineThemeIndex], [self inlinePanelFillAlpha]);
 }
 
 // 透明度设置变化后，已经显示出来的贴译立即更新：只改背景，不动文字与位置。
@@ -7863,9 +7776,15 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     NSMutableArray<NSPanel *> *panels = [self.inlineTranslationPanels mutableCopy] ?: [NSMutableArray array];
     [panels addObjectsFromArray:self.inlineLongCardPanels ?: @[]];
     if (self.inlineExpandedReadingPanel) { [panels addObject:self.inlineExpandedReadingPanel]; }
+    if (self.inlineOverflowPanel) { [panels addObject:self.inlineOverflowPanel]; }
     for (NSPanel *panel in panels) {
         NSView *content = panel.contentView;
-        if (content.layer) { content.layer.backgroundColor = fill.CGColor; }
+        if (content.layer) { content.layer.backgroundColor = fill.CGColor; content.layer.borderColor = [self inlinePanelBorderColor].CGColor; }
+        if ([content isKindOfClass:FYInlinePatchView.class]) {
+            FYInlinePatchView *patch = (FYInlinePatchView *)content;
+            patch.normalBorderColor = [self inlinePanelBorderColor]; patch.dragHintColor = [self inlinePanelTextColor];
+            patch.showsDragHint = patch.showsDragHint;
+        }
     }
 }
 
@@ -7886,7 +7805,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
         }
     }
     for (NSView *child in view.subviews) {
-        if ([view isKindOfClass:FYInlineLongCardView.class] && child == ((FYInlineLongCardView *)view).expandedFooterLabel) { continue; }
+        if ([view isKindOfClass:FYInlineLongCardView.class] && child == ((FYInlineLongCardView *)view).selectedBadgeBox) { continue; }
         [self applyInlineTextColor:color toView:child];
     }
 }
@@ -7896,16 +7815,15 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     [panels addObjectsFromArray:self.inlineLongCardPanels ?: @[]];
     if (self.inlineExpandedReadingPanel) { [panels addObject:self.inlineExpandedReadingPanel]; }
     if (self.inlineOverflowPanel) { [panels addObject:self.inlineOverflowPanel]; }
-    if (self.inlineOverflowChoicePanel) { [panels addObject:self.inlineOverflowChoicePanel]; }
     for (NSPanel *panel in panels) {
         [self applyInlineTextColor:[self inlinePanelTextColor] toView:panel.contentView];
     }
 }
 - (NSColor *)inlinePanelBorderColor {
-    return FYAdventureColor(@"line");
+    return FYSubtitleThemeBorder([self inlineThemeIndex]);
 }
 - (NSColor *)inlinePanelTextColor {
-    return self.batchTextColorWell ? self.batchTextColorWell.color : FYAdventureColor(@"ink");
+    return self.batchTextColorWell ? self.batchTextColorWell.color : [self inlineThemeTextColor];
 }
 - (NSColor *)inlinePanelTitleColor {
     return [[self inlinePanelTextColor] colorWithAlphaComponent:0.82];
@@ -8040,8 +7958,8 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 
     // 短贴片用专门的内容视图：平时穿透，按住 Option 时可拖动并给出反馈。
     FYInlinePatchView *content = [[FYInlinePatchView alloc] initWithFrame:NSMakeRect(0, 0, NSWidth(layout.frame), NSHeight(layout.frame))];
-    content.dragHintColor = FYAdventureColor(@"ink");
-    content.normalBorderColor = FYAdventureColor(@"line");
+    content.dragHintColor = [self inlinePanelTextColor];
+    content.normalBorderColor = [self inlinePanelBorderColor];
     content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     content.wantsLayer = YES;
     [self applyInlineChromeToContent:content cornerRadius:layout.cornerRadius];

@@ -18,6 +18,8 @@ FOUNDATION_EXPORT NSImage *FYAdventureSymbolImage(NSString *symbol, NSColor *col
 @interface FYLearningColumnsView : NSStackView
 @property(nonatomic) CGFloat leftFraction;
 @property(nonatomic) CGFloat compactWidth;
+// Opt in for settings whose reviewed column ratio must outrank native control hugging.
+@property(nonatomic) NSLayoutPriority columnWidthPriority;
 @end
 
 // Fit the captured frame to the available width, without image pixels sizing the window.
@@ -31,6 +33,38 @@ FOUNDATION_EXPORT NSImage *FYAdventureSymbolImage(NSString *symbol, NSColor *col
 @property(nonatomic) BOOL accent;
 @property(nonatomic) BOOL navigation;
 @property(nonatomic) NSInteger artworkIndex;
+@end
+
+// Native selectable palette cards and a sample-only subtitle preview.
+FOUNDATION_EXPORT NSColor *FYSubtitleThemeBackground(NSInteger index, CGFloat alpha);
+FOUNDATION_EXPORT NSColor *FYSubtitleThemeText(NSInteger index);
+FOUNDATION_EXPORT NSColor *FYSubtitleThemeBorder(NSInteger index);
+@interface FYSubtitleStyleButton : NSButton
+@property(nonatomic) NSInteger themeIndex;
+@end
+@interface FYSubtitleModeButton : NSButton
+@end
+@interface FYSubtitleDisclosureButton : NSButton
+@end
+@interface FYSubtitleSliderCell : NSSliderCell
+@end
+@interface FYSubtitleColorWell : NSColorWell
+@end
+@interface FYSubtitleFollowButton : FYWorkspaceButton
+@end
+@interface FYSubtitleAppearancePreview : FYAdventurePanel
+@property(nonatomic) BOOL inlineMode;
+@property(nonatomic) BOOL showsHeightLimitExample;
+@property(nonatomic, strong) NSColor *subtitleFill;
+@property(nonatomic, strong) NSColor *subtitleInk;
+@property(nonatomic, strong) NSColor *subtitleBorder;
+@property(nonatomic) CGFloat subtitleSize;
+@property(nonatomic) CGFloat subtitleWidth;
+@property(nonatomic) CGFloat subtitleHeight;
+@property(nonatomic, strong, readonly) NSTextField *translationLabel;
+@property(nonatomic, copy, readonly) NSArray<FYAdventurePanel *> *translationSurfaces;
+@property(nonatomic, copy, readonly) NSArray<FYAdventurePanel *> *sourcePanels;
+- (void)refreshSample;
 @end
 
 FOUNDATION_EXPORT NSAttributedStringKey const FYSourceHoverAttributeName;

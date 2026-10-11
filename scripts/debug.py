@@ -212,6 +212,7 @@ def run(args):
                          ("TestIsolationTests", ["bash", "scripts/run-isolation-tests.sh"]),
                          ("RuntimeDiagnosticsTests", ["bash", "scripts/run-diagnostics-tests.sh"]),
                          ("ModuleTests", ["bash", "scripts/run-module-tests.sh"]),
+                         ("SubtitleAppearanceTests", ["bash", "scripts/run-subtitle-appearance-tests.sh"]),
                          ("LearningStoreResilienceTests", ["bash", "scripts/run-learning-resilience-tests.sh"]),
                          ("InlineLayoutDebugTests", [sys.executable, "scripts/layout-debug.py", "check", "--output", str(output / "layout-evidence")]),
                          ("TranslationTraceTests", ["bash", "scripts/run-translation-trace-tests.sh"]),
