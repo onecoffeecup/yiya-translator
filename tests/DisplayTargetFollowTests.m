@@ -195,6 +195,7 @@ static FollowApp *FollowMakeApp(FYLearningStore *store, FYLearningAnalyzer *anal
     // 本套件验证几何跟随，不验证"等待文本稳定/两遍放大 OCR"：关掉它们让每轮只做一次 OCR。
     app.stableTextCheckbox = [NSButton checkboxWithTitle:@"synthetic stability gate" target:nil action:NULL];
     app.stableTextCheckbox.state = NSControlStateValueOff;
+    app.autoFitRegionCheckbox = [NSButton checkboxWithTitle:@"synthetic refinement gate" target:nil action:NULL];
     app.autoFitRegionCheckbox.state = NSControlStateValueOff;
     app.fixtureWindows = @[];
     app.liveBounds = [NSMutableDictionary dictionary];
@@ -451,6 +452,10 @@ static void TestSameTextGeometryFollow(FYLearningStore *store, FYLearningAnalyze
     NSUInteger requestsBeforeSwitch = gRequests;
     app.usesScriptedTarget = YES;
     app.scriptedTargetID = projector;
+    [app refreshDisplayGeometryIfNeeded:YES];
+    Check(FollowAllPanelsHidden(app), @"目标接管后、新 OCR 尚未返回时旧几何贴译隐藏");
+    [app refreshOverlayVisibility:nil];
+    Check(FollowAllPanelsHidden(app), @"前台刷新不能把等待新几何的旧贴译重新显示");
     FollowRunCycle(app);
     Check(gRequests == requestsBeforeSwitch, @"切到全屏投影不需要重新翻译");
     NSRect projectorFrame = [app appKitFrameForWindowItem:projectorItem];

@@ -23,6 +23,40 @@ static void Expect(BOOL condition, NSString *message) {
     assertions++;
     if (!condition) { NSLog(@"FAIL %@", message); exit(1); }
 }
+
+static void TestScaledCaptureImage(void) {
+    // Fictional UI: narrow strokes and broad blank regions, rather than the
+    // large colored tiles that hid the sampling error in older fixtures.
+    const size_t sourceW=960,sourceH=540;
+    unsigned char *bytes=calloc(sourceW*sourceH,1);
+    for(size_t y=0;y<sourceH;y++) for(size_t x=0;x<sourceW;x++) {
+        unsigned char v=238;
+        if(y>90 && y<115 && x>300 && x<910)v=150;
+        if(y<75 && x>35 && x<400 && x%17<5 && y%29<19)v=80;
+        if(y>260 && y<460 && x>360 && x<900 && x%11<2 && y%31<17)v=35;
+        if(x>35 && x<270 && y>145 && y<430 && y%72<2)v=100;
+        bytes[y*sourceW+x]=v;
+    }
+    CGColorSpaceRef space=CGColorSpaceCreateDeviceGray();
+    CGContextRef sourceContext=CGBitmapContextCreate(bytes,sourceW,sourceH,8,sourceW,space,kCGImageAlphaNone);
+    CGImageRef source=CGBitmapContextCreateImage(sourceContext);CGContextRelease(sourceContext);free(bytes);
+    const size_t sceneW=1600,sceneH=1000;
+    CGContextRef sceneContext=CGBitmapContextCreate(NULL,sceneW,sceneH,8,sceneW,space,kCGImageAlphaNone);
+    CGContextSetGrayFillColor(sceneContext,0,1);CGContextFillRect(sceneContext,CGRectMake(0,0,sceneW,sceneH));
+    CGContextSetInterpolationQuality(sceneContext,kCGInterpolationHigh);
+    CGContextDrawImage(sceneContext,CGRectMake(0,50,1600,900),source);
+    CGImageRef scene=CGBitmapContextCreateImage(sceneContext);CGContextRelease(sceneContext);CGColorSpaceRelease(space);
+    double *t=NULL,*s=NULL;size_t tw,th,w,h;CGFloat aspect;NSRect window=NSMakeRect(0,0,sceneW,sceneH);
+    Expect(FYBuildCaptureGrids(source,scene,CGSizeMake(sourceW,sourceH),^NSRect{return window;},320,&t,&tw,&th,&s,&w,&h,&aspect,NULL),
+           @"thin-stroke scaled capture produces production comparison grids");
+    FYCaptureCandidateResult found=FYSelectCaptureCandidate(s,w,h,t,tw,th,aspect,window,
+        ^BOOL(NSRect *fit){return FYEstimatedCaptureDisplayRect(CGSizeMake(sourceW,sourceH),window,fit);},
+        ^NSDictionary *{return nil;},3,NULL,NULL);
+    NSRect detected=FYWindowRectFromCaptureGrid(found.bestRect,w,h,window);
+    Expect(fabs(NSMinX(detected))<=5 && fabs(NSMinY(detected)-50)<=10 && fabs(NSWidth(detected)-1600)<=10 && fabs(NSHeight(detected)-900)<=10,
+           [NSString stringWithFormat:@"thin-stroke fullscreen capture finds the actual letterboxed video: %@",NSStringFromRect(detected)]);
+    free(t);free(s);
+}
 int main(void) {
     @autoreleasepool {
         Expect(FYGeometryDeliveryIsStale(1,2,10,10), @"geometry generation change rejects old placement");
@@ -69,6 +103,23 @@ int main(void) {
         Expect(fabs(FYSignatureCorrelation(inverse,2,2,0,0,2,2,templ,2,2)+1)<1e-9, @"inverted content returns negative correlation");
         Expect(FYSignatureCorrelation(uniform,2,2,0,0,2,2,templ,2,2)==-1, @"uniform candidate keeps legacy negative sentinel");
         Expect(FYSignatureCorrelation(scene,2,2,-1,0,2,2,templ,2,2)==-2 && FYSignatureCorrelation(scene,2,2,1,0,2,2,templ,2,2)==-2, @"invalid candidate bounds rejected");
+        // A reduced template pixel represents a cell, not its upper-left sample.
+        // Fine strokes can have the opposite value at that corner while the
+        // entire cell still matches perfectly (windowed/fullscreen scaling).
+        double detailedScene[32*32], averagedTemplate[8*8];
+        for(size_t j=0;j<8;j++) for(size_t i=0;i<8;i++) {
+            double value=80+sin(i*.8+j*.31)*20+i*j;
+            averagedTemplate[j*8+i]=value;
+            for(size_t y=0;y<4;y++) for(size_t x=0;x<4;x++) {
+                double corner=180-2*value;
+                double detail=(x==0 && y==0) ? corner : -corner/15;
+                detailedScene[(j*4+y)*32+i*4+x]=value+detail;
+            }
+        }
+        FYNormalizeSignature(averagedTemplate,64);
+        Expect(FYSignatureCorrelation(detailedScene,32,32,0,0,32,32,averagedTemplate,8,8)>.999,
+               @"scaled capture comparison averages each template cell instead of sampling stroke corners");
+        TestScaledCaptureImage();
         FYNormalizeSignature(uniform,4); Expect(uniform[0]==0 && uniform[3]==0, @"constant signature safely normalizes to zero");
         Expect(!FYGrayGridFromImage(NULL,4,4), @"missing image returns no allocated grid");
         double grid[16*16], signature[8*8];
@@ -109,9 +160,13 @@ int main(void) {
         Expect(!uniformOK && [reason isEqual:@"采集卡画面没有可用细节"] && geometryCalls==1 && !gridTemplate && !gridScene,@"uniform capture grids reject detail and free both buffers");
         CGContextSetRGBFillColor(context,1,1,1,1);CGContextFillRect(context,CGRectMake(0,0,50,80));
         BOOL gridsOK=FYBuildCaptureGrids(CGBitmapContextCreateImage(context),CGBitmapContextCreateImage(context),CGSizeMake(100,80),^NSRect {return NSMakeRect(0,0,100,80);},80,&gridTemplate,&tw,&th,&gridScene,&ww,&wh,&aspect,&reason);
-        Expect(gridsOK && gridTemplate && gridScene && tw==40 && th==32 && ww==80 && wh==64 && aspect==1.25,@"capture grid dimensions preserve aspect and caller-owned outputs");
+        Expect(gridsOK && gridTemplate && gridScene && tw==80 && th==64 && ww==80 && wh==64 && aspect==1.25,@"capture grid retains narrow strokes, aspect and caller-owned outputs");
         double sum=0;for(size_t i=0;i<tw*th;i++)sum+=gridTemplate[i];
         Expect(fabs(sum)<1e-6,@"prepared capture template is normalized");
+        free(gridTemplate);free(gridScene);gridTemplate=NULL;gridScene=NULL;
+        Expect(FYBuildCaptureGrids(CGBitmapContextCreateImage(context),CGBitmapContextCreateImage(context),CGSizeMake(100,80),
+            ^NSRect{return NSMakeRect(0,0,100,160);},80,&gridTemplate,&tw,&th,&gridScene,&ww,&wh,&aspect,NULL) && ww==80 && wh==64,
+            @"capture grid keeps screenshot pixel aspect when live window bounds have a different aspect");
         free(gridTemplate);free(gridScene);CGContextRelease(context);CGColorSpaceRelease(colorSpace);
         NSRect gridWindow=NSMakeRect(-400,100,800,600);
         NSRect upperGridRect=FYWindowRectFromCaptureGrid(NSMakeRect(10,10,20,10),80,60,gridWindow);

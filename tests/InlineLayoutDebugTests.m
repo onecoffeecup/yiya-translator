@@ -269,6 +269,15 @@ static void ExportScene(NSDictionary *scene, NSArray *requests, FYInlineLayoutRe
     [[NSJSONSerialization dataWithJSONObject:rotated options:0 error:NULL] writeToFile:controlPath atomically:YES];chmod(controlPath.fileSystemRepresentation,0600);
     [debug recordDecision:@"old_session_callback" context:context];
     Check([[NSFileManager defaultManager] contentsOfDirectoryAtPath:directory error:NULL].count==before+1,@"new session revokes callbacks from the previous one");
+    CGImageRef quotaImage=SyntheticImage(scene);
+    Check([debug beginFrameWithImage:quotaImage metadata:@{}]!=nil,@"new diagnostic session starts with a fresh recording budget");
+    [debug setValue:@(64*1024*1024-1) forKey:@"savedBytes"];
+    Check([debug beginFrameWithImage:quotaImage metadata:@{}]==nil,@"oversized next image respects the private recording budget");
+    Check(!debug.isActive,@"recording budget exhaustion disables live diagnostics instead of displaying stale geometry");
+    rotated[@"session"]=NSUUID.UUID.UUIDString;
+    [[NSJSONSerialization dataWithJSONObject:rotated options:0 error:NULL] writeToFile:controlPath atomically:YES];chmod(controlPath.fileSystemRepresentation,0600);
+    Check([debug beginFrameWithImage:quotaImage metadata:@{}]!=nil && debug.isActive,@"explicit rearming resets an exhausted diagnostic budget");
+    CGImageRelease(quotaImage);
     chmod(controlPath.fileSystemRepresentation,0644);Check(!debug.isActive,@"public control file cannot enable image/text diagnostics");
     chmod(controlPath.fileSystemRepresentation,0600);rotated[@"expires_at"]=@(NSDate.date.timeIntervalSince1970-1);
     [[NSJSONSerialization dataWithJSONObject:rotated options:0 error:NULL] writeToFile:controlPath atomically:YES];chmod(controlPath.fileSystemRepresentation,0600);

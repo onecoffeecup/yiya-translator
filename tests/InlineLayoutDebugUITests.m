@@ -49,6 +49,15 @@ int main(int argc,const char **argv) { @autoreleasepool {
     }
     NSLog(@"native diagnostic color pixels: green=%lu yellow=%lu blue=%lu red=%lu; maximum green coverage=%.3f",(unsigned long)colors[0],(unsigned long)colors[1],(unsigned long)colors[2],(unsigned long)colors[3],maximumGreenCoverage);
     Require(colors[0]>0 && colors[1]>0 && colors[2]>0 && colors[3]>0,@"native overlay draws all four diagnostic colors");
+    for(NSValue *value in @[[NSValue valueWithRect:NSMakeRect(0,0,1000,700)],
+                           [NSValue valueWithRect:NSMakeRect(480,420,320,240)],
+                           [NSValue valueWithRect:NSMakeRect(0,0,1000,700)]]) {
+        NSRect resized=value.rectValue;
+        [debug showSnapshot:FYLayoutDebugSnapshot(result,nil,resized,@{},@"repeated_fullscreen") viewport:resized];
+        Require(NSEqualRects(panel.frame,resized),@"repeated viewport changes update native overlay frame");
+        Require(NSEqualRects(panel.contentView.bounds,NSMakeRect(0,0,NSWidth(resized),NSHeight(resized))),
+                @"repeated viewport changes keep diagnostic drawing coordinates in screen points");
+    }
     [debug refreshVisible:NO level:NSFloatingWindowLevel];Require(!panel.isVisible,@"foreground hide is respected");
     [[NSFileManager defaultManager] removeItemAtPath:controlPath error:NULL];
     Pump(^BOOL{return [debug valueForKey:@"overlay"]==nil;});

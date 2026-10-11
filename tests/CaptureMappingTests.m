@@ -541,13 +541,18 @@ static void TestCoordinateChainToLayout(void) {
         }
         Check(longPlacement != nil, @"说明弹窗拿到了排版结果");
         if (longPlacement) {
-            // 当前布局允许所属字段内的覆盖锚点；其它字段仍须保持零重叠。
+            // 右边界内收已允许右侧卡覆盖自己的部分原文（P2 right-boundary 合同）；
+            // 仍不能越过自己的左边界、视口右边界，或盖住其它字段。
             // 联合避让会移动已有短贴片，必须检查这一轮 withLong 的最终位置。
             BOOL degradedLong = longPlacement.mode == FYInlineDisplayModeCompactEntry ||
                                 longPlacement.mode == FYInlineDisplayModeUnplaceable;
+            BOOL inwardRight = longPlacement.anchor == FYInlineAnchorRight &&
+                NSMinX(longPlacement.translationFrame) >= NSMinX(longSource) &&
+                fabs(NSMaxX(longPlacement.translationFrame) -
+                     (NSMaxX(viewport) - [FYInlineLayoutEngine defaultEngine].viewportMargin)) < .5;
             Check(!CGRectIntersectsRect(longPlacement.translationFrame, longSource) || degradedLong ||
-                  longPlacement.anchor == FYInlineAnchorOverlay,
-                  @"长卡覆盖自身时使用所属字段的覆盖锚点，其它锚点不跨入原文");
+                  longPlacement.anchor == FYInlineAnchorOverlay || inwardRight,
+                  @"长卡覆盖自身时使用覆盖锚点或合法的右边界内收，其它锚点不跨入原文");
             for (NSUInteger other = 0; other < requests.count; other++) {
                 FYInlinePlacement *shortPlacement = [withLong placementForBlockID:result.placements[other].blockID];
                 Check(shortPlacement != nil, @"联合布局保留原有选项身份");

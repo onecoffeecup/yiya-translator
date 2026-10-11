@@ -681,6 +681,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 // 最近一次渲染时用的几何上下文。和 lastDisplayGeometryToken 不一致 =
 // 画面目标/区域已经变了但贴译还是按旧几何渲染的 → 必须重排（哪怕文本一个字都没变）。
 @property(nonatomic, copy) NSString *lastInlineRenderGeometryToken;
+// A foreground poll must not revive panels hidden while waiting for valid geometry.
+@property(nonatomic) BOOL inlineGeometryPending;
 // 本轮 OCR 用的显示目标与几何代次（异步回调据此判断是否已过期）。
 @property(nonatomic) NSInteger ocrGeometryGeneration;
 @property(nonatomic) uint32_t ocrDisplayTargetWindowID;
@@ -3718,7 +3720,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     BOOL targetActive = !self.selectingCaptureRegion && [self translationTargetIsForeground];
     NSArray *visibleWindows = self.overlayWindowSnapshot;
     NSWindowLevel overlayLevel = [self overlayLevelForTargetPID:[self selectedWindowOwnerPID] inWindowList:visibleWindows];
-    [[FYInlineLayoutDebug shared] refreshVisible:targetActive level:overlayLevel];
+    [[FYInlineLayoutDebug shared] refreshVisible:targetActive && !self.inlineGeometryPending level:overlayLevel];
     BOOL showCaption = targetActive && self.captionPanelShownByUser && !self.captionSuppressedForUIMode;
     self.captionPanel.level = showCaption ? overlayLevel : NSNormalWindowLevel;
     if (showCaption) {
@@ -3746,7 +3748,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     for (NSPanel *panel in overlays) {
         panel.level = overlayLevel;
         BOOL hasContent = panel != self.inlineOverflowPanel || self.inlineOverflowCount > 0;
-        if (hasContent && FYOverlayShouldShow(targetActive, expanded, panel == self.inlineExpandedReadingPanel)) {
+        if (hasContent && !self.inlineGeometryPending && FYOverlayShouldShow(targetActive, expanded, panel == self.inlineExpandedReadingPanel)) {
             if (!panel.isVisible) { [panel orderFrontRegardless]; }
         } else if (panel.isVisible) {
             [panel orderOut:nil];
@@ -4655,7 +4657,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 // 把贴译面板从旧位置收起来（不销毁）：实际显示目标/画面区域变了、或者定位暂时不可用时，
 // 绝不能把面板继续留在旧坐标上冒充"跟着走"。
 - (void)hideInlineTranslationPanelsForGeometryChange {
-    [[FYInlineLayoutDebug shared] refreshVisible:NO level:NSNormalWindowLevel];
+    self.inlineGeometryPending = YES;
+    [[FYInlineLayoutDebug shared] clearOverlay];
     NSMutableArray<NSPanel *> *panels = [[self.inlineTranslationPanels arrayByAddingObjectsFromArray:self.inlineLongCardPanels] mutableCopy];
     if (self.inlineExpandedReadingPanel) { [panels addObject:self.inlineExpandedReadingPanel]; }
     for (NSPanel *panel in panels) {
@@ -6361,6 +6364,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                 if (card) { card.showsSelectedBadge = [self.inlineBlockSnapshot.blockID isEqualToString:panel.identifier]; }
             }
         }
+        self.inlineGeometryPending = NO;
         [self recordInlineLayoutDebug:self.lastInlineLayoutResult previous:self.lastInlineLayoutResult viewport:windowFrame
             reason:minorOCRJitter ? @"cache_minor_ocr_jitter" : @"cache_identical_input"];
         // 内容没变也要推进展开态记账（上一帧的排版结果里还有没有这一块）。
@@ -6542,6 +6546,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.lastInlineLayoutBoxes = layoutBoxes;
     // 记下这次渲染用的几何上下文：文本没变但几何变了时，靠它判断必须重排。
     self.lastInlineRenderGeometryToken = self.lastDisplayGeometryToken ?: @"";
+    self.inlineGeometryPending = NO;
     // 极端降级：确实连折叠入口都贴不到原文旁边的块，在游戏显示区域边缘给一个总入口。
     [self updateInlineOverflowEntryWithPlacements:result.placements
                                             items:itemsByBlockID
@@ -8254,9 +8259,10 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
 // 采集卡画面区域的映射版本。
 //   1 = 旧版实现：bestRect.origin.y（像素网格、从图像顶部算）被直接加到 AppKit 窗口底部，
 //       漏了纵坐标翻转 → 映射整体下移（OBS 预览靠上时，贴译会落到下方控制区）。
-//   2 = 当前实现：网格坐标按图像顶部换算回 AppKit 的「距底部」。
+//   2 = 网格坐标按图像顶部换算回 AppKit 的「距底部」，比对仍使用角点取样。
+//   3 = 模板与候选都按像素单元面积比对，保留细字笔画；旧自动结果重新定位。
 // 读取映射时必须校验版本：修了算法也不能继续读取旧版存下的错误结果。
-static const NSInteger kCaptureCardMappingVersion = 2;
+static const NSInteger kCaptureCardMappingVersion = 3;
 // 无法取样时的哨兵值：与「相关性很差（负数）」区分开，避免把“完全对不上”当成“测不了”。
 static const double kCaptureCardMappingScoreUnavailable = -99;
 
@@ -8469,7 +8475,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
     NSString *mappingKey = [NSString stringWithFormat:@"%u", window.windowID];
     NSDictionary *entry = [[self mappingCache] entryForWindowID:window.windowID];
     if (!entry) { if (outReason) { *outReason = @"该窗口还没有贴译位置。"; } return NO; }
-    // 旧版（mappingVersion < 2）的自动映射纵坐标是错的：作废重定位，不能继续读旧结果。
+    // 旧版自动映射可能带有翻转或取样偏差：作废重定位，不能继续读旧结果。
     // 手动调整（source=manual）一直是 AppKit 坐标，不受这个 bug 影响，保留。
     FYCaptureMappingVersionStatus versionStatus = FYCaptureMappingVersion(entry, kCaptureCardMappingVersion);
     BOOL autoMapping = versionStatus != FYCaptureMappingVersionNonAutomatic;

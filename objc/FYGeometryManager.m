@@ -109,13 +109,20 @@ BOOL FYBuildCaptureGrids(CGImageRef frameImage, CGImageRef windowImage, CGSize f
     NSRect (^windowFrame)(void), size_t sceneWidth, double **outTempl, size_t *outTW, size_t *outTH,
     double **outScene, size_t *outWW, size_t *outWH, CGFloat *outAspect, NSString **outReason) {
     CGFloat videoAspect = frameSize.width / MAX((CGFloat)1, frameSize.height);
-    const size_t TW = 40;
+    // Retain narrow UI strokes; 40 columns discarded their position and made
+    // a smaller, displaced copy of a mostly blank page look like a better fit.
+    const size_t TW = 80;
     size_t TH = MAX((size_t)8, (size_t)lround(TW / MAX((CGFloat)0.1, videoAspect)));
     double *templ = FYGrayGridFromImage(frameImage, TW, TH);
     CGImageRelease(frameImage);
 
     NSRect windowRect = windowFrame();
-    CGFloat windowAspect = NSWidth(windowRect) / MAX((CGFloat)1, NSHeight(windowRect));
+    // The pixels are the sampled scene. Window bounds may include different
+    // framing or change during fullscreen transitions; using their aspect here
+    // stretches the screenshot before comparing it to the capture template.
+    CGFloat windowAspect = CGImageGetHeight(windowImage) > 0
+        ? (CGFloat)CGImageGetWidth(windowImage) / CGImageGetHeight(windowImage)
+        : NSWidth(windowRect) / MAX((CGFloat)1, NSHeight(windowRect));
     size_t WW = MAX((size_t)80, sceneWidth);
     size_t WH = MAX((size_t)40, (size_t)lround(WW / MAX((CGFloat)0.1, windowAspect)));
     double *scene = FYGrayGridFromImage(windowImage, WW, WH);
@@ -186,23 +193,50 @@ void FYNormalizeSignature(double *values, size_t count) {
     for (size_t i = 0; i < count; i++) { values[i] = (values[i] - mean) / sd; }
 }
 
-// 候选区域与模板的归一化互相关（模板已零均值单位方差）。
-double FYSignatureCorrelation(const double *scene, size_t sw, size_t sh,
-                                     NSInteger x, NSInteger y, size_t cw, size_t ch,
-                                     const double *templ, size_t tw, size_t th) {
+// Integral pixels allow the candidate to be reduced with the same cell
+// footprint as the template, without scanning each source pixel per candidate.
+static double *FYCaptureGridIntegral(const double *scene, size_t width, size_t height) {
+    if (!scene || !width || !height || width == SIZE_MAX || height == SIZE_MAX ||
+        width + 1 > SIZE_MAX / (height + 1) / sizeof(double)) { return NULL; }
+    double *sum = calloc((width + 1) * (height + 1), sizeof(double));
+    if (!sum) { return NULL; }
+    for (size_t y = 0; y < height; y++) {
+        double row = 0;
+        for (size_t x = 0; x < width; x++) {
+            row += scene[y * width + x];
+            sum[(y + 1) * (width + 1) + x + 1] = sum[y * (width + 1) + x + 1] + row;
+        }
+    }
+    return sum;
+}
+
+// Interpolating the integral includes fractional edge pixels in a cell.
+static double FYCaptureIntegralAt(const double *sum, size_t width, size_t height, double x, double y) {
+    size_t x0 = (size_t)x, y0 = (size_t)y;
+    size_t x1 = MIN(width, x0 + 1), y1 = MIN(height, y0 + 1);
+    double fx = x - x0, fy = y - y0;
+    return (sum[y0 * (width + 1) + x0] * (1 - fx) + sum[y0 * (width + 1) + x1] * fx) * (1 - fy) +
+           (sum[y1 * (width + 1) + x0] * (1 - fx) + sum[y1 * (width + 1) + x1] * fx) * fy;
+}
+
+static double FYCaptureAreaCorrelation(const double *integral, size_t sw, size_t sh,
+                                       NSInteger x, NSInteger y, size_t cw, size_t ch,
+                                       const double *templ, size_t tw, size_t th) {
+    if (!integral || !templ || !tw || !th) { return -2; }
     if (x < 0 || y < 0 || cw == 0 || ch == 0) { return -2; }
     if (x + (NSInteger)cw > (NSInteger)sw || y + (NSInteger)ch > (NSInteger)sh) { return -2; }
     double sum = 0, sum2 = 0, dot = 0;
     size_t n = tw * th;
+    double cellArea = (double)cw * ch / n;
     for (size_t j = 0; j < th; j++) {
-        NSInteger sy = y + (NSInteger)((double)j * ch / th);
-        if (sy >= (NSInteger)sh) { sy = (NSInteger)sh - 1; }
-        const double *row = scene + (size_t)sy * sw;
+        double y0 = y + (double)j * ch / th;
+        double y1 = y + (double)(j + 1) * ch / th;
         const double *trow = templ + j * tw;
         for (size_t i = 0; i < tw; i++) {
-            NSInteger sx = x + (NSInteger)((double)i * cw / tw);
-            if (sx >= (NSInteger)sw) { sx = (NSInteger)sw - 1; }
-            double v = row[sx];
+            double x0 = x + (double)i * cw / tw;
+            double x1 = x + (double)(i + 1) * cw / tw;
+            double v = (FYCaptureIntegralAt(integral, sw, sh, x1, y1) - FYCaptureIntegralAt(integral, sw, sh, x0, y1) -
+                        FYCaptureIntegralAt(integral, sw, sh, x1, y0) + FYCaptureIntegralAt(integral, sw, sh, x0, y0)) / cellArea;
             sum += v; sum2 += v * v; dot += v * trow[i];
         }
     }
@@ -210,6 +244,17 @@ double FYSignatureCorrelation(const double *scene, size_t sw, size_t sh,
     double var = sum2 / n - mean * mean;
     if (var < 1e-6) { return -1; }
     return dot / (n * sqrt(var));
+}
+
+// 候选区域与模板的归一化互相关（模板已零均值单位方差）。
+double FYSignatureCorrelation(const double *scene, size_t sw, size_t sh,
+                              NSInteger x, NSInteger y, size_t cw, size_t ch,
+                              const double *templ, size_t tw, size_t th) {
+    double *integral = FYCaptureGridIntegral(scene, sw, sh);
+    if (!integral) { return -2; }
+    double score = FYCaptureAreaCorrelation(integral, sw, sh, x, y, cw, ch, templ, tw, th);
+    free(integral);
+    return score;
 }
 
 // 在一对已生成的网格上给「缓存矩形」打分（网格第 0 行 = 图像顶部 → 这里再翻一次 y）。
@@ -235,6 +280,8 @@ BOOL FYShouldPreferCaptureFit(double fitScore, double searchScore, BOOL clearlyS
 BOOL FYShouldKeepCachedCaptureMapping(double existingScore, double bestScore) { return existingScore >= 0.5 && bestScore < existingScore + 0.05; }
 double FYSearchCaptureGrid(const double *scene, size_t WW, size_t WH, const double *templ,
                            size_t TW, size_t TH, CGFloat videoAspect, NSRect *outRect) {
+    double *integral = FYCaptureGridIntegral(scene, WW, WH);
+    if (!integral) { if (outRect) { *outRect = NSZeroRect; } return -2; }
     // ① 粗搜：画面在窗口里占 25%–100% 宽，位置按网格走
     double best = -2;
     NSRect bestRect = NSZeroRect;
@@ -250,7 +297,7 @@ double FYSearchCaptureGrid(const double *scene, size_t WW, size_t WH, const doub
             NSInteger y = spanY <= 0 ? 0 : (NSInteger)llround((double)spanY * iy / steps);
             for (NSInteger ix = 0; ix <= steps; ix++) {
                 NSInteger x = spanX <= 0 ? 0 : (NSInteger)llround((double)spanX * ix / steps);
-                double score = FYSignatureCorrelation(scene, WW, WH, x, y, cw, ch, templ, TW, TH);
+                double score = FYCaptureAreaCorrelation(integral, WW, WH, x, y, cw, ch, templ, TW, TH);
                 if (score > best) { best = score; bestRect = NSMakeRect(x, y, cw, ch); }
             }
         }
@@ -270,13 +317,14 @@ double FYSearchCaptureGrid(const double *scene, size_t WW, size_t WH, const doub
                 NSInteger y = MAX((NSInteger)0, MIN(spanY, cy + dy));
                 for (NSInteger dx = -10; dx <= 10; dx++) {
                     NSInteger x = MAX((NSInteger)0, MIN(spanX, cx + dx));
-                    double score = FYSignatureCorrelation(scene, WW, WH, x, y, cw, ch, templ, TW, TH);
+                    double score = FYCaptureAreaCorrelation(integral, WW, WH, x, y, cw, ch, templ, TW, TH);
                     if (score > best) { best = score; bestRect = NSMakeRect(x, y, cw, ch); }
                 }
             }
         }
     }
     if (outRect) { *outRect = bestRect; }
+    free(integral);
     return best;
 }
 

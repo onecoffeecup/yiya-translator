@@ -108,6 +108,7 @@ static void DrawSnapshot(NSDictionary *snapshot) {
 @property NSMutableDictionary *frames;
 @property NSString *session;
 @property NSUInteger frameCount, layoutCount, savedBytes;
+@property BOOL budgetExhausted;
 @property NSPanel *overlay;
 @property NSTimer *expiryTimer;
 @end
@@ -141,12 +142,18 @@ static void DrawSnapshot(NSDictionary *snapshot) {
     if (!isfinite(start) || !isfinite(end) || start>now || end<=now || end<=start || end-start>300) return nil;
     return c;
 }
-- (BOOL)isActive { @synchronized(self) { return [self control]!=nil; } }
+- (BOOL)isActive { @synchronized(self) {
+    NSDictionary *c=[self control];
+    return c && (![self.session isEqual:c[@"session"]] ||
+        (!self.budgetExhausted && self.frameCount<120 && self.layoutCount<300 && self.savedBytes<64*1024*1024));
+} }
 - (BOOL)validContext:(NSDictionary *)context {
-    NSDictionary *c=[self control]; return context && c && [c[@"session"] isEqual:context[@"session"]] && self.savedBytes<64*1024*1024;
+    NSDictionary *c=[self control]; return context && c && !self.budgetExhausted && [c[@"session"] isEqual:context[@"session"]] && self.savedBytes<64*1024*1024;
 }
 - (BOOL)writeData:(NSData *)data name:(NSString *)name {
-    if (!data || self.savedBytes+data.length>64*1024*1024) return NO;
+    if (!data) return NO;
+    // A full session cannot keep presenting its last window geometry as live.
+    if (data.length>64*1024*1024-self.savedBytes) { self.budgetExhausted=YES; return NO; }
     NSString *path=[self.directory stringByAppendingPathComponent:name];
     int fd=open(path.fileSystemRepresentation,O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW,0600);
     if (fd<0) return NO;
@@ -157,8 +164,8 @@ static void DrawSnapshot(NSDictionary *snapshot) {
 - (NSDictionary *)beginFrameWithImage:(CGImageRef)image metadata:(NSDictionary *)metadata {
     @synchronized(self) {
         NSDictionary *control=[self control]; if (!control || !image) return nil;
-        if (![self.session isEqual:control[@"session"]]) { self.session=control[@"session"]; self.frameCount=0; self.layoutCount=0; self.savedBytes=0; [self.frames removeAllObjects]; }
-        if (self.frameCount>=120 || self.savedBytes>=64*1024*1024) return nil;
+        if (![self.session isEqual:control[@"session"]]) { self.session=control[@"session"]; self.frameCount=0; self.layoutCount=0; self.savedBytes=0; self.budgetExhausted=NO; [self.frames removeAllObjects]; }
+        if (self.budgetExhausted || self.frameCount>=120 || self.layoutCount>=300 || self.savedBytes>=64*1024*1024) return nil;
         NSString *frame=NSUUID.UUID.UUIDString;
         NSData *png=[[[NSBitmapImageRep alloc] initWithCGImage:image] representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
         if (![self writeData:png name:[frame stringByAppendingString:@".source.png"]]) return nil;

@@ -189,3 +189,39 @@ python3 scripts/layout-debug.py compare /absolute/private/before.json /absolute/
 2026-10-10 后续状态：上述忙时快切失败是历史证据；该夹具已升级为普通 `latest-frame-while-translating.json`，追加窗口/采集卡、稳定确认和界面换页回归。当前实现与验证见 [实时识别不再等待翻译](live-preview-stall.md#2026-10-10实时识别不再等待翻译)，英文句点缺口仍保留。
 
 2026-10-10 再次追加：英文句点也已从已知失败目标转为普通回归；保留英文句子与日文省略号，纯标点仍过滤。上文计数与缺口为历史记录，本次命令与结果见 [审查报告](review-dev0.2.1-261009.md)。
+
+## 2026-10-10：小屏与连续全屏的绿色框错位
+
+触发条件：采集卡提供干净源图，译文跟随 OBS 投影；先观察小屏，再全屏、返回小屏、第二次全屏。用户提供的三张桌面截图中，绿色观察框没有包住对应文字，第二次全屏时诊断框与实际译文卡还使用了不同的旧位置。预期是观察框随当前视频区域映射，几何过期的译文与诊断框先隐藏，得到新几何后再显示。
+
+根因证据与局部修正：
+
+- `FYGeometryManager.m` 原比对模板由缩小后的像素组成，候选却取每个格子的左上角。细笔画在缩放时产生取样偏差，较小且偏移的区域会获得更高分。最小失败回归使用格子均值匹配、角点反向的合成图；修正为通过积分图计算候选格子的面积均值，并将模板宽度从 40 提高至 80，保留细笔画位置。搜索范围、阈值、缓存优先与手动校准合同保持原有行为。
+- 同一生产比对函数对已授权源图构造的全屏投影重放：实际区域为 3420 × 1923.75 像素，底边 112.125 像素；旧结果为宽 2778.75、高 1560.24、底边 10.69，修正后为宽 3420、高 1923.58、底边 106.87。重放也能从带浮层的用户截图定位全宽区域。这里只证明该素材的离线定位，不能替代新的桌面采集验收。
+- 建立场景网格时原先使用窗口边界宽高比；窗口边界与截图像素比例不同时，会先拉伸截图再搜索。新增独立失败回归后，改用截图像素宽高比；窗口边界仍用于网格到屏幕点坐标的换算。采集映射专项的非等比合成截图定位也恢复通过。
+- `LiveCaptionTranslator.m` 原先在几何变化时隐藏面板，随后前台刷新又将旧面板显示。新增 `inlineGeometryPending`，等待新布局期间保持隐藏，完成缓存重排或新布局后才恢复显示；同时清除旧诊断覆盖层。自动映射版本升至 3，旧自动结果重定位，手动映射保留。
+- `FYInlineLayoutDebug.m` 达到记录上限后原先仍报告活跃，保留最后一组诊断框。现场会话的登记文件已接近 64 MiB；容量边界失败回归证明旧框仍可能显示。修正为达到帧数、布局数或字节上限后停用并自动收起，显式开启新会话才重置预算。这个旧框问题会加重对第二次切屏的观察，不能将其视为全部实际贴译偏移的原因。
+
+修正前失败证据在本机忽略目录 `.build/private-diagnostics/fullscreen-20261010/`：`geometry-before.log`、`aspect-before.log`、`follow-before.log`、`layout-quota-before.log`。画面、OCR、译文及附图仅保存在私有目录，不进入 Git 或公开包。
+
+执行与结果：
+
+| 命令 / 检查 | 结果 |
+| --- | --- |
+| `bash scripts/run-module-tests.sh` | 退出 0；几何 96 条断言及其它模块通过，日志 `modules-final.log` |
+| `FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh DisplayTargetFollowTests` | 退出 0；46 条断言，新增前台轮询不能复活旧几何面板的检查通过，日志 `follow-after.log` |
+| `FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh InlineLayoutDebugUITests` | 退出 0；原生四色框、窗口→大屏→小屏→大屏、穿透与停止收起通过，日志 `overlay-ui-after.log` |
+| `CaptureMappingTests` 同生产链接源、测试隔离与 `-O2` 编译，`FY_TEST_ALLOW_UI=1` 执行 | 退出 0；场景朝向、实际视频区域、旧映射、移动缩放、坐标链路和缓存失效通过，日志 `mapping-verified.log` |
+| `python3 scripts/debug.py check` | 退出 0；77 项结果，`source_unchanged:true`；P0–P3 132725 条断言通过；结果为 `baseline_passed_with_known_gaps` |
+
+统一报告为 `.build/debug/20261010T153307Z-4f28f5/summary.json`。既有 `inline-long-batch-unrelated-change` 缺口重复两次精确复现，尚未修复；不属于本次映射修正。此前首轮统一检查在采集卡离线强制重建的子进程超时，不能计作通过；以上报告是完成后的重新执行。
+
+映射专项另有一条旧长卡断言与已确认的 P2 右边界内收合同冲突：它只允许 Overlay 覆盖自己的原文，实际右侧内收也允许局部覆盖自身。用 HEAD 的旧几何模块重放仍得到相同断言失败（anchor=Right），证据 `anchor-baseline/run.log`。仅将断言与既有合同对齐：Right 必须不越过所属原文左边界，并严格落在视口右边界；对其它原文、译文与视口的零重叠检查保留。没有修改长卡布局生产逻辑。
+
+本机交付为临时开发诊断构建，0.2.1，同 bundle identifier；源码快照哈希与当前 `objc/` 一致，签名深度检查通过，arm64 二进制与 dSYM UUID 均为 `F8E91255-3109-390B-B40E-84727BBA4CC3`。通过应用菜单退出旧构建并打开修正版；此后界面确认当前未检测到采集卡，OBS 投影也已关闭。用户选择稍后测试，因此应用保持暂停，现场 Debug 控制关闭。没有在本轮更新公开附件。
+
+剩余验收：接回采集卡并打开原 OBS 投影，选择对应显示窗口，开启短时诊断后在同一静止页面执行“小屏→全屏→小屏→全屏”，每步等待新框出现；确认绿色包住原文、红框与实际卡片一致、第二次全屏不使用旧位置。到容量或时间上限时诊断框应消失，不能继续看作实时结果。尚未据自动回归宣称真实设备与连续全屏体验全部验收通过。
+
+2026-10-11 提交前隔离验证：基于 `4c933b7`，只导出本次 9 个文件的待提交索引至 `.build/commit-fullscreen-20261011/snapshot/`。混合主文件只包含本次几何与映射段，其它工作区修改和未提交的 Replay / 已知缺口不混入。`python3 scripts/debug.py check` 退出 0，73 项结果、`source_unchanged:true`、结果 `passed`；P0–P3 132725 条断言通过。报告为该快照中的 `.build/debug/20261011T025306Z-f737e9/summary.json`。该结果只覆盖待提交场景，不能将其它工作区已登记缺口说成已修复。
+
+待提交快照另以 `FY_TEST_COMPILE_ONLY=1 bash scripts/run-learning-app-tests.sh <Suite>` 核对 `CaptureMappingTests`、`DisplayTargetFollowTests`、`InlineLayoutDebugUITests`，三套编译退出 0；本次提交准备没有重新运行桌面、连接设备、启用现场诊断或更换应用。几何跟随夹具显式创建精读测试门，以便关闭第二遍 OCR 并隔离坐标边界。真实连续全屏仍按用户选择留待稍后验收。
