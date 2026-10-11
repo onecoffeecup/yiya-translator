@@ -26,9 +26,12 @@ int main(void) {
             FYRequestIdentity *identity = [coordinator recordText:variant kind:FYSentenceKindDialogue];
             Require([identity.sentenceID isEqualToString:first.sentenceID], @"OCR dash/spacing fluctuation must reuse the dialogue identity");
         }
+        Require(History(store).count == 0, @"untranslated deduplicated source stays outside recent history");
+        [coordinator setTranslation:@"合成对白译文" forIdentity:first];
         NSArray *rows = History(store);
         Require(rows.count == 1 && [[rows[0] latestText] isEqualToString:source], @"alternating OCR must persist one sentence without rewriting its source");
         NSArray *options = [coordinator recordItems:@[@"はい", @"いいえ"] kind:FYSentenceKindOption];
+        for (FYRequestIdentity *option in options) { [coordinator setTranslation:@"合成选项译文" forIdentity:option]; }
         FYRequestIdentity *afterOptions = [coordinator recordText:source kind:FYSentenceKindDialogue];
         Require([afterOptions.sentenceID isEqualToString:first.sentenceID], @"option recording must not break dialogue deduplication");
         Require(![[options[0] sentenceID] isEqualToString:first.sentenceID] && History(store).count == 3, @"options must keep separate identities and translations");
@@ -52,11 +55,14 @@ int main(void) {
             FYRequestIdentity *a = [coordinator recordText:pair[0] kind:FYSentenceKindDialogue];
             FYRequestIdentity *b = [coordinator recordText:pair[1] kind:FYSentenceKindDialogue];
             Require(![a.sentenceID isEqualToString:b.sentenceID], @"long vowels, punctuation, negative numbers and internal dashes must remain meaningful");
+            [coordinator setTranslation:@"合成 A 译文" forIdentity:a];
+            [coordinator setTranslation:@"合成 B 译文" forIdentity:b];
         }
         FYRequestIdentity *evicted = [coordinator recordText:@"選択肢が多い場面。" kind:FYSentenceKindDialogue];
         [coordinator recordItems:@[@"一番", @"二番", @"三番", @"四番", @"五番"] kind:FYSentenceKindOption];
         FYRequestIdentity *restored = [coordinator recordText:@"選択肢が多い場面。" kind:FYSentenceKindDialogue];
         Require(![restored.sentenceID isEqualToString:evicted.sentenceID], @"an evicted dialogue identity must not be reused");
+        [coordinator setTranslation:@"合成恢复译文" forIdentity:restored];
         Require([[[History(store) firstObject] sentenceID] isEqualToString:restored.sentenceID], @"dialogue after many options must exist in persistent history");
         [coordinator followLatest]; Drain(store);
         Require(History(store).count == 5, @"deduplication must retain the five-record history policy");
@@ -74,6 +80,7 @@ int main(void) {
             NSString *sid = [NSString stringWithFormat:@"legacy-%lu", (unsigned long)i];
             [store insertSentenceWithID:sid sessionID:i < 2 ? @"legacy-old" : @"legacy-new" kind:FYSentenceKindDialogue originalText:legacy[i]
                               occurredAt:[NSDate dateWithTimeIntervalSinceNow:100 + i] completion:^(NSError *error) { Require(!error, @"legacy insert failed"); }];
+            [store updateTranslation:@"合成旧版译文" forSentence:sid version:1 completion:^(NSError *error) { Require(!error, @"legacy translation failed"); }];
         }
         Drain(store);
         NSArray *legacyRows = History(store);
@@ -101,6 +108,7 @@ int main(void) {
         NSArray *actual = @[partialFrames[1], complete, partialFrames[0], complete, partialFrames[2]];
         for (NSUInteger i = 0; i < actual.count; i++) {
             [store insertSentenceWithID:[NSString stringWithFormat:@"actual-%lu", (unsigned long)i] sessionID:@"legacy-new" kind:FYSentenceKindDialogue originalText:actual[i] occurredAt:[NSDate dateWithTimeIntervalSinceNow:200 + i] completion:^(NSError *error) { Require(!error, @"actual OCR fixture insert failed"); }];
+            [store updateTranslation:@"合成完整译文" forSentence:[NSString stringWithFormat:@"actual-%lu", (unsigned long)i] version:1 completion:^(NSError *error) { Require(!error, @"actual OCR fixture translation failed"); }];
         }
         Drain(store);
         [app refreshHistory];
@@ -138,6 +146,7 @@ int main(void) {
             [liveStore insertSentenceWithID:[NSString stringWithFormat:@"live-%lu", (unsigned long)i] sessionID:@"live-session"
                                        kind:(FYSentenceKind)[liveRows[i][@"kind"] integerValue] originalText:liveRows[i][@"text"]
                                  occurredAt:[NSDate dateWithTimeIntervalSinceNow:i] completion:^(NSError *error) { Require(!error, @"live insert failed"); }];
+            [liveStore updateTranslation:@"合成现场译文" forSentence:[NSString stringWithFormat:@"live-%lu", (unsigned long)i] version:1 completion:^(NSError *error) { Require(!error, @"live translation failed"); }];
         }
         Drain(liveStore);
         Require(History(liveStore).count == 5, @"five-record retention must prune the oldest live row");
@@ -186,7 +195,11 @@ int main(void) {
         FYRequestIdentity *consultationIdentity=[liveApp.learningCoordinator recordText:consultation kind:FYSentenceKindDialogue];
         for(NSUInteger i=0;i<8;i++){FYRequestIdentity *clipIdentity=[liveApp.learningCoordinator recordText:consultationClips[i%2] kind:FYSentenceKindDialogue];Require([clipIdentity.sentenceID isEqualToString:consultationIdentity.sentenceID] && [clipIdentity.sourceText isEqualToString:consultation],@"interior clipped OCR oscillation must retain the complete identity");}
         NSArray *consultationRows=@[consultationClips[1],consultationClips[0],consultation,consultationClips[1],consultationClips[0]];
-        for(NSUInteger i=0;i<consultationRows.count;i++){[liveStore insertSentenceWithID:[NSString stringWithFormat:@"consultation-%lu",(unsigned long)i] sessionID:@"live-session" kind:FYSentenceKindDialogue originalText:consultationRows[i] occurredAt:[NSDate dateWithTimeIntervalSinceNow:500+i] completion:^(NSError *error){Require(!error,@"consultation fixture insert");}];}
+        for(NSUInteger i=0;i<consultationRows.count;i++){
+            NSString *sid=[NSString stringWithFormat:@"consultation-%lu",(unsigned long)i];
+            [liveStore insertSentenceWithID:sid sessionID:@"live-session" kind:FYSentenceKindDialogue originalText:consultationRows[i] occurredAt:[NSDate dateWithTimeIntervalSinceNow:500+i] completion:^(NSError *error){Require(!error,@"consultation fixture insert");}];
+            [liveStore updateTranslation:@"合成咨询译文" forSentence:sid version:1 completion:^(NSError *error){Require(!error,@"consultation fixture translation");}];
+        }
         Drain(liveStore);[liveApp refreshHistory];Pump(^BOOL{return [liveApp.historyRecords.firstObject.sentenceID isEqualToString:@"consultation-2"];});
         Require(liveApp.historyRecords.count==1 && History(liveStore).count==5,@"existing clipped rows group into one complete dialogue without rewriting snapshots");
         __block BOOL liveClosed = NO;

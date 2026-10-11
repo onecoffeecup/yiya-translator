@@ -14,7 +14,8 @@ FOUNDATION_EXPORT const NSUInteger FYRecentSentenceLimit;
 - (dispatch_queue_t)completionQueue; // 默认主队列，测试可覆盖
 - (void)setCompletionQueue:(dispatch_queue_t)queue;
 
-// 0 disables pruning (used by isolated stores); the app retains the latest five.
+// 0 disables pruning (isolated stores). Retain the latest five translated
+// sentences plus a separate bounded working set for pending identities.
 - (void)configureHistoryRetentionWithLimit:(NSUInteger)limit
                                completion:(void (^)(NSError *_Nullable error))completion;
 // Keep a pinned sentence usable until the user follows the latest sentence again.
@@ -49,6 +50,7 @@ FOUNDATION_EXPORT const NSUInteger FYRecentSentenceLimit;
 - (void)fetchSentence:(NSString *)sentenceID
            completion:(void (^)(FYSentenceRecord *_Nullable record, NSError *_Nullable error))completion;
 
+// Only the latest version's non-whitespace translation qualifies for history.
 - (void)fetchRecentSentencesWithLimit:(NSUInteger)limit
                            completion:(void (^)(NSArray<FYSentenceRecord *> *records, NSError *_Nullable error))completion;
 

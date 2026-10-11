@@ -20,6 +20,9 @@ static void Insert(FYLearningStore *store, NSString *sid, NSTimeInterval time) {
     NSString *text = [sid isEqualToString:@"s1"] ? @"猫です。" : [NSString stringWithFormat:@"猫です。%@", sid];
     [store insertSentenceWithID:sid sessionID:@"session" kind:FYSentenceKindDialogue originalText:text occurredAt:[NSDate dateWithTimeIntervalSince1970:time] completion:^(NSError *error) { Require(!error, @"insert failed"); done = YES; }];
     Pump(^BOOL { return done; });
+    done = NO;
+    [store updateTranslation:@"合成译文" forSentence:sid version:1 completion:^(NSError *error) { Require(!error, @"translation failed"); done = YES; }];
+    Pump(^BOOL { return done; });
 }
 int main(void) {
     @autoreleasepool {
@@ -64,10 +67,13 @@ int main(void) {
         Insert(store, @"same-time-a", 20); Insert(store, @"same-time-b", 20);
         rows = History(store);
         Check(rows.count == 5 && [[rows[0] sentenceID] isEqualToString:@"same-time-b"] && [[rows[1] sentenceID] isEqualToString:@"same-time-a"], @"timestamp ties use insertion order consistently for pruning and display");
+        __block BOOL inserted = NO;
+        [store insertSentenceWithID:@"rollback" sessionID:@"session" kind:FYSentenceKindDialogue originalText:@"失敗" occurredAt:[NSDate dateWithTimeIntervalSince1970:21] completion:^(NSError *error) { Require(!error, @"pending insert failed"); inserted = YES; }]; Pump(^BOOL { return inserted; });
+        Check(History(store).count == 5, @"new pending source does not consume translated history slots");
         Trigger(path, @"CREATE TRIGGER fail_prune BEFORE DELETE ON sentences BEGIN SELECT RAISE(ABORT, 'injected cleanup failure'); END;");
         __block BOOL failed = NO;
-        [store insertSentenceWithID:@"rollback" sessionID:@"session" kind:FYSentenceKindDialogue originalText:@"失敗" occurredAt:[NSDate dateWithTimeIntervalSince1970:21] completion:^(NSError *error) { failed = error != nil; }]; Pump(^BOOL { return failed; });
-        Check(History(store).count == 5 && Count(path, @"sentence_versions") == 5 && [[[History(store) firstObject] sentenceID] isEqualToString:@"same-time-b"], @"failed cleanup rolls back the new sentence and preserves previous history");
+        [store updateTranslation:@"不应提交" forSentence:@"rollback" version:1 completion:^(NSError *error) { failed = error != nil; }]; Pump(^BOOL { return failed; });
+        Check(History(store).count == 5 && Count(path, @"sentence_versions") == 6 && [[[History(store) firstObject] sentenceID] isEqualToString:@"same-time-b"], @"failed cleanup rolls back translation promotion and preserves previous history plus the pending source");
         Trigger(path, @"DROP TRIGGER fail_prune;");
         __block BOOL closed = NO; [store closeWithCompletion:^(NSError *error) { Require(!error, @"close failed"); closed = YES; }]; Pump(^BOOL { return closed; });
         store = Store(path); configured = NO;

@@ -23,6 +23,14 @@ static NSString *FYTrimmed(NSString *value) {
     return value ?: @"";
 }
 
+// Match Foundation's Unicode whitespace rules for both new and legacy records.
+// Used inside SQL so untranslated rows are excluded before ORDER BY / LIMIT.
+static void FYSQLiteHasTranslation(sqlite3_context *context, int argc, sqlite3_value **values) {
+    const unsigned char *bytes = argc == 1 ? sqlite3_value_text(values[0]) : NULL;
+    NSString *translation = bytes ? [NSString stringWithUTF8String:(const char *)bytes] : nil;
+    sqlite3_result_int(context, [translation stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length > 0);
+}
+
 // 把 FYAnalysisResult 序列化成可存库的 JSON 字典；反向解析用于读取缓存。
 static NSDictionary *FYDictionaryFromAnalysisResult(FYAnalysisResult *result) {
     NSMutableArray *grammar = [NSMutableArray arrayWithCapacity:result.grammar.count];
@@ -193,6 +201,13 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         if (_db) { sqlite3_close(_db); _db = NULL; }
         return error;
     }
+    rc = sqlite3_create_function_v2(_db, "fy_has_translation", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC,
+                                    NULL, FYSQLiteHasTranslation, NULL, NULL, NULL);
+    if (rc != SQLITE_OK) {
+        NSError *error = FYStoreError(_db, @"初始化历史译文检查失败");
+        sqlite3_close(_db); _db = NULL;
+        return error;
+    }
     // A second app/process may hold a brief write lock; wait off the main thread.
     sqlite3_busy_timeout(_db, 1500);
     sqlite3_exec(_db, "PRAGMA foreign_keys = ON;", NULL, NULL, NULL);
@@ -317,7 +332,13 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
 // versions and analysis caches; saved vocabulary/grammar keep independent snapshots.
 - (NSError *)pruneHistory {
     if (self.historyRetentionLimit == 0) { return nil; }
+    // Keep translated history independently from the existing bounded working
+    // set. Pending identities still support retries, pinning and corrections,
+    // but cannot evict a successful translation or enter the recent list.
     const char *sql = "DELETE FROM sentences WHERE sentence_id NOT IN "
+                      "(SELECT sentence_id FROM sentences WHERE fy_has_translation(latest_translation) "
+                      "ORDER BY occurred_at DESC, rowid DESC LIMIT ?) "
+                      "AND sentence_id NOT IN "
                       "(SELECT sentence_id FROM sentences ORDER BY occurred_at DESC, rowid DESC LIMIT ?) "
                       "AND sentence_id NOT IN (SELECT sentence_id FROM sentence_bookmarks) "
                       "AND (? IS NULL OR sentence_id != ?);";
@@ -326,11 +347,12 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         return FYStoreError(self.db, @"准备清理历史台词失败");
     }
     sqlite3_bind_int64(stmt, 1, (sqlite3_int64)self.historyRetentionLimit);
+    sqlite3_bind_int64(stmt, 2, (sqlite3_int64)self.historyRetentionLimit);
     if (self.preservedHistorySentenceID.length) {
-        sqlite3_bind_text(stmt, 2, self.preservedHistorySentenceID.UTF8String, -1, SQLITE_TRANSIENT);
         sqlite3_bind_text(stmt, 3, self.preservedHistorySentenceID.UTF8String, -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, self.preservedHistorySentenceID.UTF8String, -1, SQLITE_TRANSIENT);
     } else {
-        sqlite3_bind_null(stmt, 2); sqlite3_bind_null(stmt, 3);
+        sqlite3_bind_null(stmt, 3); sqlite3_bind_null(stmt, 4);
     }
     NSError *error = sqlite3_step(stmt) == SQLITE_DONE ? nil : FYStoreError(self.db, @"清理历史台词失败");
     sqlite3_finalize(stmt);
@@ -498,6 +520,7 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                 }
             }
         }
+        if (!error) { error = [self pruneHistory]; }
         if (began) {
             if (!error && sqlite3_exec(self.db, "COMMIT", NULL, NULL, NULL) != SQLITE_OK) {
                 error = FYStoreError(self.db, @"提交回填译文事务失败");
@@ -563,6 +586,7 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
                 error = FYStoreError(self.db, @"准备更新主句版本语句失败");
             }
         }
+        if (!error) { error = [self pruneHistory]; }
         if (error) {
             sqlite3_exec(self.db, "ROLLBACK;", NULL, NULL, NULL);
         } else if (sqlite3_exec(self.db, "COMMIT;", NULL, NULL, NULL) != SQLITE_OK) {
@@ -626,7 +650,8 @@ static FYAnalysisResult *FYAnalysisResultFromDictionary(NSDictionary *dict) {
         if (!error) {
             const char *sql = "SELECT s.sentence_id, s.session_id, s.kind, s.original_text, s.latest_version, s.latest_translation, s.occurred_at, s.display_name,"
                               " (SELECT v.text FROM sentence_versions v WHERE v.sentence_id = s.sentence_id AND v.version = s.latest_version) AS latest_text"
-                              " FROM sentences s ORDER BY s.occurred_at DESC, s.rowid DESC LIMIT ?;";
+                              " FROM sentences s WHERE fy_has_translation(s.latest_translation) "
+                              "ORDER BY s.occurred_at DESC, s.rowid DESC LIMIT ?;";
             sqlite3_stmt *stmt = NULL;
             if (sqlite3_prepare_v2(self.db, sql, -1, &stmt, NULL) == SQLITE_OK) {
                 sqlite3_bind_int(stmt, 1, (int)MAX(1, limit));

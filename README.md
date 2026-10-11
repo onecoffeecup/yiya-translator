@@ -4,6 +4,8 @@
 
 **当前开发源码已于 2026-10-11 改为跨版本保留 API Key。** 安装包含此改动的包后会直接读取已有 Key，无需因版本号改变重填。已发布 0.2.1 build 17 仍采用旧规则；公开附件尚未更新。
 
+**本机开发版 0.2.1 build 52 已安装：最近台词只收录已有非空译文的记录。** 等待、失败或取消的翻译不占最近 5 条，旧版留下的空译文记录也会过滤。新增生产链路检查与完整核心回归通过，详见 [最近台词收录规则](docs/dialogue-history-translated-only.md)；公开附件尚未更新。
+
 **本机开发版 0.2.1 build 51 已修补引用词缺失。** 双遍 OCR 保护完整引用词，对白路由保留被横向拆开的同行短片段；核心回归通过，用户已确认本机该句复测正常。实现与验收范围见 [引用词修复记录](docs/ocr-refinement-quotation.md)；公开版本仍为下方 build 17。
 
 **当前版本：[v0.2.1 正式版](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1)（2026-10-08，build 17）。** 55 步完整本机回归和独立应用的手动升级验收通过；跨机器验收仍待完成。v0.2.0 保留供追溯。
@@ -54,7 +56,7 @@
 
 画面识别在本机完成；翻译与 AI 学习会把相关文字、问题和上下文发送到你填写的接口地址。API Key 会随认证请求发送给该服务。远程服务地址须使用 HTTPS；明文 HTTP 仅允许本机回环地址。API Key 保存在当前用户的本机应用数据文件 `~/Library/Application Support/com.nanami.fuyi/credentials/api-key.json`，文件权限为 0600；当前开发源码在重启、重建、重装、build 递增和跨应用版本更新后均自动读取。此文件不在源码或应用包中，不会随安装包分发。升级前生成的设置备份可能仍含旧 Key，若曾分享备份请到服务商撤销并重建。 详细规则见 [API Key 本机保存约定](docs/api-key-storage.md)。
 
-设置和学习记录留在本机。学习数据库位于 `~/Library/Application Support/com.nanami.fuyi/learning.sqlite3`，最近台词最多保留 5 条，收藏及其语境另行持久保存。公开资料包不包含用户的台词、收藏或凭据。
+设置和学习记录留在本机。学习数据库位于 `~/Library/Application Support/com.nanami.fuyi/learning.sqlite3`，最近台词最多保留 5 条，收藏及其语境另行持久保存。当前开发源码只把已有非空译文的记录计入最近台词，等待或失败的翻译不占这 5 条；实现与验证见 [最近台词收录规则](docs/dialogue-history-translated-only.md)，公开附件尚未更新。公开资料包不包含用户的台词、收藏或凭据。
 
 离线资料由 JMdict、Tatoeba 和 OpenJLPT 整理而来，词典释义为英文，中文语境解释可能由 AI 或用户提供。JLPT 等级属于社区参考，资料和 AI 解析都未经过完整人工审校。来源及许可见 [第三方资料说明](THIRD_PARTY_NOTICES.md)。
 

@@ -279,6 +279,26 @@ static TracePipelineApp *TraceAppOfClass(Class appClass) {
     return a;
 }
 static TracePipelineApp *TraceApp(void) { return TraceAppOfClass(TracePipelineApp.class); }
+static FYLearningStore *AttachHistoryStore(TracePipelineApp *app) {
+    NSString *path = [FYTestTemporaryDirectory() stringByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingString:@".sqlite"]];
+    FYLearningStore *store = Store(path);
+    __block BOOL configured = NO;
+    [store configureHistoryRetentionWithLimit:FYRecentSentenceLimit completion:^(NSError *error) { Require(!error, @"configure isolated history"); configured = YES; }];
+    Pump(^BOOL { return configured; });
+    app.learningStore = store;
+    app.learningCoordinator = [[FYLearningCoordinator alloc] initWithStore:store analyzer:nil tokenizer:nil catalog:nil];
+    return store;
+}
+static NSArray<FYSentenceRecord *> *TraceHistory(FYLearningStore *store) {
+    __block NSArray *rows;
+    [store fetchRecentSentencesWithLimit:FYRecentSentenceLimit completion:^(NSArray *records, NSError *error) { Require(!error, @"read isolated translated history"); rows = records; }];
+    Pump(^BOOL { return rows != nil; }); return rows;
+}
+static void CloseHistoryStore(FYLearningStore *store) {
+    __block BOOL closed = NO;
+    [store closeWithCompletion:^(NSError *error) { Require(!error, @"close isolated history"); closed = YES; }];
+    Pump(^BOOL { return closed; });
+}
 static NSArray *Fixture(NSString *text, CGFloat width);
 static void CheckIndependentLivePreview(void) {
     Require([AppDelegate instancesRespondToSelector:@selector(restartPreviewTimerIfRunning)],
@@ -449,6 +469,7 @@ static void TraceCycle(TracePipelineApp *a, NSArray *fixture) {
 static void CheckLatestDialogueWhileTranslating(void) {
     for (NSUInteger source = 0; source < 2; source++) {
         TracePipelineApp *a = TraceApp(); a.inputSourceSegment=source;
+        FYLearningStore *history = AttachHistoryStore(a);
         FYTestCaptureCardInput *card=[FYTestCaptureCardInput new]; a.captureCardInput=card;
         a.stableTextCheckbox.state=NSControlStateValueOff;
         MockRequests=0; SubmittedSources=[NSMutableArray new]; HoldResponse=YES; PendingResponse=nil;
@@ -457,6 +478,7 @@ static void CheckLatestDialogueWhileTranslating(void) {
         [a timerFired:nil]; Pump(^BOOL { return PendingResponse != nil; });
         TraceTask *first=LastTask;
         Require(!a.inFlight, @"a pending translation must not own the capture/OCR busy flag");
+        Require(TraceHistory(history).count == 0, @"pending production dialogue cannot enter recent history");
         for (NSUInteger index=2; index<=5; index++) {
             Require([card testEnqueueFrameIndex:index pixelSize:16], @"synthetic repeated frame");
             [a timerFired:nil]; Pump(^BOOL { return a.ocrCalls==index && !a.inFlight; });
@@ -470,7 +492,11 @@ static void CheckLatestDialogueWhileTranslating(void) {
         Require([card testEnqueueFrameIndex:7 pixelSize:16], @"synthetic latest sentence");
         [a timerFired:nil]; Pump(^BOOL { return MockRequests==3; }); TraceTask *latest=LastTask;
         Require(second.cancelCalls==1, @"the latest sentence replaces the intermediate request");
+        Require(TraceHistory(history).count == 0, @"cancelled and pending production dialogues cannot enter recent history");
         latest.response(); Pump(^BOOL { return a.captions.count==1; });
+        NSArray<FYSentenceRecord *> *rows = TraceHistory(history);
+        Require(rows.count == 1 && [rows.firstObject.latestText isEqual:@"週末は家族と海を見に出かけます。"] &&
+                [rows.firstObject.latestTranslation isEqual:@"测试译文3"], @"delivered production translation records its matching original in history");
         if (source==0) {
             a.captureEntered=dispatch_semaphore_create(0); a.captureRelease=dispatch_semaphore_create(0);
             dispatch_semaphore_t release=a.captureRelease;
@@ -482,7 +508,10 @@ static void CheckLatestDialogueWhileTranslating(void) {
         } else { first.response(); second.response(); Tick(); }
         Require([a.captions isEqual:@[@"测试译文3"]], @"cancelled late responses cannot display old dialogue or overwrite the latest caption");
         Require(!a.activeTranslationTask, @"late old completions cannot retain or replace the new task owner");
+        rows = TraceHistory(history);
+        Require(rows.count == 1 && [rows.firstObject.latestTranslation isEqual:@"测试译文3"], @"late cancelled replies cannot add abandoned originals to history");
         [a stop]; HoldResponse=NO; PendingResponse=nil;
+        CloseHistoryStore(history);
     }
     puts("PASS latest dialogue: OCR continues; same sentence deduplicates; A/B cancelled; C alone delivered; old replies cannot release new OCR");
 }
@@ -707,6 +736,7 @@ static void CheckTranslationFailureServiceGuidance(void) {
     NSString *body = [@"synthetic model unavailable " stringByPaddingToLength:300 withString:@"x" startingAtIndex:0];
     for (NSUInteger route=0; route<3; route++) {
         TracePipelineApp *a=TraceApp(); a.allowsErrors=YES;
+        FYLearningStore *history = AttachHistoryStore(a);
         a.liveErrorLabel=(id)TextControl(@"");
         a.fixtureMode=route==0 ? ContentModeDialogue : ContentModeUI;
         ((TraceControl *)(id)a.stableTextCheckbox).state=NSControlStateValueOff;
@@ -717,6 +747,7 @@ static void CheckTranslationFailureServiceGuidance(void) {
         if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
         else { TraceCycle(a,a.fixture); TraceCycle(a,a.fixture); }
         Pump(^BOOL { return a.liveErrorLabel.stringValue.length>0; });
+        Require(TraceHistory(history).count == 0, @"failed dialogue, realtime interface and manual snapshot translations cannot enter recent history");
         Require([a.liveErrorLabel.stringValue containsString:@"404"] &&
             [a.liveErrorLabel.stringValue containsString:body] && [a.liveErrorLabel.stringValue hasPrefix:hint] &&
             !a.liveErrorLabel.hidden, @"translation failure retains full details and visibly directs the player to retest the model service");
@@ -736,9 +767,12 @@ static void CheckTranslationFailureServiceGuidance(void) {
         Pump(^BOOL { return a.liveErrorLabel.hidden; });
         Require(a.liveErrorLabel.stringValue.length==0 && MockRequests==2,
             @"successful translation clears the prior failure guidance through the production callback");
+        NSArray<FYSentenceRecord *> *rows = TraceHistory(history);
+        Require(rows.count == 1 && rows.firstObject.latestTranslation.length > 0, @"only the successful recovery enters recent history on each production route");
         [a showError:@"合成 OCR 错误"];
         Require([a.liveErrorLabel.stringValue isEqual:@"合成 OCR 错误"], @"non-translation errors do not receive model-service guidance");
         [a stop];
+        CloseHistoryStore(history);
     }
     puts("PASS translation failure guidance: dialogue, realtime inline and manual snapshot; full details, visible hint, recovery and unchanged configuration");
 }

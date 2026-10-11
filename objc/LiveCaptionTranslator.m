@@ -2426,7 +2426,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         [self clearArrangedSubviews:self.historyListStack];
         if (error) { [self.historyListStack addArrangedSubview:[self mutedLabel:[NSString stringWithFormat:@"历史加载失败：%@", error.localizedDescription]]]; return; }
         self.historyRecords = [FYLearningCoordinator displayHistoryRecords:records];
-        if (self.historyRecords.count == 0) { [self.historyListStack addArrangedSubview:[self mutedLabel:@"暂无历史台词，开始翻译后自动记录日文句子。"]]; return; }
+        if (self.historyRecords.count == 0) { [self.historyListStack addArrangedSubview:[self mutedLabel:@"暂无最近台词，翻译成功后会显示在这里。"]]; return; }
         NSDateFormatter *time = [NSDateFormatter new]; time.dateFormat = @"HH:mm";
         for (NSUInteger i = 0; i < self.historyRecords.count; i++) {
             FYSentenceRecord *record = self.historyRecords[i];
