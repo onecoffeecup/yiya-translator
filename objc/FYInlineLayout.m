@@ -19,10 +19,12 @@ void FYInstallInlineLongCardHeader(FYInlineLongCardView *card, CGFloat cardWidth
     CGFloat titleBand, BOOL selected, NSTextField *title, NSTextField *badge, NSColor *badgeColor, NSColor *ruleColor) {
     title.lineBreakMode = NSLineBreakByTruncatingTail;
     title.frame = NSMakeRect(padding, padding + 2, cardWidth - padding * 2 - 70, titleBand);
+    title.autoresizingMask = NSViewWidthSizable;
     [card addSubview:title];
     if (selected) {
         NSView *badgeBox = [[NSView alloc] initWithFrame:NSMakeRect(cardWidth - padding - 72, padding, 72, titleBand + 2)];
         card.selectedBadgeBox = badgeBox;
+        badgeBox.autoresizingMask = NSViewMinXMargin;
         badgeBox.wantsLayer = YES;
         badgeBox.layer.backgroundColor = badgeColor.CGColor;
         badgeBox.layer.cornerRadius = (titleBand + 2) / 2.0;
@@ -32,6 +34,7 @@ void FYInstallInlineLongCardHeader(FYInlineLongCardView *card, CGFloat cardWidth
         [card addSubview:badgeBox];
     }
     NSView *rule = [[NSView alloc] initWithFrame:NSMakeRect(padding, padding + titleBand + 2, cardWidth - padding * 2, 1)];
+    rule.autoresizingMask = NSViewWidthSizable;
     rule.wantsLayer = YES;
     rule.layer.backgroundColor = ruleColor.CGColor;
     [card addSubview:rule];

@@ -100,6 +100,15 @@ int main(int argc,const char *argv[]){@autoreleasepool{
     [inlineDimensions performClick:nil];Tick();
     for(NSNumber *windowWidth in @[@1320,@720]){
         [app.mainWindow setContentSize:NSMakeSize(windowWidth.doubleValue,900)];Tick();
+        app.batchWidthSlider.doubleValue=240;
+        [NSApp sendAction:app.batchWidthSlider.action to:app from:app.batchWidthSlider];Tick();
+        CGFloat narrowCardWidth=NSWidth(inlineSample.translationSurfaces.lastObject.frame);
+        app.batchWidthSlider.doubleValue=720;
+        [NSApp sendAction:app.batchWidthSlider.action to:app from:app.batchWidthSlider];Tick();
+        CGFloat wideCardWidth=NSWidth(inlineSample.translationSurfaces.lastObject.frame);
+        NSLog(@"WIDTH_PREVIEW window=%@ narrow=%g wide=%g",windowWidth,narrowCardWidth,wideCardWidth);
+        Require(wideCardWidth>narrowCardWidth+10 && fabs(narrowCardWidth/wideCardWidth-.6)<.01,
+            @"both width slider endpoints visibly resize the native preview at wide and narrow window sizes");
         for(NSNumber *fontSize in @[@13,@16,@30]){
             app.batchFontSizeSlider.doubleValue=fontSize.doubleValue;
             [NSApp sendAction:app.batchFontSizeSlider.action to:app from:app.batchFontSizeSlider];Tick();
@@ -120,7 +129,7 @@ int main(int argc,const char *argv[]){@autoreleasepool{
                 @"resized height example starts at its first sentence instead of the bottom of the document");
         }
     }
-    app.batchFontSizeSlider.doubleValue=16;app.batchHeightSlider.doubleValue=330;
+    app.batchFontSizeSlider.doubleValue=16;app.batchHeightSlider.doubleValue=330;app.batchWidthSlider.doubleValue=560;
     [NSApp sendAction:app.batchHeightSlider.action to:app from:app.batchHeightSlider];Tick();
     [app.mainWindow setContentSize:NSMakeSize(1320,900)];Tick();
     Snapshot(inlineSample,[output stringByAppendingPathComponent:@"appearance-inline-height-limit.png"]);

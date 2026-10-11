@@ -8,11 +8,16 @@ Mac 字幕外观页切换「长对白字幕 / 界面贴译」，各自提供黑�
 
 示例使用可选择、可复制的原生文本，不进入 OCR、翻译或正式字幕。真实贴译换色原位更新短贴片、长卡、展开阅读卡和折叠入口，保留几何、字号、条目身份和滚动位置。打开的选择列表保持独立奶油阅读底。
 
+游戏内「最大宽度 / 长卡最大高度」也约束点击展开后的阅读卡。原展开入口固定使用 560×420 pt，并且尺寸滑条只更新普通贴译；现在打开时与连续拖动时均读取当前上限，在同一张阅读卡内重新排版，保留正文、滚动视图、阅读偏移、块身份、收起按钮及 Esc。短内容按自然高度显示，上限不强行撑高卡片；调整尺寸不请求重新翻译。
+
 ## 验证
 
 - `scripts/run-subtitle-appearance-tests.sh`：headless，测试默认值、旧设置迁移、两类配色独立、自定义字色、重开序列化及不透明度。
 - 在已安排桌面时段运行 `FY_TEST_ALLOW_UI=1 scripts/run-learning-app-tests.sh SettingsInteractionTests`：验证实际栏宽、字体、836 pt 参考内容宽度、四主题、尺寸展开，以及 720 / 1320 pt 窗口与 13 / 16 / 30 pt 字号下的高度变化、滚动和收起恢复。
-- 同时运行 `FY_TEST_ALLOW_UI=1 scripts/run-learning-app-tests.sh BatchAppearanceTests`：验证真实面板换色、窗口复用、位置和滚动保留。
+- 同时运行 `FY_TEST_ALLOW_UI=1 scripts/run-learning-app-tests.sh BatchAppearanceTests`：验证真实面板换色、窗口复用、位置和滚动保留，以及普通/展开卡的宽高限制、打开后的连续宽高/字号调整、无普通场景缓存时的更新与收起。
+- `FY_TEST_ALLOW_UI=1 scripts/run-learning-app-tests.sh InlineFoldReadTests`：检查折叠、展开、收起、几何跟随及零新增翻译请求。
 - `python3 scripts/debug.py check` 将外观设置 headless 回归纳入统一核心检查。
 
 2026-10-11 已对本机安装进行实际鼠标验收：最大高度 500 → 160 → 500 时预览跟随改变，受限视口内可滚动，收起恢复短文。使用 0.2.1 / build 40 安装重开，原设置保留；API Key 仅比较文件元数据，未读取内容。在线翻译与真实游戏设备验收不由这些示例检查代替；本轮未更新公开附件。
+
+同日补充宽高限制回归：240×160 设置下，普通卡已正确缩小，但展开卡仍是 560×420，原生失败回归退出 2。修正后，打开与连续宽高/字号调整、阅读偏移、完整正文及收起检查通过；`InlineFoldReadTests` 的 135 条断言通过。设置页在 720 / 1320 pt 窗口下验证宽度 240→720 与高度 160→500，卡框均有实际变化。`python3 scripts/debug.py check --timeout 600` 为 75 条通过及同一个既有 OCR 缺口的两次 `known_gap_reproduced`，总结果为 `baseline_passed_with_known_gaps`。两架构构建和 dSYM UUID 核对通过，0.2.1 / build 40 已再次安装；具体游戏长卡页面尚未现场复测。

@@ -5102,16 +5102,19 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (void)scheduleBatchAppearanceLayout {
-    if (self.batchAppearanceTimer || self.lastInlineRenderedTranslations.count == 0 || self.lastInlineRenderedItems.count == 0) { return; }
+    BOOL hasScene = self.lastInlineRenderedTranslations.count > 0 && self.lastInlineRenderedItems.count > 0;
+    if (self.batchAppearanceTimer || (!hasScene && !self.inlineExpandedReadingPanel)) { return; }
     __weak typeof(self) weakSelf = self;
     self.batchAppearanceTimer = [NSTimer timerWithTimeInterval:1.0 / 30.0 repeats:NO block:^(NSTimer *timer) {
         AppDelegate *app = weakSelf;
         app.batchAppearanceTimer = nil;
         NSRect placement = NSZeroRect;
         // 读取执行时的内容和几何：停止、换页或换窗口后不恢复旧字幕。
-        if (app.lastInlineRenderedTranslations.count > 0 && app.lastInlineRenderedItems.count > 0 &&
-            [app inlinePlacementRect:&placement reason:NULL]) {
-            [app showInlineTranslations:app.lastInlineRenderedTranslations forItems:app.lastInlineRenderedItems placementRect:placement];
+        if ([app inlinePlacementRect:&placement reason:NULL]) {
+            if (app.lastInlineRenderedTranslations.count > 0 && app.lastInlineRenderedItems.count > 0) {
+                [app showInlineTranslations:app.lastInlineRenderedTranslations forItems:app.lastInlineRenderedItems placementRect:placement];
+            }
+            [app refreshExpandedInlineReadingCardAppearanceInRect:placement];
         }
     }];
     // AppKit 的滑条在事件跟踪模式中运行；普通模式的 timer 会等到松手才刷新。
@@ -7355,14 +7358,60 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
     [self openFullInlineReadingCardForItem:item translation:translation stableBlockID:nil];
 }
 
+- (NSSize)expandedInlineReadingSizeForTranslation:(NSString *)translation viewport:(NSRect)viewport {
+    CGFloat width = floor(MIN(MAX((CGFloat)160, self.inlineLayoutEngine.cardMaxWidth), MAX((CGFloat)1, NSWidth(viewport) - 24)));
+    FYInlinePlacement *measured = [self inlinePlacementForLongCardFrame:NSMakeRect(0, 0, width, 0)
+                                                         translation:translation expandedReading:YES];
+    CGFloat naturalHeight = measured.measuredContentHeight + measured.panelPadding * 2 + measured.titleBandHeight + 16;
+    CGFloat height = floor(MIN(MAX((CGFloat)160, naturalHeight),
+        MIN(self.inlineLayoutEngine.cardMaxHeight, MAX((CGFloat)1, NSHeight(viewport) - 24))));
+    return NSMakeSize(width, height);
+}
+
+// 设置滑条只改变同一张阅读卡的框与排版，保留正文、滚动视图、收起按钮及块身份。
+- (void)refreshExpandedInlineReadingCardAppearanceInRect:(NSRect)viewport {
+    NSPanel *panel = self.inlineExpandedReadingPanel;
+    if (!panel || ![panel.contentView isKindOfClass:FYInlineLongCardView.class] || NSWidth(viewport) < 2 || NSHeight(viewport) < 2) { return; }
+    FYInlineLongCardView *card = (FYInlineLongCardView *)panel.contentView;
+    NSScrollView *scroll = nil;
+    for (NSView *child in card.subviews) {
+        if ([child isKindOfClass:NSScrollView.class]) { scroll = (NSScrollView *)child; break; }
+    }
+    if (![scroll.documentView isKindOfClass:NSTextField.class]) { return; }
+    NSTextField *label = (NSTextField *)scroll.documentView;
+    NSString *translation = label.stringValue;
+    CGFloat offsetFromTop = 0;
+    if (!card.expandedFooterLabel.hidden) {
+        offsetFromTop = label.isFlipped ? NSMinY(scroll.contentView.bounds)
+            : MAX((CGFloat)0, NSHeight(label.frame) - NSMaxY(scroll.contentView.bounds));
+    }
+    NSSize size = [self expandedInlineReadingSizeForTranslation:translation viewport:viewport];
+    NSRect frame = panel.frame;
+    CGFloat x = MIN(MAX(NSMidX(frame) - size.width / 2, NSMinX(viewport) + 12), MAX(NSMinX(viewport) + 12, NSMaxX(viewport) - size.width - 12));
+    CGFloat y = MIN(MAX(NSMaxY(frame) - size.height, NSMinY(viewport) + 12), MAX(NSMinY(viewport) + 12, NSMaxY(viewport) - size.height - 12));
+    NSRect target = NSMakeRect(round(x), round(y), size.width, size.height);
+    if (!NSEqualRects(frame, target)) { [panel setFrame:target display:NO]; }
+    FYInlinePlacement *placement = [self inlinePlacementForLongCardFrame:target translation:translation expandedReading:YES];
+    NSRect bodyFrame = placement.bodyViewportFrame;
+    bodyFrame.size.height = MAX((CGFloat)40, NSHeight(bodyFrame) - 16);
+    scroll.frame = bodyFrame;
+    [self applyInlineLongCardBody:translation toLabel:label cardWidth:size.width placement:placement];
+    CGFloat maxOrigin = MAX((CGFloat)0, NSHeight(label.frame) - NSHeight(scroll.contentView.bounds));
+    CGFloat origin = label.isFlipped ? offsetFromTop : maxOrigin - offsetFromTop;
+    [scroll.contentView scrollToPoint:NSMakePoint(0, MIN(maxOrigin, MAX((CGFloat)0, origin)))];
+    [scroll reflectScrolledClipView:scroll.contentView];
+    card.expandedFooterLabel.hidden = NO;
+    panel.contentView.needsDisplay = YES;
+}
+
 - (void)openFullInlineReadingCardForItem:(OCRTextItem *)item
                              translation:(NSString *)translation
                            stableBlockID:(NSString *)stableBlockID {
     NSRect placement = NSZeroRect;
     if (![self inlinePlacementRect:&placement reason:NULL]) { return; }
     [self closeExpandedInlineReadingCard];
-    CGFloat width = MIN((CGFloat)560, MAX((CGFloat)320, NSWidth(placement) * 0.5));
-    CGFloat height = MIN((CGFloat)420, MAX((CGFloat)240, NSHeight(placement) * 0.6));
+    NSSize size = [self expandedInlineReadingSizeForTranslation:translation viewport:placement];
+    CGFloat width = size.width, height = size.height;
     // 优先贴着原文展开：原文下方放得下就放下方，否则上方；都不行才退回显示区域居中。
     // 无论哪种都必须完整落在**游戏显示区域**内（不落到 OBS 控制区、不出画面）。
     CGRect sourceFrame = CGRectZero;
@@ -7409,19 +7458,7 @@ static NSString *InlineNormalizeTranslationParagraphs(NSString *text) { return F
         card.onCollapse = ^{ [weakSelf closeExpandedInlineReadingCard]; };
         [card installCollapseControl];
     }
-    // 底部提示与正文让位：展开卡才显示"其他贴译已暂时隐藏 / Esc 收起"。
-    if ([panel.contentView isKindOfClass:FYInlineLongCardView.class]) {
-        FYInlineLongCardView *reading = (FYInlineLongCardView *)panel.contentView;
-        if (reading.expandedFooterLabel) {
-            reading.expandedFooterLabel.hidden = NO;
-            for (NSView *child in reading.subviews) {
-                if (![child isKindOfClass:NSScrollView.class]) { continue; }
-                NSRect scrollFrame = child.frame;
-                scrollFrame.size.height = MAX((CGFloat)40, NSHeight(scrollFrame) - 16);
-                child.frame = scrollFrame;
-            }
-        }
-    }
+    [self refreshExpandedInlineReadingCardAppearanceInRect:placement];
     // 阅读卡沿用现有标题栏拖动（正文滚动与按钮点击不误触拖动）。
     [self wireInlinePanelDrag:panel placement:cardPlacement];
     [panel orderFrontRegardless];

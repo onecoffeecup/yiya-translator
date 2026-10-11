@@ -1,6 +1,6 @@
 #import "LearningAppTestSupport.h"
 
-// All panels remain hidden. Fictional text, fixed geometry, no capture or requests.
+// Fictional text, fixed geometry, no capture or requests; expanded panels briefly appear.
 @interface BatchAppearanceTestApp : AppDelegate
 @property(nonatomic) NSUInteger renderCount;
 @property(nonatomic) NSUInteger captionRefreshCount;
@@ -164,4 +164,72 @@ int main(void) { @autoreleasepool {
     Require(fabs(title.textColor.alphaComponent-.82)<.001 && [FYAppearanceColorHex(title.textColor) isEqual:FYAppearanceColorHex(FYSubtitleThemeText(0))], @"expanded title receives the palette and keeps secondary alpha");
     [real clearInlineTranslationPanels];
     NSLog(@"PASS: same-text font updates, stable panel reuse, immediate color changes, preserved geometry and scroll, unchanged-layout fast path");
+
+    BatchAppearanceTestApp *dimensions = TestApp();
+    dimensions.renderPanels = YES;
+    [dimensions showInlineTranslations:@[body] forItems:@[scene.lastObject] placementRect:NSMakeRect(0,0,1200,800)];
+    NSPanel *ordinary = dimensions.inlineLongCardPanels.firstObject;
+    NSString *blockID = ordinary.identifier;
+    dimensions.batchWidthSlider.doubleValue = 240;
+    dimensions.batchHeightSlider.doubleValue = 160;
+    [dimensions controlValueChanged:dimensions.batchWidthSlider];
+    [dimensions controlValueChanged:dimensions.batchHeightSlider];
+    TrackFor(.1);
+    Require(dimensions.inlineLongCardPanels.firstObject == ordinary && [ordinary.identifier isEqualToString:blockID], @"dimension changes retain the ordinary panel and block identity");
+    NSLog(@"ordinary dimensions: %@, configured maximum 240 x 160", NSStringFromRect(ordinary.frame));
+    Require(NSWidth(ordinary.frame) <= 241 && NSHeight(ordinary.frame) <= 161, @"ordinary long card respects both configured limits");
+    [dimensions openFullInlineReadingCardForItem:scene.lastObject translation:body stableBlockID:blockID];
+    NSPanel *expanded = dimensions.inlineExpandedReadingPanel;
+    NSLog(@"expanded dimensions: %@, configured maximum 240 x 160", NSStringFromRect(expanded.frame));
+    Require(expanded && NSWidth(expanded.frame) <= 241 && NSHeight(expanded.frame) <= 161, @"expanded reading card respects both configured limits when opened");
+    FYInlineLongCardView *reading = (FYInlineLongCardView *)expanded.contentView;
+    NSScrollView *readingScroll = BodyScroll(reading);
+    NSTextField *readingLabel = (NSTextField *)readingScroll.documentView;
+    NSButton *collapse = reading.collapseButton;
+    id escapeMonitor = dimensions.inlineExpandedReadingKeyMonitor;
+    CGFloat initialTop = readingLabel.isFlipped ? 0 : MAX(0, NSHeight(readingLabel.frame)-NSHeight(readingScroll.contentView.bounds));
+    Require(fabs(NSMinY(readingScroll.contentView.bounds)-initialTop)<1, @"expanded reading starts at the first sentence");
+    for (NSNumber *maximumWidth in @[@720, @240]) {
+        dimensions.batchWidthSlider.doubleValue = maximumWidth.doubleValue;
+        [dimensions controlValueChanged:dimensions.batchWidthSlider];
+        TrackFor(.1);
+        Require(fabs(NSWidth(expanded.frame)-maximumWidth.doubleValue)<1, @"width slider resizes an already-open long reading card during event tracking");
+        Require(NSHeight(expanded.frame)<=161, @"width change retains the independent height limit");
+    }
+    for (NSNumber *maximumHeight in @[@500, @160]) {
+        dimensions.batchHeightSlider.doubleValue = maximumHeight.doubleValue;
+        [dimensions controlValueChanged:dimensions.batchHeightSlider];
+        TrackFor(.1);
+        Require(fabs(NSHeight(expanded.frame)-maximumHeight.doubleValue)<1, @"height slider resizes an already-open long reading card during event tracking");
+        Require(NSWidth(expanded.frame)<=241, @"height change retains the independent width limit");
+    }
+    Require(dimensions.inlineExpandedReadingPanel == expanded && expanded.contentView == reading && BodyScroll(reading) == readingScroll && readingScroll.documentView == readingLabel,
+        @"dimension drags preserve the expanded window and native reading views");
+    Require(reading.collapseButton == collapse && reading.onCollapse && !reading.expandedFooterLabel.hidden && dimensions.inlineExpandedReadingKeyMonitor == escapeMonitor && [dimensions.inlineExpandedReadingBlockID isEqualToString:blockID],
+        @"dimension drags preserve collapse controls, Escape handling, footer and block identity");
+    Require(NSMaxY(readingScroll.frame) <= NSMinY(reading.expandedFooterLabel.frame)-1 && NSMaxX(collapse.frame) <= NSWidth(reading.bounds),
+        @"resized body leaves room for the footer and collapse button");
+    CGFloat topDistance = 45;
+    CGFloat origin = readingLabel.isFlipped ? topDistance : NSHeight(readingLabel.frame)-NSHeight(readingScroll.contentView.bounds)-topDistance;
+    [readingScroll.contentView scrollToPoint:NSMakePoint(0,origin)];
+    NSLog(@"reading offset before: flipped=%d label=%@ clip=%@", readingLabel.isFlipped, NSStringFromRect(readingLabel.frame), NSStringFromRect(readingScroll.contentView.bounds));
+    dimensions.batchHeightSlider.doubleValue=280;
+    [dimensions controlValueChanged:dimensions.batchHeightSlider];TrackFor(.1);
+    NSLog(@"reading offset after: flipped=%d label=%@ clip=%@", readingLabel.isFlipped, NSStringFromRect(readingLabel.frame), NSStringFromRect(readingScroll.contentView.bounds));
+    CGFloat afterOffset = readingLabel.isFlipped ? NSMinY(readingScroll.contentView.bounds)
+        : NSHeight(readingLabel.frame)-NSHeight(readingScroll.contentView.bounds)-NSMinY(readingScroll.contentView.bounds);
+    Require(fabs(afterOffset-topDistance)<1,
+        @"height changes preserve the visible reading offset from the top");
+    dimensions.batchFontSizeSlider.doubleValue=24;
+    [dimensions controlValueChanged:dimensions.batchFontSizeSlider];TrackFor(.1);
+    Require(fabs(readingLabel.font.pointSize-dimensions.inlineLayoutEngine.longBodyFontSize)<1 && [readingLabel.stringValue isEqualToString:FYInlineNormalizeTranslationParagraphs(body)],
+        @"expanded font changes retain the full original translation");
+    dimensions.lastInlineRenderedTranslations=nil;dimensions.lastInlineRenderedItems=nil;
+    dimensions.batchWidthSlider.doubleValue=480;
+    [dimensions controlValueChanged:dimensions.batchWidthSlider];TrackFor(.1);
+    Require(fabs(NSWidth(expanded.frame)-480)<1, @"open reading card responds even without ordinary rendered-scene cache");
+    [collapse performClick:nil];
+    Require(!dimensions.inlineExpandedReadingPanel && !dimensions.inlineExpandedReadingKeyMonitor, @"collapse still works after both dimensions and font change");
+    [dimensions clearInlineTranslationPanels];
+    NSLog(@"PASS: ordinary and expanded dimension limits, live width/height/font updates, preserved controls, text and reading offset");
 } return 0; }
