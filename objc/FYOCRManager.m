@@ -808,9 +808,10 @@ static BOOL FYPlateDominantColor(FYOCRPixelBuffer *buffer, CGRect box, unsigned 
     for (NSUInteger row=0;row<7;row++) for (NSUInteger col=0;col<9;col++) {
         const unsigned char *p=FYPlatePixel(buffer,box.origin.x+box.size.width*(col+.5)/9,
             box.origin.y+box.size.height*(row+.5)/7);
-        if (!p) { return NO; }
+        if (!p) { continue; }
         memcpy(samples[count++],p,3);
     }
+    if (count*100<7*9*60) { return NO; }
     for (NSUInteger i=0;i<count;i++) {
         NSUInteger hits=0;
         for (NSUInteger j=0;j<count;j++) if (FYPlateColorNear(samples[i],samples[j])) { hits++; }
@@ -824,13 +825,15 @@ static BOOL FYPlateBodyHasDistinctBackdrop(FYOCRPixelBuffer *buffer, CGRect box,
     for (NSUInteger row=0;row<7;row++) for (NSUInteger col=0;col<9;col++) {
         const unsigned char *p=FYPlatePixel(buffer,box.origin.x+box.size.width*(col+.5)/9,
             box.origin.y+box.size.height*(row+.5)/7);
-        if (!p) { return NO; }
+        if (!p) { continue; }
         total++;
         if (abs(p[0]-color[0])>=45 || abs(p[1]-color[1])>=45 || abs(p[2]-color[2])>=45) { distinct++; }
     }
     // Translucent dialogue can show a textured scene. It need not have one
     // uniform color, but most of it must differ from the filled name plate.
-    return distinct*100>=total*80;
+    // An edge may clip the sampling collar; require 60% of the grid to remain
+    // visible, then measure backdrop evidence only among those valid pixels.
+    return total*100>=7*9*60 && distinct*100>=total*80;
 }
 + (NSArray<OCRTextItem *> *)itemsByMarkingSpeakerLabels:(NSArray<OCRTextItem *> *)items inImage:(CGImageRef)image {
     if (!image) { return items; }

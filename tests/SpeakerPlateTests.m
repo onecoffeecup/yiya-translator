@@ -66,8 +66,41 @@ int main(void) { @autoreleasepool {
     Check([(OCRTextItem *)embeddedMarked.firstObject speakerLabel],@"a filled name plate remains metadata when the game is embedded above OBS controls");
     Check([[FYContentRouter dialogueRouteForItems:embeddedMarked optionsCanPasteInline:NO filterObserver:nil].dialogueText isEqual:patternBody.text],@"full-window fallback must also exclude the confirmed plate");
     CGImageRelease(embedded);
+    CGSize leftCanvas=CGSizeMake(800,450);
+    CGRect leftViewport=CGRectMake((.001-tightLabel.boundingBox.origin.x)*800,0,800,450);
+    CGImageRef leftImage=EmbeddedImage(patterned,leftViewport,leftCanvas);
+    OCRTextItem *leftLabel=Item(@"青木",EmbeddedBox(tightLabel.boundingBox,leftViewport,leftCanvas));
+    OCRTextItem *leftBody=Item(patternBody.text,EmbeddedBox(patternBody.boundingBox,leftViewport,leftCanvas));
+    Check(CGRectGetMinX(leftLabel.boundingBox)>0 && CGRectGetMinX(leftLabel.boundingBox)<leftLabel.boundingBox.size.height*.2,@"only the plate sampling collar crosses the left canvas edge");
+    NSArray *leftMarked=[FYOCRManager itemsByMarkingSpeakerLabels:@[leftLabel,leftBody] inImage:leftImage];
+    Check([(OCRTextItem *)leftMarked.firstObject speakerLabel],@"valid dominant-color samples confirm the tight ink plate at the left edge");
+    Check([[FYContentRouter dialogueRouteForItems:leftMarked optionsCanPasteInline:NO filterObserver:nil].dialogueText isEqual:leftBody.text],@"left-edge sampling preserves the spoken body");
+    CGImageRelease(leftImage);
     CGImageRelease(patterned);CFRelease(patternSource);
     OCRTextItem *body=Item(@"明日は休みです。",CGRectMake(.289,.117,.18,.054));
+    // Crop the existing synthetic game at the canvas edge, keeping OCR and
+    // source pixels in the same coordinates as a bottom-aligned dialogue.
+    CGSize edgeCanvas=CGSizeMake(800,450);
+    CGRect bottomViewport=CGRectMake(0,-body.boundingBox.origin.y*450,800,450);
+    CGImageRef bottomImage=EmbeddedImage(image,bottomViewport,edgeCanvas);
+    OCRTextItem *bottomLabel=Item(@"青木",EmbeddedBox(CGRectMake(.267,.183,.068,.057),bottomViewport,edgeCanvas));
+    OCRTextItem *bottomBody=Item(body.text,EmbeddedBox(body.boundingBox,bottomViewport,edgeCanvas));
+    Check(fabs(CGRectGetMinY(bottomBody.boundingBox))<1e-9,@"the body observation touches the bottom of the canvas");
+    NSArray *bottomMarked=[FYOCRManager itemsByMarkingSpeakerLabels:@[bottomLabel,bottomBody] inImage:bottomImage];
+    Check([(OCRTextItem *)bottomMarked.firstObject speakerLabel],@"valid body samples still confirm the plate when its sampling collar crosses the bottom edge");
+    Check([[FYContentRouter dialogueRouteForItems:bottomMarked optionsCanPasteInline:YES filterObserver:nil].dialogueText isEqual:body.text],@"bottom-aligned dialogue excludes the confirmed name and preserves the spoken body");
+    CGImageRelease(bottomImage);
+    for (NSValue *placement in @[
+        [NSValue valueWithRect:NSMakeRect(0,-(body.boundingBox.origin.y+.03)*450,800,450)],
+        [NSValue valueWithRect:NSMakeRect(-.31*800,0,800,450)]]) {
+        CGRect clippedViewport=NSRectToCGRect(placement.rectValue);
+        CGImageRef clippedImage=EmbeddedImage(image,clippedViewport,edgeCanvas);
+        OCRTextItem *clippedLabel=Item(@"青木",EmbeddedBox(CGRectMake(.267,.183,.068,.057),clippedViewport,edgeCanvas));
+        OCRTextItem *clippedBody=Item(body.text,EmbeddedBox(body.boundingBox,clippedViewport,edgeCanvas));
+        NSArray *clippedMarked=[FYOCRManager itemsByMarkingSpeakerLabels:@[clippedLabel,clippedBody] inImage:clippedImage];
+        Check(![(OCRTextItem *)clippedMarked.firstObject speakerLabel],@"insufficient visible body or plate samples cannot prove a speaker label");
+        CGImageRelease(clippedImage);
+    }
     for (NSString *text in @[@"ててて",@"ink",@"？？？",@"みよ",@"青木",@"ルード"]) {
         OCRTextItem *label=Item(text,CGRectMake(.267,.183,.068,.057));
         NSArray *marked=[FYOCRManager itemsByMarkingSpeakerLabels:@[label,body] inImage:image];
