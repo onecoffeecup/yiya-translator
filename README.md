@@ -1,12 +1,12 @@
 # 译芽 · Yiya!
 
-**Mac 开发分支 `dev0.2.1_261009`：功能提交 `4956d21` 与翻译服务提交 `73c306e` 已推送，本机已安装 0.2.1 build 59。** AI 侧栏只手动开关，展开 / 收起时最小内容宽度为 1100 / 720 pt；拖动和切页保持显隐选择。实时页先读中文，再查看原文，空状态收紧；翻译服务支持 10 个预设、自定义 URL 与可直接输入的模型名。行为与证据见[窗口缩放](docs/window-resize.md)、[阅读布局](docs/live-reading-layout.md)、[服务组件](docs/translation-service-settings.md)。
+**Mac 开发分支 `dev0.2.1_261009`：功能提交 `4956d21` 与翻译服务提交 `73c306e` 已推送，本机已安装 0.2.1 build 60。** AI 侧栏只手动开关，展开 / 收起时最小内容宽度为 1100 / 720 pt；拖动和切页保持显隐选择。实时页先读中文，再查看原文，空状态收紧；中文与当前对白正文统一 19 pt，点击选中保持字号；翻译服务支持 10 个预设、自定义 URL 与可直接输入的模型名。行为与证据见[窗口缩放](docs/window-resize.md)、[阅读布局](docs/live-reading-layout.md)、[服务组件](docs/translation-service-settings.md)。
 
-对应代码的新增缩放回归、五组相关 UI、111 项核心检查及双架构打包通过，安装身份已核对。完整视觉套件仍有修改前已复现的「已选中」徽标失败，正式 build 59 的真实鼠标体验、设备及跨机器验收待完成。当前交付与规则入口见[维护约定](docs/project-maintenance.md)。
+build 59 集成代码的新增缩放回归、五组相关 UI、111 项核心检查及双架构打包通过，安装身份已核对。完整视觉套件仍有修改前已复现的「已选中」徽标失败，正式 build 59 的真实鼠标体验、设备及跨机器验收待完成。本轮字号修补的三组原生 UI 回归通过，完整核心结果见[阅读布局记录](docs/live-reading-layout.md)，本轮字号修补提交至 Mac 开发分支。当前交付与规则入口见[维护约定](docs/project-maintenance.md)。
 
 **公开版本仍为 [v0.2.1 正式版](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.1)（2026-10-08，build 17）。** 开发分支推送与本机安装没有更新 Release 附件或 Sparkle 清单。build 17 的 55 步完整本机回归和独立应用手动升级验收通过；新开发版的安装不能替代公开更新或跨机器验收。
 
-0.2.1 已提供「译芽 → 检查更新…」，首次手动安装后可通过 Sparkle 安装后续公开版本。开发源码及本机 build 59 已跨版本保留 API Key，公开 build 17 从不同版本升级时仍使用旧重填规则。机制见[自动更新](docs/automatic-updates.md)和[Key 保存合同](docs/api-key-storage.md)，已发布内容和验证范围见[发布说明](docs/发布说明.md)及[检查记录](docs/发布检查结果.md)。
+0.2.1 已提供「译芽 → 检查更新…」，首次手动安装后可通过 Sparkle 安装后续公开版本。开发源码及本机 build 60 已跨版本保留 API Key，公开 build 17 从不同版本升级时仍使用旧重填规则。机制见[自动更新](docs/automatic-updates.md)和[Key 保存合同](docs/api-key-storage.md)，已发布内容和验证范围见[发布说明](docs/发布说明.md)及[检查记录](docs/发布检查结果.md)。
 
 在游戏里，读懂日语。一个 macOS 实时字幕翻译与日语学习工具。
 

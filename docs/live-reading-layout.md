@@ -1,12 +1,40 @@
 # 实时页：先读中文，再查看原文
 
-2026-10-11，用户确认奶油棕圆体预览及紧凑空状态并授权接入。阅读布局已随功能提交 `4956d21` 推送至 Mac 分支 `dev0.2.1_261009`，本机集成版为 0.2.1 build 59；公开 Release / Sparkle 仍为 build 17。
+2026-10-11，用户确认奶油棕圆体预览及紧凑空状态并授权接入。阅读布局已随功能提交 `4956d21` 推送至 Mac 分支 `dev0.2.1_261009`，前一集成包为 0.2.1 build 59；公开 Release / Sparkle 仍为 build 17。
+
+## 2026-10-11：正文统一 19 pt，点击后保持字号（本机 build 60）
+
+用户要求中文正文与当前对白同大，并指出点击后文字缩小。原生生产视图失败回归中，中文显示为 23 pt，进入 AppKit field editor 后变为 14 pt；控件沿用了等待提示的默认字体，且 `allowsEditingTextAttributes=NO`。证据为 `.build/reading-font-20261011/before.log` 的 `displayed=23.0 selected=14.0 rich=0`，该字号保持断言退出 2。
+
+`objc/LiveCaptionTranslator.m` 仅将中文正文改为 19 pt，并允许原生选中编辑器保留已有富文本样式。姓名仍为 13 pt，等待提示仍为 14 pt；正文不可编辑，继续支持原生选择、复制与完整换行。`tests/PreviewLayoutTests.m` 使用相同生产视图，覆盖 selectText、原生 mouseDown / mouseUp 追踪、全选写入独立测试剪贴板、同句刷新及退出选中，分别验证有姓名短句和十二行无姓名长译文。显示 / 选中均为 19 pt；未改动玩家剪贴板。
+
+三组 UI 均退出 0：`PreviewLayoutTests`（含宽窄卡片、空状态、字号、复制、点击和缩放）、`DragSelectionTests` 与 `SourceHoverTests`。日志在 `.build/reading-font-20261011/final.log`、`drag.log`、`hover.log`。最新[合成台词预览](../../../../docs/design/live-reading-preview-20261011/production-reading-19pt.png)使用正式视图渲染。
+
+首次 `python3 scripts/debug.py check` 退出 1：前六个模块通过后，同仓库另一项任务更新了 `tests/SpeakerPlateTests.m` 与 `speaker-plate-ocr-noise.json`，源码 / 夹具快照保护主动中断；不能记为完整检查通过。报告 `.build/debug/20261011T112820Z-e0e4bd/summary.json`。应用生产源码没有变化。重跑 `python3 scripts/debug.py check` 退出 1，前五套通过，`ModuleTests` 在新增的姓名牌 OCR 断言「every confirmed plate is metadata; dialogue contains only the spoken body」失败，报告 `.build/debug/20261011T113055Z-2e56c0/summary.json`。该目标只链接 OCR / 内容路由 / 学习模型模块，不编译本轮修改的 `LiveCaptionTranslator.m`；失败发生在另一项任务新加强的断言。未删除或放宽该测试，未将完整核心检查记为通过。
+
+已执行 `FY_BUILD_NUMBER=60 bash scripts/install-app.sh`，双架构构建、dSYM UUID 和安装包签名核对通过，正式应用已重新打开并保持暂停。安装前后 180 项生产文件 SHA-256 无变化；凭据只检查元数据，文件及目录权限、大小、mtime 和 inode 不变，未读取 Key 内容。日志及安装核对在 `.build/reading-font-20261011/install.log`、`installed-verification.json`。本轮字号修补提交至 Mac 开发分支；公开 Release / Sparkle 仍为 build 17。
+
+- x86_64 UUID：`24B99006-5926-3533-9C76-391CC8FBAE2F`
+- arm64 UUID：`00B1BE09-A4E4-34DE-A5AC-157E3BF83F61`
+
+实际命令（仓库根）：
+
+```bash
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh PreviewLayoutTests .build/reading-font-20261011/final
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh DragSelectionTests .build/reading-font-20261011/DragSelectionTests
+FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh SourceHoverTests .build/reading-font-20261011/SourceHoverTests
+python3 scripts/debug.py check
+FY_BUILD_NUMBER=60 bash scripts/install-app.sh
+codesign --verify --deep --strict /Users/nanami/Applications/译芽.app
+```
+
+上述点击回归为隔离的 AppKit 事件追踪与合成台词；没有启动真实采集、调用翻译服务或读取玩家学习数据库。最短体验验收：打开本机译芽，在有译文时点击 / 拖选中文正文，再点击其它区域，确认与当前对白正文同大且不缩小。真实服务、设备和所有视觉场景不在本轮验证范围。
 
 ## 当前规则与集成验证
 
-阅读顺序为「游戏画面 → 中文翻译 → 当前对白 → 语法」；中文正文 23 pt、日文 19 pt、匹配原文姓名的前缀 13 pt。两卡间距 12 pt，有内容时最小高度 156 pt；空状态最小高度 104 pt，标题位于左上、距顶部 14 pt，等待提示 14 pt，隐藏空原文视口并禁用固定操作。长译文不限制八行，原文视口最高 190 pt 后内部滚动；缩放按实际栏宽重测，保留全部字符、选择索引及固定身份。
+阅读顺序为「游戏画面 → 中文翻译 → 当前对白 → 语法」；中文正文 19 pt、日文 19 pt、匹配原文姓名的前缀 13 pt。两卡间距 12 pt，有内容时最小高度 156 pt；空状态最小高度 104 pt，标题位于左上、距顶部 14 pt，等待提示 14 pt，隐藏空原文视口并禁用固定操作。长译文不限制八行，原文视口最高 190 pt 后内部滚动；缩放按实际栏宽重测，保留全部字符、选择索引及固定身份。
 
-AI 侧栏仅手动开关；检查 720 pt 窄窗时先手动收起，展开时保留 1100 pt 最小内容宽度。最新 `PreviewLayoutTests`、相关 UI、111 项核心检查、双架构打包和安装身份核对通过；完整视觉套件的既有徽标失败及正式鼠标待验收范围，统一见[build 59 集成记录](window-resize.md)。下方 build 54 / 55 的命令、超时和 UUID 是各自历史证据，不代表当前安装包，也不把后续通过改写为此前超时已通过。
+AI 侧栏仅手动开关；检查 720 pt 窄窗时先手动收起，展开时保留 1100 pt 最小内容宽度。build 59 集成时的 `PreviewLayoutTests`、相关 UI、111 项核心检查、双架构打包和安装身份核对通过；完整视觉套件的既有徽标失败及正式鼠标待验收范围，统一见[build 59 集成记录](window-resize.md)。下方 build 54 / 55 的命令、超时和 UUID 是各自历史证据，不代表当前安装包，也不把后续通过改写为此前超时已通过。
 
 ## build 54 行为与修改范围
 

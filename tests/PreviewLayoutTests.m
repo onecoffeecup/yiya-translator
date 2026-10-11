@@ -26,6 +26,46 @@ static void ReadingSnapshot(NSView *view, NSRect rect, NSString *output) {
     [view cacheDisplayInRect:rect toBitmapImageRep:bitmap];
     Require([[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:output atomically:YES], @"reading screenshot save failed");
 }
+static void CheckTranslationSelection(AppDelegate *app, CGFloat bodySize) {
+    NSTextField *label=app.learningTranslationLabel;
+    NSString *text=[label.stringValue copy];
+    NSFont *firstFont=[label.attributedStringValue attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
+    [app.mainWindow makeKeyAndOrderFront:nil];
+    [label selectText:nil]; Layout(app);
+    NSTextView *editor=(NSTextView *)label.currentEditor;
+    Require(editor && [editor.string isEqualToString:text], @"Chinese translation enters native selection without changing its text");
+    NSFont *selectedFont=[editor.textStorage attribute:NSFontAttributeName atIndex:text.length-1 effectiveRange:NULL];
+    NSLog(@"TRANSLATION_SELECTION: label default=%.1f displayed=%.1f selected=%.1f rich=%d",label.font.pointSize,bodySize,selectedFont.pointSize,label.allowsEditingTextAttributes);
+    Require(fabs(selectedFont.pointSize-bodySize)<.1, @"clicking Chinese translation preserves its displayed body size in the native field editor");
+    NSFont *speaker=[editor.textStorage attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
+    Require(fabs(speaker.pointSize-firstFont.pointSize)<.1, @"Chinese first-line styling stays unchanged during selection");
+    [editor selectAll:nil];
+    NSPasteboard *pasteboard=[NSPasteboard pasteboardWithUniqueName];
+    NSArray<NSPasteboardType> *types=editor.writablePasteboardTypes;
+    [pasteboard declareTypes:types owner:nil];
+    BOOL copied=[editor writeSelectionToPasteboard:pasteboard types:types];
+    Require(copied &&
+        [[pasteboard stringForType:NSPasteboardTypeString] isEqualToString:text], @"native translation copy preserves every character");
+    [pasteboard releaseGlobally];
+    [app refreshLearningSource]; Layout(app);
+    selectedFont=[editor.textStorage attribute:NSFontAttributeName atIndex:text.length-1 effectiveRange:NULL];
+    Require(fabs(selectedFont.pointSize-bodySize)<.1, @"refreshing the same translation keeps the selected body size");
+    [app.mainWindow makeFirstResponder:nil]; Layout(app);
+    NSFont *unselectedFont=[label.attributedStringValue attribute:NSFontAttributeName atIndex:text.length-1 effectiveRange:NULL];
+    Require(fabs(unselectedFont.pointSize-bodySize)<.1 && [label.stringValue isEqualToString:text], @"leaving selection preserves translation size and characters");
+    // Exercise the native mouse tracking path as well as selectText:.
+    NSRect target=NSMakeRect(0,MAX(0,NSHeight(label.bounds)-48),MIN(120,NSWidth(label.bounds)),48);
+    [label scrollRectToVisible:target]; Layout(app);
+    NSPoint point=[label convertPoint:NSMakePoint(18,NSMidY(target)) toView:nil];
+    NSEvent *down=[NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:point modifierFlags:0 timestamp:1 windowNumber:app.mainWindow.windowNumber context:nil eventNumber:1 clickCount:1 pressure:1];
+    NSEvent *up=[NSEvent mouseEventWithType:NSEventTypeLeftMouseUp location:point modifierFlags:0 timestamp:1.1 windowNumber:app.mainWindow.windowNumber context:nil eventNumber:2 clickCount:1 pressure:0];
+    [NSApp postEvent:up atStart:YES]; [label mouseDown:down]; Layout(app);
+    editor=(NSTextView *)label.currentEditor;
+    Require(editor && [editor.string isEqualToString:text], @"native mouse click opens Chinese selection without changing characters");
+    selectedFont=[editor.textStorage attribute:NSFontAttributeName atIndex:text.length-1 effectiveRange:NULL];
+    Require(fabs(selectedFont.pointSize-bodySize)<.1, @"native mouse click keeps the Chinese body size unchanged");
+    [app.mainWindow makeFirstResponder:nil]; Layout(app);
+}
 static void CheckEmptyReadingCards(AppDelegate *app, NSString *output) {
     NSRect originalWindow=app.mainWindow.frame;
     [app refreshLearningSource]; Layout(app);
@@ -77,11 +117,13 @@ static void CheckReadingCards(AppDelegate *app, NSString *output) {
     NSRect heading=[translationTitle convertRect:translationTitle.bounds toView:translated];
     Require(fabs(NSHeight(translated.bounds)-NSMaxY(heading)-14)<1, @"translated Chinese heading also stays at the top");
     NSFont *translationBody=[app.learningTranslationLabel.attributedStringValue attribute:NSFontAttributeName atIndex:app.learningTranslationLabel.stringValue.length-1 effectiveRange:NULL];
-    Require(fabs(translationBody.pointSize-23)<.1, @"arriving translation restores the approved Chinese reading size");
+    CheckTranslationSelection(app,translationBody.pointSize);
+    Require(fabs(translationBody.pointSize-19)<.1, @"arriving Chinese translation uses the same 19 pt body size as the original dialogue");
     Require([app.learningSourceTextView.string isEqualToString:source], @"speaker styling preserves every original character and selection index");
     NSFont *speakerFont=[app.learningSourceTextView.textStorage attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
     NSFont *bodyFont=[app.learningSourceTextView.textStorage attribute:NSFontAttributeName atIndex:source.length-1 effectiveRange:NULL];
     Require(fabs(speakerFont.pointSize-13)<.1 && fabs(bodyFont.pointSize-19)<.1, @"speaker is secondary while the Japanese body stays at 19 pt");
+    Require(fabs(translationBody.pointSize-bodyFont.pointSize)<.1, @"Chinese and Japanese body sizes match");
     NSTextField *title=FindLabel(original,@"当前对白");
     Require(title && app.pinSentenceButton.superview==title.superview && app.learningPinnedLabel.superview==title.superview,
         @"pin action and follow state share the original title row");
@@ -121,6 +163,7 @@ static void CheckReadingCards(AppDelegate *app, NSString *output) {
     Require([app.learningTranslationLabel.stringValue isEqualToString:longTranslation] && app.learningTranslationLabel.maximumNumberOfLines==0 &&
         NSHeight(app.learningTranslationLabel.bounds)>=required-2 && NSHeight(translated.bounds)>300,
         @"long Chinese translation grows beyond eight lines without truncation");
+    CheckTranslationSelection(app,19);
     NSString *wrappingSource=@"这是合成布局夹具。これは折り返しを確認するための長い台詞です。ゲームの画面を見ながら、すべての文字を最後まで読みます。";
     [app.learningCoordinator recordText:wrappingSource kind:FYSentenceKindDialogue];
     [app refreshLearningSource]; Layout(app); CGFloat narrow=app.sourceReadingHeight.constant;
@@ -128,7 +171,7 @@ static void CheckReadingCards(AppDelegate *app, NSString *output) {
     Require(app.sourceReadingHeight.constant<narrow && [app.learningSourceTextView.string isEqualToString:wrappingSource],
         @"resizing without another OCR frame remeasures source height and preserves its text");
     NSAttributedString *unnamed=[app liveReadingText:@"先去图书馆\n然后在那里见面。" japanese:NO];
-    Require(fabs([(NSFont *)[unnamed attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL] pointSize]-23)<.1,
+    Require(fabs([(NSFont *)[unnamed attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL] pointSize]-19)<.1,
         @"a short Chinese first paragraph without a confirmed speaker remains full-sized body text");
     // A fresh coordinator models a new empty session without changing persisted history.
     app.learningCoordinator=[[FYLearningCoordinator alloc] initWithStore:app.learningStore analyzer:app.learningAnalyzer tokenizer:app.japaneseTokenizer catalog:app.grammarCatalog];
@@ -236,7 +279,7 @@ int main(int argc, const char *argv[]) {
         [app.mainWindow orderOut:nil]; __block BOOL closed = NO;
         [store closeWithCompletion:^(NSError *error) { Require(!error, @"close failed"); closed = YES; }]; Pump(^BOOL { return closed; });
         [[NSFileManager defaultManager] removeItemAtPath:directory error:NULL];
-        NSLog(@"PASS: empty title top-left/104 pt cards/14 pt hints, empty-to-waiting-to-translated-to-empty transitions, picture/translation/original order, 23/19 pt, balanced short cards, speaker indices, narrow pin/follow, twelve-line translation, resize remeasurement, seven capture ratios and all %lu pages; no real capture/API/user database.", (unsigned long)app.pages.count);
+        NSLog(@"PASS: empty title top-left/104 pt cards/14 pt hints, empty-to-waiting-to-translated-to-empty transitions, picture/translation/original order, matching 19 pt bodies, stable native translation selection/refresh/copy, balanced short cards, speaker indices, narrow pin/follow, twelve-line translation, resize remeasurement, seven capture ratios and all %lu pages; no real capture/API/user database.", (unsigned long)app.pages.count);
     }
     return 0;
 }

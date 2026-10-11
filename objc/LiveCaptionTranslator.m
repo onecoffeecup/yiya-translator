@@ -1529,6 +1529,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [translationBlock addArrangedSubview:translationTitleRow];
     self.learningTranslationLabel = [self label:@"开始翻译后，译文会显示在这里。" font:FYUIFont(14, NSFontWeightRegular) color:self.uiMuted];
     self.learningTranslationLabel.selectable = YES;
+    // Keep attributed speaker/body fonts when AppKit opens the selection editor.
+    self.learningTranslationLabel.allowsEditingTextAttributes = YES;
     self.learningTranslationLabel.maximumNumberOfLines = 0;
     self.learningTranslationLabel.lineBreakMode = NSLineBreakByWordWrapping;
     [translationBlock addArrangedSubview:self.learningTranslationLabel];
@@ -2408,7 +2410,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     NSMutableParagraphStyle *style = [NSMutableParagraphStyle new];
     style.lineSpacing = japanese ? 0 : 5;
     NSMutableAttributedString *reading = [[NSMutableAttributedString alloc] initWithString:text ?: @"" attributes:@{
-        NSFontAttributeName:japanese ? FYJapaneseFont(19) : FYUIFont(23, NSFontWeightRegular),
+        NSFontAttributeName:japanese ? FYJapaneseFont(19) : FYUIFont(19, NSFontWeightRegular),
         NSForegroundColorAttributeName:self.uiInk, NSParagraphStyleAttributeName:style}];
     NSString *speaker = nil, *body = nil;
     [self splitSpeakerAndBody:text speaker:&speaker body:&body];
