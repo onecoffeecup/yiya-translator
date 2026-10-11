@@ -305,6 +305,46 @@ static void TestSpeakerExcludedHistory(void) {
     [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
 }
 
+static BOOL TestSpeakerSelfIntroductionRecording(BOOL confirmedFirst) {
+    NSString *body=@"青木\nそう呼んでください。";
+    NSString *legacy=[@"青木\n" stringByAppendingString:body];
+    NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:
+        [NSString stringWithFormat:@"fuyi-speaker-self-introduction-%@.sqlite3",NSUUID.UUID.UUIDString]];
+    FYLearningStore *store=[[FYLearningStore alloc] initWithDatabasePath:path];
+    FYLearningCoordinator *coordinator=[[FYLearningCoordinator alloc] initWithStore:store
+        analyzer:[FYLearningAnalyzer new] tokenizer:[FYJapaneseTokenizer new] catalog:LoadCatalog()];
+    FYRequestIdentity *first=[coordinator recordDialogueText:confirmedFirst ? body : legacy
+        excludingSpeakerLabels:confirmedFirst ? @[@"青木"] : @[]];
+    [coordinator setTranslation:@"请叫我青木。" forIdentity:first];
+    FYRequestIdentity *second=[coordinator recordDialogueText:confirmedFirst ? legacy : body
+        excludingSpeakerLabels:confirmedFirst ? @[] : @[@"青木"]];
+    [coordinator setTranslation:@"请叫我青木。" forIdentity:second];
+    BOOL same=[first.sentenceID isEqual:second.sentenceID];
+    BOOL passed=(confirmedFirst ? same : !same) && [second.sourceText isEqual:body] && second.version==1;
+    __block NSArray<FYSentenceRecord *> *saved=nil;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records,NSError *error) {
+        Check(error==nil,@"self-introduction reads the isolated production store");saved=records;
+    }];
+    PumpUntil(^BOOL { return saved!=nil; });
+    Check(saved!=nil,@"self-introduction store read completes");
+    passed &= saved.count==(confirmedFirst ? 1 : 2) && [saved.firstObject.latestText isEqual:body];
+    __block FYSentenceRecord *original=nil;
+    [store fetchSentence:first.sentenceID completion:^(FYSentenceRecord *record,NSError *error) {
+        Check(error==nil,@"self-introduction original identity remains readable");original=record;
+    }];
+    PumpUntil(^BOOL { return original!=nil; });
+    Check(original!=nil,@"self-introduction original fetch completes");
+    passed &= [original.latestText isEqual:confirmedFirst ? body : legacy] && original.latestVersion==1;
+    NSLog(@"%@ SpeakerSelfIntroductionRecording %@: same_identity=%d; source=%@; records=%lu",
+        passed ? @"PASS" : @"FAIL",confirmedFirst ? @"transient plate miss" : @"late plate confirmation",
+        same,second.sourceText,(unsigned long)saved.count);
+    __block BOOL closed=NO;
+    [store closeWithCompletion:^(NSError *error) { Check(error==nil,@"self-introduction store closes");closed=YES; }];
+    PumpUntil(^BOOL { return closed; });Check(closed,@"self-introduction close completes");
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+    return passed;
+}
+
 static void TestDialogueLeadingEllipsisHistory(void) {
     NSString *source = @"青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」";
     NSMutableArray<FYSentenceRecord *> *rows = [NSMutableArray new];
@@ -352,6 +392,11 @@ int main(void) {
         TestTokenizerTextSnapshots();
         TestReadingCueEnumeration();
         TestSpeakerExcludedHistory();
+        // Run both directions before failing so each independently reports
+        // identity, source and persistence through the production coordinator.
+        BOOL latePlate=TestSpeakerSelfIntroductionRecording(NO);
+        BOOL missedPlate=TestSpeakerSelfIntroductionRecording(YES);
+        Check(latePlate && missedPlate,@"one excluded plate line preserves a spoken self-introduction in both recording directions");
         TestDialogueEllipsisHistory();
         TestDialogueLeadingEllipsisHistory();
         FYVocabularyEntry *first=[FYVocabularyEntry new], *second=[FYVocabularyEntry new];

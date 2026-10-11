@@ -6,7 +6,14 @@ static NSString *FYTrim(NSString *value) {
 static NSString *FYDialogueBodyExcludingLabels(NSString *source, NSSet<NSString *> *keys) {
     NSArray<NSString *> *lines=[source componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
     NSUInteger removed=0;
-    while (removed<lines.count && [keys containsObject:FYDialogueComparisonKey(lines[removed])]) { removed++; }
+    // Each confirmed label can explain one prefix row, not a repeated name
+    // spoken as the first body line (e.g. 青木 / 青木 / そう呼んでください。).
+    NSMutableSet<NSString *> *remaining=[keys mutableCopy];
+    while (removed<lines.count) {
+        NSString *key=FYDialogueComparisonKey(lines[removed]);
+        if (![remaining containsObject:key]) { break; }
+        [remaining removeObject:key];removed++;
+    }
     return removed && removed<lines.count
         ? [[lines subarrayWithRange:NSMakeRange(removed,lines.count-removed)] componentsJoinedByString:@"\n"] : nil;
 }
