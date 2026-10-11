@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "name": "routing-r8-english-books",
+  "mode": "dialogue",
+  "source": "window",
+  "stable": true,
+  "auto_mode": true,
+  "language": "en",
+  "responses": [
+    {
+      "translation": "合成字幕"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "Books are here.",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ]
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "Books are here.",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "Books are here.",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ]
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "Books are here.",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0,
+        "requests": 1,
+        "sources": [
+          "Books are here."
+        ],
+        "captions": [
+          "合成字幕"
+        ]
+      }
+    }
+  ],
+  "notes": "Synthetic review regression: current product routing and complete-text requirements. Injected OCR after Vision; no real data."
+}

@@ -38,6 +38,8 @@ static FYContentModeDecision *FYModeDecision(NSInteger mode, NSString *reason) {
 @interface FYContentRouter ()
 @property(nonatomic, strong) FYContentModeStability *modeStability;
 @property(nonatomic, strong) FYContentModeDecision *lastModeDecision;
++ (BOOL)isWrappedDialogueBand:(NSArray<OCRTextItem *> *)band;
++ (NSArray<OCRTextItem *> *)separatedDialogueItemsInItems:(NSArray<OCRTextItem *> *)items;
 @end
 
 static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
@@ -219,6 +221,9 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
 }
 
 + (FYContentTextFilterReason)filterReasonForText:(NSString *)text normalized:(NSString *)normalized boundingBox:(CGRect)box strict:(BOOL)strict {
+    return [self filterReasonForText:text normalized:normalized boundingBox:box strict:strict japanese:YES];
+}
++ (FYContentTextFilterReason)filterReasonForText:(NSString *)text normalized:(NSString *)normalized boundingBox:(CGRect)box strict:(BOOL)strict japanese:(BOOL)japanese {
     if (normalized.length == 0) { return FYContentTextEmpty; }
 
     // 只过滤纯省略号、纯标点/符号与空白；没有假名/汉字不等于没有文字。
@@ -263,16 +268,16 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
 
     NSString *lower = normalized.lowercaseString;
     if (strict) {
-        // 对白模式：这些词基本是游戏 UI/环境噪声，不该混进字幕
+        // Isolated control labels need both an exact token and control geometry.
+        // Substrings of ordinary speech (know, Books, 戻らないで) are not controls.
         NSArray<NSString *> *ignoreTokens = @[
             @"today", @"web", @"back", @"戻る", @"戻", @"詳細", @"閉じる", @"ルームへ",
             @"更新", @"news", @"no.", @"no", @"ok", @"yes", @"skip", @"auto", @"menu"
         ];
-        // 说明：这条“界面词表”规则保持不变（它需要同时命中词表与长度/宽度条件，
-        // 不属于本轮要删除的“仅凭字数/框宽/省略号比例删除”的误删条件）。
         for (NSString *token in ignoreTokens) {
-            if ([lower isEqualToString:token] || [lower containsString:token]) {
-                if (normalized.length <= 8 || box.size.width < 0.16 || box.size.height < 0.06) {
+            if ([lower isEqualToString:token]) {
+                BOOL peripheral = CGRectGetMinX(box) < .15 || CGRectGetMaxX(box) > .85 || CGRectGetMidY(box) > .45;
+                if (box.size.height < .036 || peripheral) {
                     return FYContentTextDialogueControl;
                 }
             }
@@ -288,12 +293,13 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
 
         // 短且**完全没有日文假名/汉字**的纯字母碎片，也是 `？？？` 之类的错读
         // （实测名字框被读成 `iee`），发去翻译只会得到编造的译文。
-        if (!strict && normalized.length <= 6) {
+        if (japanese && normalized.length <= 6) {
             BOOL hasKanaOrKanji = NO;
             for (NSUInteger index = 0; index < normalized.length; index++) {
                 unichar character = [normalized characterAtIndex:index];
                 if ((character >= 0x3040 && character <= 0x30FF) ||   // 平假名 / 片假名
-                    (character >= 0x4E00 && character <= 0x9FFF)) {   // 汉字
+                    (character >= 0x4E00 && character <= 0x9FFF) ||   // 汉字
+                    (character >= 0xFF66 && character <= 0xFF9F)) {  // 半角片假名
                     hasKanaOrKanji = YES;
                     break;
                 }
@@ -301,13 +307,11 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
             if (!hasKanaOrKanji) { return FYContentTextShortUIFragment; }
         }
 
-        // 界面模式：按钮、日期、条目编号都是用户要看的文字，不能当成噪声丢掉。
-        // 之前和上面共用同一张表，导致「No. 48 5/1更新」被 “更新” 命中而整条不翻，
-        // 「詳細」「戻る」这类按钮也永远不会被翻译。
-        // 这里只丢真正的装饰：版本号样式的一小串字符。
+        // Preserve English No/Yes menus. Japanese OCR retains its standalone
+        // Latin numbering-decoration rule; numeric/date filtering is separate.
         NSArray<NSString *> *decorativeTokens = @[@"no.", @"no"];
         for (NSString *token in decorativeTokens) {
-            if (([lower isEqualToString:token]) && normalized.length <= 3) { return FYContentTextDecoration; }
+            if (japanese && [lower isEqualToString:token] && normalized.length <= 3) { return FYContentTextDecoration; }
         }
     }
 
@@ -342,9 +346,8 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
 + (FYContentModeDecision *)modeDecisionForItems:(NSArray<OCRTextItem *> *)blocks fallback:(NSInteger)fallbackSegment {
     if (blocks.count == 0) { return FYModeDecision(fallbackSegment, @"empty"); }
 
-    // UI 特征优先否决：画面里有「戻る / 詳細 / メニュー」这类按钮，或者是文本密集的列表/菜单页，
-    // 就走贴译整屏，而不是把某条宽行当对白。
-    // 现实依据：列表页里也有很宽的行（实测 0.26），光凭“有没有宽行”分不出对白和列表。
+    // UI evidence still takes priority unless a distinct lower spoken region
+    // supports mixed routing. A wide row alone cannot distinguish a menu.
     if ([self looksLikeUIFrame:blocks]) { return FYModeDecision(FYContentModeUI, @"ui_evidence"); }
 
     // 再看有没有成形的对白框：有就按对白处理，别被街景招牌/公告牌带偏
@@ -461,6 +464,9 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
                        options:(NSMutableArray<OCRTextItem *> *)outOptions {
     if (band.count == 0) { return; }
 
+    // Reuse the region that protected this mixed frame from menu classification.
+    // A nearby name plate must not bridge the lowest option into the body.
+    NSArray<OCRTextItem *> *separatedBody = [self separatedDialogueItemsInItems:allBlocks ?: band];
     // band 已按从上到下排序；这里切成簇
     NSMutableArray<NSMutableArray<OCRTextItem *> *> *clusters = [NSMutableArray array];
     NSMutableArray<OCRTextItem *> *current = nil;
@@ -471,7 +477,9 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
             continue;
         }
         CGFloat gap = fabs(CGRectGetMidY(current.lastObject.boundingBox) - CGRectGetMidY(item.boundingBox));
-        if (gap <= 0.12) {
+        BOOL crossesBody = separatedBody.count > 0 &&
+            [separatedBody containsObject:current.lastObject] != [separatedBody containsObject:item];
+        if (gap <= 0.12 && !crossesBody) {
             [current addObject:item];
         } else {
             current = [NSMutableArray arrayWithObject:item];
@@ -620,6 +628,15 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
 // 台词几乎都以句末标点结尾，而街景招牌通常没有 —— 用这个区分。
 + (BOOL)isSingleLineDialogue:(OCRTextItem *)block {
     NSString *normalized = FYNormalizeOCRTextForComparison(block.text);
+    // A central, full-height English sentence has the same placement evidence
+    // as unpunctuated Japanese speech. A decimal/date or corner label does not.
+    BOOL latin = [normalized rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:
+        @"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"]].location != NSNotFound;
+    CGRect box = block.boundingBox;
+    if (normalized.length >= 3 && latin && [normalized hasSuffix:@"."] &&
+        box.size.width >= .05 && box.size.width <= .30 && box.size.height >= .043 &&
+        CGRectGetMinX(box) >= .18 && CGRectGetMaxX(box) <= .78 &&
+        CGRectGetMidY(box) >= .10 && CGRectGetMidY(box) <= .38) { return YES; }
     if (normalized.length < 4) { return NO; }
     // 门槛放到 0.05：台词本来就短（实测「行くぞ。」只有 0.08 宽）。
     // 真正的防误判靠“必须以句末标点结尾”，不靠宽度。
@@ -830,21 +847,25 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
 
 // 判定“这一帧看起来像功能界面”：小按钮、菜单词、密集短文本、贴边文字
 // 画面里出现几个游戏 UI 特有的按钮/菜单词？
-// 这是区分“功能 UI”和“剧情对白”最可靠的单一信号 ——
-// 新闻、列表、菜单页一定带「戻る / 詳細 / メニュー」这类词，对白框不会。
+// Control labels contribute evidence; they can also coexist with dialogue.
 //
 // 匹配必须精确：早期用 containsString 会误判 ——
 // 日文那边的 "River Books" 会命中 "ok"，对白 "これでプレゼントはOK。" 也会命中 "ok"。
 + (BOOL)textHitsUIToken:(NSString *)text {
     NSString *normalized = FYNormalizeOCRTextForComparison(text);
     if (normalized.length == 0) { return NO; }
-    NSString *lower = normalized.lowercaseString;
+    // Preserve spaces for Latin word boundaries; normalizing them away turns
+    // "go back" into "goback" before the boundary check.
+    NSString *lower = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].lowercaseString;
 
-    // 日文按钮词：整条相等，或者出现在开头（「詳細を見る」「戻る」这类）
+    // A Japanese prefix followed by letters is ordinary text, not a button.
+    // Exact labels and punctuation-delimited hints (戻る(B)) remain evidence.
     NSArray<NSString *> *japaneseTokens = @[@"戻る", @"戻", @"閉じる", @"詳細", @"次へ",
                                             @"決定", @"設定", @"メニュー", @"スキップ"];
     for (NSString *token in japaneseTokens) {
-        if ([normalized isEqualToString:token] || [normalized hasPrefix:token]) { return YES; }
+        if ([normalized isEqualToString:token]) { return YES; }
+        if ([normalized hasPrefix:token] && normalized.length > token.length &&
+            ![NSCharacterSet.letterCharacterSet characterIsMember:[normalized characterAtIndex:token.length]]) { return YES; }
     }
 
     // 拉丁词：必须是独立词，不能在别的单词里（避免 "Books" → "ok"）
@@ -900,7 +921,97 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
     return NO;
 }
 
++ (BOOL)isWrappedDialogueBand:(NSArray<OCRTextItem *> *)band {
+    if (band.count < 3 || ![self isSpeakerLabelItem:band.firstObject inPool:band]) { return NO; }
+    NSUInteger kanaLines = 0;
+    BOOL punctuated = NO, continuation = NO;
+    NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…・、"];
+    NSCharacterSet *complete = [NSCharacterSet characterSetWithCharactersInString:@"。．.！!？?…‥"];
+    OCRTextItem *previous = nil;
+    for (OCRTextItem *item in band) {
+        CGRect box = item.boundingBox;
+        if (CGRectGetMidY(box) > .45 || box.size.height < .026 || box.size.width > .30) { return NO; }
+        if (previous) {
+            CGRect before = previous.boundingBox;
+            CGFloat height = MAX(before.size.height,box.size.height);
+            if (fabs(CGRectGetMinX(before)-CGRectGetMinX(box)) > MAX(.025,height) ||
+                fabs(CGRectGetMidY(before)-CGRectGetMidY(box)) > height*2.5) { return NO; }
+        }
+        NSString *text = FYNormalizeOCRTextForComparison(item.text);
+        if (text.length >= 3 && [self containsJapaneseKana:text]) {
+            kanaLines++;
+            unichar last = [text characterAtIndex:text.length-1];
+            punctuated |= [enders characterIsMember:last];
+            continuation |= ![self looksLikeSpeakerName:text] && ![complete characterIsMember:last];
+        }
+        previous = item;
+    }
+    return kanaLines >= 2 && punctuated && continuation;
+}
+
++ (NSArray<OCRTextItem *> *)separatedDialogueItemsInItems:(NSArray<OCRTextItem *> *)items {
+    NSSet *controls = [NSSet setWithArray:@[@"戻る",@"戻",@"閉じる",@"詳細",@"次へ",@"決定",@"設定",@"メニュー",@"スキップ",
+        @"back",@"close",@"menu",@"next",@"ok",@"cancel",@"skip",@"setting",@"settings",@"web"]];
+    BOOL (^control)(OCRTextItem *) = ^BOOL(OCRTextItem *item) {
+        return [controls containsObject:FYNormalizeOCRTextForComparison(item.text).lowercaseString] || [self isCornerHelpButton:item];
+    };
+    NSArray *band = [self subtitleBandItems:items];
+    if ([self isWrappedDialogueBand:band]) {
+        BOOL outsideControl = NO, onlyControls = YES;
+        for (OCRTextItem *item in items) {
+            if ([band containsObject:item] || [self isFurigana:item nearLargerLineInItems:items]) { continue; }
+            outsideControl = YES;
+            if (!control(item)) { onlyControls = NO; }
+        }
+        if (outsideControl && onlyControls) { return band; }
+    }
+    OCRTextItem *anchor = nil;
+    NSCharacterSet *punctuation = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…"];
+    NSCharacterSet *latin = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"];
+    for (OCRTextItem *item in items) {
+        NSString *text = FYNormalizeOCRTextForComparison(item.text);
+        if (![self isDialogueAnchor:item] || control(item) || item.speakerLabel) { continue; }
+        BOOL spoken = [self containsJapaneseKana:text] && [text rangeOfCharacterFromSet:punctuation].location != NSNotFound;
+        spoken |= [text rangeOfCharacterFromSet:latin].location != NSNotFound &&
+            ([text hasSuffix:@"."] || [text hasSuffix:@"!"] || [text hasSuffix:@"?"]);
+        if (spoken && (!anchor || item.boundingBox.size.width > anchor.boundingBox.size.width)) { anchor = item; }
+    }
+    if (!anchor) { return @[]; }
+    NSMutableArray<OCRTextItem *> *body = [NSMutableArray arrayWithObject:anchor];
+    BOOL added;
+    do {
+        added = NO;
+        for (OCRTextItem *item in items) {
+            if ([body containsObject:item] || control(item) || CGRectGetMidY(item.boundingBox) > .42) { continue; }
+            for (OCRTextItem *row in [body copy]) {
+                CGRect a = item.boundingBox, b = row.boundingBox;
+                CGFloat overlap = MIN(CGRectGetMaxX(a),CGRectGetMaxX(b))-MAX(CGRectGetMinX(a),CGRectGetMinX(b));
+                if (FYDialogueAdjacentRowFragments(item,row) ||
+                    (overlap > 0 && overlap >= MIN(a.size.width,b.size.width)*.5 &&
+                     fabs(CGRectGetMidY(a)-CGRectGetMidY(b)) <= MIN(.12,MAX(a.size.height,b.size.height)*2.5))) {
+                    [body addObject:item];added=YES;break;
+                }
+            }
+        }
+    } while (added);
+    CGFloat top = 0;
+    for (OCRTextItem *item in body) { top = MAX(top,CGRectGetMaxY(item.boundingBox)); }
+    BOOL separated = NO;
+    for (OCRTextItem *item in items) {
+        if ([body containsObject:item] || [self isFurigana:item nearLargerLineInItems:items]) { continue; }
+        if (control(item)) { separated = YES;continue; }
+        CGRect box = item.boundingBox, spoken = anchor.boundingBox;
+        if (CGRectGetMinY(box) < top + .025 ||
+            !(spoken.size.width >= box.size.width*1.25 || spoken.size.height >= box.size.height*1.10)) { return @[]; }
+        separated = YES;
+    }
+    return separated ? body : @[];
+}
+
 + (BOOL)looksLikeUIFrame:(NSArray<OCRTextItem *> *)blocks {
+    // A distinct lower spoken region can coexist with options and controls.
+    // Equal-sized rows of a pure list do not provide this separation evidence.
+    if ([self separatedDialogueItemsInItems:blocks].count > 0) { return NO; }
     NSUInteger smallBoxCount = 0;
     NSUInteger edgeCount = 0;
     NSUInteger wideLineCount = 0;
@@ -932,33 +1043,14 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
         // A continuation fragment distinguishes the supported short-dialogue
         // case from a list of independently completed sentences.
         NSArray<OCRTextItem *> *band = [self subtitleBandItems:blocks];
-        NSUInteger kanaLines = 0, bandSmallBoxes = 0;
-        BOOL compact = band.count >= 3, punctuated = NO, hasContinuation = NO;
-        BOOL hasSpeakerLabel = band.count > 0 && [self isSpeakerLabelItem:band.firstObject inPool:band];
-        NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…・、"];
-        NSCharacterSet *sentenceEnders = [NSCharacterSet characterSetWithCharactersInString:@"。．.！!？?…‥"];
-        OCRTextItem *previous = nil;
+        NSUInteger bandSmallBoxes = 0;
         for (OCRTextItem *item in band) {
             CGRect box = item.boundingBox;
             NSString *text = FYNormalizeOCRTextForComparison(item.text);
-            if (CGRectGetMidY(box) > 0.45 || box.size.height < 0.026 || box.size.width > 0.30) { compact = NO; }
-            if (previous) {
-                CGRect before = previous.boundingBox;
-                CGFloat lineHeight = MAX(before.size.height, box.size.height);
-                if (fabs(CGRectGetMinX(before) - CGRectGetMinX(box)) > MAX(0.025, lineHeight) ||
-                    fabs(CGRectGetMidY(before) - CGRectGetMidY(box)) > lineHeight * 2.5) { compact = NO; }
-            }
-            if (text.length >= 3 && [self containsJapaneseKana:text]) {
-                kanaLines++;
-                if ([enders characterIsMember:[text characterAtIndex:text.length - 1]]) { punctuated = YES; }
-                if (![self looksLikeSpeakerName:text] &&
-                    ![sentenceEnders characterIsMember:[text characterAtIndex:text.length - 1]]) { hasContinuation = YES; }
-            }
             if (text.length <= 8 && box.size.height < 0.036 && box.size.width < 0.20 &&
                 ![self isFurigana:item nearLargerLineInItems:blocks]) { bandSmallBoxes++; }
-            previous = item;
         }
-        BOOL wrappedSpeech = compact && hasSpeakerLabel && hasContinuation && kanaLines >= 2 && punctuated;
+        BOOL wrappedSpeech = [self isWrappedDialogueBand:band];
         NSUInteger menuBoxes = wrappedSpeech ? smallBoxCount - bandSmallBoxes : smallBoxCount;
         if (menuBoxes >= 4 || (blocks.count >= 5 && menuBoxes >= 3)) { return YES; }
     }
@@ -988,36 +1080,10 @@ static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right
     return NO;
 }
 
-// OCR 常把紧邻对白的小按钮粘进同一行：实测 `思い出した。` 被读成 `思い出した。使用`。
-// 直接发去翻译，模型会照着输出「想起来了。使用」—— 按钮文字混进了字幕。
-// 规则：句末标点之后只剩一小段**纯汉字**（2~4 字），且整串里有假名，就把它当按钮切掉。
+// A string alone cannot distinguish a trailing spoken word from an OCR-fused
+// button. Preserve it; separately observed controls are filtered with geometry.
 + (NSString *)dialogueTextWithoutTrailingButton:(NSString *)text {
-    NSString *trimmed = (text ? [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"");
-    if (trimmed.length == 0) { return trimmed; }
-
-    NSCharacterSet *kanaSet = [NSCharacterSet characterSetWithCharactersInString:
-        @"ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴー"];
-    BOOL hasKana = NO;
-    for (NSUInteger index = 0; index < trimmed.length; index++) {
-        if ([kanaSet characterIsMember:[trimmed characterAtIndex:index]]) { hasKana = YES; break; }
-    }
-    if (!hasKana) { return trimmed; }
-
-    // 从末尾往前吃掉 2~4 个纯汉字，并要求它前面是句末标点
-    NSUInteger end = trimmed.length;
-    NSUInteger runStart = end;
-    while (runStart > 0) {
-        unichar character = [trimmed characterAtIndex:runStart - 1];
-        if (character >= 0x4E00 && character <= 0x9FFF) { runStart -= 1; continue; }
-        break;
-    }
-    NSUInteger hanRun = end - runStart;
-    if (hanRun < 2 || hanRun > 4 || runStart == 0) { return trimmed; }
-
-    NSCharacterSet *sentenceEnd = [NSCharacterSet characterSetWithCharactersInString:@"。．.!！?？、，,…」』）)"];
-    if (![sentenceEnd characterIsMember:[trimmed characterAtIndex:runStart - 1]]) { return trimmed; }
-
-    return [[trimmed substringToIndex:runStart] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return [(text ?: @"") stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
 }
 
 @end

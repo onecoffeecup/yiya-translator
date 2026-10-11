@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "name": "routing-r2-dialogue-two-menu-buttons",
+  "mode": "dialogue",
+  "source": "window",
+  "stable": true,
+  "auto_mode": true,
+  "language": "ja",
+  "responses": [
+    {
+      "source": "今日は図書館で待っています。",
+      "translation": "合成字幕"
+    }
+  ],
+  "steps": [
+    {
+      "action": "frame",
+      "at_ms": 0,
+      "blocks": [
+        {
+          "text": "戻る",
+          "box": [
+            0.82,
+            0.94,
+            0.1,
+            0.03
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.86,
+            0.12,
+            0.03
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.12,
+            0.38,
+            0.045
+          ]
+        }
+      ]
+    },
+    {
+      "action": "frame",
+      "at_ms": 500,
+      "blocks": [
+        {
+          "text": "戻る",
+          "box": [
+            0.82,
+            0.94,
+            0.1,
+            0.03
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.86,
+            0.12,
+            0.03
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.12,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0
+      }
+    },
+    {
+      "action": "frame",
+      "at_ms": 1000,
+      "blocks": [
+        {
+          "text": "戻る",
+          "box": [
+            0.82,
+            0.94,
+            0.1,
+            0.03
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.86,
+            0.12,
+            0.03
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.12,
+            0.38,
+            0.045
+          ]
+        }
+      ]
+    },
+    {
+      "action": "frame",
+      "at_ms": 1500,
+      "blocks": [
+        {
+          "text": "戻る",
+          "box": [
+            0.82,
+            0.94,
+            0.1,
+            0.03
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.86,
+            0.12,
+            0.03
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.12,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0,
+        "requests": 1,
+        "captions": [
+          "合成字幕"
+        ],
+        "inline": []
+      }
+    }
+  ],
+  "notes": "Synthetic review regression: current product routing and complete-text requirements. Injected OCR after Vision; no real data."
+}

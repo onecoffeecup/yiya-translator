@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "name": "routing-r14-natural-trailing-kanji",
+  "mode": "dialogue",
+  "source": "window",
+  "stable": true,
+  "auto_mode": true,
+  "language": "ja",
+  "responses": [
+    {
+      "translation": "嗯，约好了"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "うん、約束",
+          "box": [
+            0.2,
+            0.15,
+            0.26,
+            0.045
+          ]
+        }
+      ]
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "うん、約束",
+          "box": [
+            0.2,
+            0.15,
+            0.26,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "うん、約束",
+          "box": [
+            0.2,
+            0.15,
+            0.26,
+            0.045
+          ]
+        }
+      ]
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "うん、約束",
+          "box": [
+            0.2,
+            0.15,
+            0.26,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "sources": [
+          "うん、約束"
+        ],
+        "captions": [
+          "嗯，约好了"
+        ],
+        "requests": 1
+      }
+    }
+  ],
+  "notes": "Synthetic review regression: current product routing and complete-text requirements. Injected OCR after Vision; no real data."
+}

@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "name": "routing-r8-japanese-modoru-speech",
+  "mode": "dialogue",
+  "source": "window",
+  "stable": true,
+  "auto_mode": true,
+  "language": "ja",
+  "responses": [
+    {
+      "translation": "别回去。"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "戻らないで。",
+          "box": [
+            0.2,
+            0.15,
+            0.14,
+            0.045
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.8,
+            0.12,
+            0.03
+          ]
+        }
+      ]
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "戻らないで。",
+          "box": [
+            0.2,
+            0.15,
+            0.14,
+            0.045
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.8,
+            0.12,
+            0.03
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "戻らないで。",
+          "box": [
+            0.2,
+            0.15,
+            0.14,
+            0.045
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.8,
+            0.12,
+            0.03
+          ]
+        }
+      ]
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "戻らないで。",
+          "box": [
+            0.2,
+            0.15,
+            0.14,
+            0.045
+          ]
+        },
+        {
+          "text": "メニュー",
+          "box": [
+            0.82,
+            0.8,
+            0.12,
+            0.03
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0,
+        "requests": 1,
+        "sources": [
+          "戻らないで。"
+        ],
+        "captions": [
+          "别回去。"
+        ]
+      }
+    }
+  ],
+  "notes": "Synthetic review regression: current product routing and complete-text requirements. Injected OCR after Vision; no real data."
+}

@@ -5982,7 +5982,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
 - (BOOL)shouldIgnoreInlineText:(NSString *)text normalized:(NSString *)normalized boundingBox:(CGRect)box strict:(BOOL)strict {
     FYContentTextFilterReason reason = [FYContentRouter filterReasonForText:text normalized:normalized
-                                                             boundingBox:box strict:strict];
+                                                             boundingBox:box strict:strict
+                                                               japanese:self.languageControl.selectedSegment == 0];
     if (reason != FYContentTextKeep) { FYContentFilterDiagnosticObserver()(text, box, reason); }
     return reason != FYContentTextKeep;
 }

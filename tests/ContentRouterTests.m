@@ -151,8 +151,8 @@ int main(void) {
         OCRTextItem *back = Item(@"戻る",.1,.5,.1,.03);
         OCRTextItem *menu = Item(@"メニュー",.1,.6,.1,.03);
         decision = [FYContentRouter modeDecisionForItems:@[body,back,menu] fallback:0];
-        Check(decision.mode == 1 && [decision.reason isEqual:@"ui_evidence"],
-              @"extraction preserves the existing UI-first priority instead of silently fixing it");
+        Check(decision.mode == 0 && [decision.reason isEqual:@"dialogue_band"],
+              @"a distinct lower spoken region coexists with persistent UI controls");
 
         CGRect box = CGRectMake(.2,.2,.4,.07);
         Check(Filter(@"A complete English sentence.",box,YES) == FYContentTextKeep &&
@@ -161,8 +161,41 @@ int main(void) {
         Check(Filter(@"え……",box,YES) == FYContentTextKeep, @"short kana with ellipsis remains valid dialogue");
         Check(Filter(@"…！？",box,YES) == FYContentTextPunctuationOnly, @"pure punctuation has an explicit reason");
         Check(Filter(@"",box,NO) == FYContentTextEmpty, @"empty text reason");
-        Check(Filter(@"today",box,YES) == FYContentTextDialogueControl, @"existing dialogue token filtering is retained");
-        Check(Filter(@"Hello",box,NO) == FYContentTextShortUIFragment, @"existing short English UI gap is not changed");
+        Check(Filter(@"today",box,YES) == FYContentTextKeep, @"a central spoken control-like word is retained");
+        Check(Filter(@"today",CGRectMake(.9,.8,.08,.03),YES) == FYContentTextDialogueControl,
+              @"an isolated small peripheral control is still filtered");
+        Check(Filter(@"Hello",box,NO) == FYContentTextShortUIFragment, @"Japanese OCR retains short Latin-noise filtering");
+        Check([FYContentRouter filterReasonForText:@"Hello" normalized:@"Hello" boundingBox:box strict:NO japanese:NO] == FYContentTextKeep,
+              @"English OCR keeps short UI words while Japanese OCR keeps its Latin-noise filter");
+        Check(Filter(@"ｽﾀｰﾄ",box,NO) == FYContentTextKeep, @"halfwidth kana is valid UI text");
+        for (NSString *text in @[@"I know.",@"Books are here.",@"戻らないで。",@"うん、約束",@"そう。約束"]) {
+            Check(Filter(text,box,YES) == FYContentTextKeep, @"ordinary speech does not match a control substring");
+            Check([[FYContentRouter dialogueTextWithoutTrailingButton:text] isEqual:text], @"ordinary trailing kanji remains complete");
+        }
+        Check([FYContentRouter textHitsUIToken:@"go back"] && ![FYContentRouter textHitsUIToken:@"goback"],
+              @"Latin UI matching preserves actual word boundaries");
+        Check([FYContentRouter filterReasonForText:@"No" normalized:@"No" boundingBox:box strict:NO japanese:NO] == FYContentTextKeep,
+              @"English No is a valid menu choice, not a numbering decoration");
+        OCRTextItem *longBody = Item(@"今日は図書館で待っています。",.2,.12,.38,.045);
+        NSArray *choices = @[Item(@"先に行く",.2,.75,.14,.03),Item(@"ここで待つ",.2,.61,.14,.03),
+            Item(@"話を聞く",.2,.47,.14,.03),Item(@"後で話す",.2,.33,.14,.03)];
+        for (NSArray *observations in @[
+            [choices arrayByAddingObjectsFromArray:@[name,longBody]],
+            [@[longBody,name] arrayByAddingObjectsFromArray:choices.reverseObjectEnumerator.allObjects]]) {
+            decision = [FYContentRouter modeDecisionForItems:observations fallback:1];
+            route = [FYContentRouter dialogueRouteForItems:observations optionsCanPasteInline:YES filterObserver:nil];
+            Check(decision.mode == 0 && [route.dialogueItems isEqual:@[name,longBody]] && [route.optionItems isEqual:choices],
+                  @"four choices retain separate routing even when a name plate bridges the old .12 cluster gap");
+        }
+        NSMutableArray *list = [NSMutableArray array];
+        for (NSUInteger row=0;row<6;row++) {
+            [list addObject:Item(@"ここで待ちましょう。",.2,.75-row*.12,.25,.04)];
+        }
+        Check([FYContentRouter looksLikeUIFrame:list] && [FYContentRouter contentModeForItems:list fallback:0] == 1,
+              @"six equal-sized sentence rows remain a pure menu rather than mixed speech");
+        [list addObject:Item(@"利用方法についてのお知らせ",.12,.88,.55,.05)];
+        Check([FYContentRouter contentModeForItems:list fallback:0] == 1,
+              @"a broad announcement heading prevents a lower sentence from overriding dense UI");
         Check(Filter(@"2026/10/11",box,YES) == FYContentTextDateOrNumber, @"existing numeric filter is retained");
         Check(Filter(@"行くぞ。",CGRectMake(.01,.01,.08,.04),YES) == FYContentTextCorner,
               @"corner geometry filtering is retained");

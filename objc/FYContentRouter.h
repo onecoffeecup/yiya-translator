@@ -67,6 +67,8 @@ typedef NSString *(^FYContentComparisonKey)(NSString *text);
 + (BOOL)isExcludedSpeakerLabelItem:(OCRTextItem *)item;
 + (FYContentTextFilterReason)filterReasonForText:(NSString *)text normalized:(NSString *)normalized
                                   boundingBox:(CGRect)box strict:(BOOL)strict;
++ (FYContentTextFilterReason)filterReasonForText:(NSString *)text normalized:(NSString *)normalized
+                                  boundingBox:(CGRect)box strict:(BOOL)strict japanese:(BOOL)japanese;
 
 + (double)similarityRatio:(NSString *)left comparedTo:(NSString *)right;
 // Reuse the learning model's comparison key through injection; no learning DB

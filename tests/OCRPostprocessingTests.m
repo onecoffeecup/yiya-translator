@@ -336,7 +336,9 @@ int main(void) {
         OCRTextItem *noLast=Item(@"無",0,0,1,1);
         [FYOCRManager remapItems:@[noLast] fromPixelCrop:CGRectMake(125,400,250,200) imageSize:CGSizeMake(1000,800)];
         Expect(CGRectEqualToRect(noLast.lastLineBox,CGRectZero), @"empty last-line box remains empty");
-        Expect([FYOCRManager textHitsUIToken:@"戻る"] && [FYOCRManager textHitsUIToken:@"詳細を見る"], @"Japanese UI token exact/prefix policy");
+        Expect([FYOCRManager textHitsUIToken:@"戻る"] && [FYOCRManager textHitsUIToken:@"戻る(B)"] &&
+               ![FYOCRManager textHitsUIToken:@"詳細を見る"] && ![FYOCRManager textHitsUIToken:@"戻らないで。"],
+               @"Japanese control labels require an exact or punctuation-delimited token");
         Expect(![FYOCRManager textHitsUIToken:@"River Books"] && ![FYOCRManager textHitsUIToken:@"booking"], @"Latin tokens cannot match inside words");
         Expect([FYOCRManager textHitsUIToken:@"Close!"] && [FYOCRManager textHitsUIToken:@"WEB 2"], @"Latin token boundaries and case folding retained");
         Expect(![FYOCRManager textHitsUIToken:nil], @"empty UI token input");
@@ -387,8 +389,8 @@ int main(void) {
             Item(@"君のこと",.30,.144,.11,.032), Item(@"なんだけど……",.30,.081,.14,.032)];
         Expect(![FYOCRManager looksLikeUIFrame:wrappedDialogue],
                @"speaker and unfinished speech fragments retain the short wrapped-dialogue exemption");
-        Expect([FYOCRManager looksLikeUIFrame:[shortDialogue arrayByAddingObjectsFromArray:@[back,menu]]],
-               @"explicit menu controls still override a compact dialogue-shaped band");
+        Expect(![FYOCRManager looksLikeUIFrame:[shortDialogue arrayByAddingObjectsFromArray:@[back,menu]]],
+               @"persistent controls outside confirmed wrapped speech cannot erase the dialogue region");
         NSMutableArray *upperShort=[NSMutableArray new], *lowerLabels=[NSMutableArray new];
         for (NSUInteger i=0;i<shortDialogue.count;i++) {
             OCRTextItem *item=shortDialogue[i]; CGRect box=item.boundingBox; box.origin.y+=.5;
@@ -397,8 +399,8 @@ int main(void) {
         }
         Expect([FYOCRManager looksLikeUIFrame:upperShort] && [FYOCRManager looksLikeUIFrame:lowerLabels],
                @"upper-screen options and lower-screen non-spoken labels remain UI");
-        Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@" 思い出した。使用 "] isEqual:@"思い出した。"], @"two-kanji trailing button stripped from kana dialogue");
-        Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"そうだ。操作説明"] isEqual:@"そうだ。"], @"four-kanji trailing button stripped");
+        Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@" 思い出した。使用 "] isEqual:@"思い出した。使用"], @"a string without button-role evidence preserves two trailing kanji");
+        Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"そうだ。操作説明"] isEqual:@"そうだ。操作説明"], @"a string without button-role evidence preserves four trailing kanji");
         Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"そうだ。使"] isEqual:@"そうだ。使"], @"single trailing kanji retained");
         Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"そうだ。操作説明方法"] isEqual:@"そうだ。操作説明方法"], @"over-four trailing kanji retained");
         Expect([[FYOCRManager dialogueTextWithoutTrailingButton:@"日本語。使用"] isEqual:@"日本語。使用"], @"kanji-only line retained without kana evidence");
@@ -468,7 +470,7 @@ int main(void) {
         Expect(!FYDetectBrightOCRContentRegion(pixels,7,ph,stride,&detected,NULL,NULL,0), @"undersized detection input rejected");
         Expect([FYOCRManager contentModeForItems:nil fallback:7]==7, @"empty mode input retains exact fallback");
         Expect([FYOCRManager contentModeForItems:@[anchor] fallback:1]==0, @"formed dialogue selects dialogue mode");
-        Expect([FYOCRManager contentModeForItems:@[anchor,back,menu] fallback:0]==1, @"UI evidence takes precedence over dialogue anchor");
+        Expect([FYOCRManager contentModeForItems:@[anchor,back,menu] fallback:0]==0, @"independent menu controls coexist with a distinct lower dialogue region");
         OCRTextItem *fragment=Item(@"え",.25,.2,.03,.04);
         Expect([FYOCRManager contentModeForItems:@[fragment] fallback:0]==0 && [FYOCRManager contentModeForItems:@[fragment] fallback:1]==1, @"central short kana fragment cannot switch established mode");
         Expect([FYOCRManager contentModeForItems:@[help] fallback:0]==0, @"corner hint retains dialogue fallback");
