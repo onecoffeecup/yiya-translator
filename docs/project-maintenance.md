@@ -14,15 +14,23 @@
 
 | 事实面 | 状态与依据 |
 | --- | --- |
-| 代码与远端 | `verified-current`：Mac 分支 `dev0.2.1_261009` 的混合路由、文字保留及 20 个合成 Replay 已提交并推送为 `a6ad14b`；之前姓名排除 / 学习身份 / 最近台词的 `163e48f` 及其它改动已有远端记录。本轮仅影响 Mac 生产处理；后续交付状态文档提交不改变功能验证范围。 |
-| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 67，含原 build 66 的姓名与历史修补，以及本轮混合路由、英语字段和句尾保留。严格签名、安装 / 打包 / release / dSYM 双架构 UUID 及 Key 元数据已核对，见 [混合路由修复与安装记录](dialogue-inline-routing-fix.md)。build 66 的此前用户确认见 [姓名排除记录](dialogue-speaker-exclusion.md)。 |
-| 公开交付 | `verified-current`：GitHub 最新 Release 仍为 v0.2.1，Sparkle 清单仍为 build 17；dev 推送和本机安装没有更新公开附件。 |
-| 文档与规则 | `changed-and-verified`：对白规则已同步统一姓名排除与本轮路由修复；源码 README、两层 AGENTS 与内部视觉规范同步手动侧栏、原生窗口尺寸和阅读布局规则；具体合同分别在[窗口缩放](window-resize.md)、[阅读布局](live-reading-layout.md)、[服务组件](translation-service-settings.md)。 |
-| 用户体验 | `partially-verified`：用户于 2026-10-11 对 build 66 本机复测后回复「好了，commit 然后提交吧」，确认本轮对白姓名排除及最近台词通过。该场景有采集卡实时页、最近列表和点击原句的现场核对；本轮 build 67 的实际混合画面及纯菜单尚待针对性抽查，不要求重走窗口、侧栏或整套视觉验收；其它游戏样式与长时间运行仍待验证。正式 build 59 的右边缘 / 右下角真实鼠标体验、另一台 Mac、Intel 实机尚未验收；完整视觉套件仍有修改前已复现的「已选中」徽标失败。 |
+| 代码与远端 | `verified-current`：远端 Mac 分支 `dev0.2.1_261009` 已包含服务拒答／截断及 Enter 保存修复 `8dbf649`，此前混合路由 `a6ad14b` 与姓名／历史修补 `163e48f` 保留；行为与证据见[服务组件](translation-service-settings.md)。`pending`：后续本机审查提交 `64c3316`、`223f66f`、`82a45df`、`4ebd835`、`54cfec0` 已提交，文档核对时尚未推送；分别涉及粘连按钮缺口、边缘姓名栏采样、自报姓名身份、诊断路由重复计算与过滤主线程约定。 |
+| 本机运行产物 | `verified-current`（已安装身份）：本轮只读核对 `~/Applications/译芽.app` 为 0.2.1 build 67，双架构 UUID 与[混合路由安装记录](dialogue-inline-routing-fix.md)一致，包含原 build 66 的姓名／历史及 build 67 的路由／文字保留。服务修复 `8dbf649` 和后续审查提交尚未安装，当前 App 不能用于验收这些新改动；原签名、打包、dSYM 与凭据元数据证据保留其安装时范围。 |
+| 公开交付 | `verified-current`：GitHub 最新 Release 为 v0.2.1（2026-10-08），公开 Sparkle 清单仍为 build 17。服务修复通过 dev 源码交付，未更新公开附件；开发提交、隔离检查及本机 build 67 不代表玩家已收到新修复。 |
+| 文档与规则 | `changed-and-verified`：README、[服务组件](translation-service-settings.md)、DEBUG_WORKFLOW 与本页同步服务修复；[六条审查记录](review-speaker-routing-20261011.md)、[姓名排除](dialogue-speaker-exclusion.md)与[对白规则](dialogue-inline-mode-rules.md)同步审查判断、采样有效点、每键最多剥一行、诊断计算与主线程约定。既有手动侧栏、窗口尺寸、阅读与 Key 规则继续有效；本轮只更新文档，检查内容、链接与证据，不重新构建或运行 UI。 |
+| 用户体验 | `pending`（服务修复）：真实 Claude 拒答／截断、游戏设备及跨机器体验尚未验收；三个设置套件使用合成 Key、隔离偏好和原生 AppKit，覆盖范围见[服务修复记录](translation-service-settings.md)。此前用户已确认 build 66 的姓名排除与最近台词；build 67 的实际混合画面／纯菜单仍待抽查。正式 build 59 的真实鼠标体验、另一台 Mac、Intel 实机和长时间运行保留原未验收范围；完整视觉套件仍有修改前已复现的“已选中”徽标失败；小画面贴译沿用用户确认的高度上限、内部滚动与既有折叠避让，两条旧桌面预期失败另见[字幕外观](subtitle-appearance.md)。 |
 | Agent 记忆 | `out-of-scope`：本次只更新项目文件与约束，不手改平台生成记忆。 |
-| 工作区 | `verified-current`：现役仓库仅一个 worktree，功能修复提交 `a6ad14b` 已推送。本次文档收尾同步 build 67 和提交状态，不重新构建或安装；最终核心检查 161 项记录通过，20 个新增 Replay 各两遍、373 个源码 / 夹具 / 媒体散列与已提交文件一致。注册 known gap 数为 0 不代表背景角色、混合两路共享取消等未注册边界已解决；详见 [专项范围](dialogue-inline-routing-fix.md)。历史分支、私有日志、签名产物与备份保留。 |
+| 工作区 | `pending`（其他工作）：现役仓库只有一个 worktree，仍有构建／检查脚本、规则与布局说明／示例图、源码构建说明、采集卡离线检查和新增 ReleaseBinaryTests 的未提交改动；本轮服务提交未包含这些文件。历史分支、私有日志、签名产物与备份保留。最新本机审查工作树报告为 168 条记录：166 条通过、2 条复现同一粘连按钮已知缺口，整体 `baseline_passed_with_known_gaps`，不代表全部产品要求通过。 |
 
 查句悬停在用户确认预览后共用实时页的生产组件。新增 `QuickSentenceHoverTests` 与五组相关原生 UI 回归通过，覆盖词义／语法优先级、选择复制、自然高度、外层滚动、关闭及迟到回调隔离；安装前后 65 个生产源码散列一致，正式应用打开后为暂停空状态。命令、build 61 安装 UUID、Key 元数据及最短手动验收见[阅读布局](live-reading-layout.md)。真实游戏、设备与物理鼠标体验仍待确认。
+
+### 本次服务修复与后续审查的证据范围
+
+服务提交 `8dbf649` 的独立检查为 `.build/debug/20261011T141237Z-98526c/summary.json`：166 条全通过、378 个散列核对一致；三组设置 UI、14 项翻译解码与学习拒答回归通过，前后日志及提交文件散列在 `.build/refusal-enter-fix/evidence.json`。这些数字描述当时服务修复工作树，不能替代后续代码验证。
+
+后续本机审查提交截至 `54cfec0` 的 `.build/debug/20261011T141946Z-f2f2a5/summary.json` 包含 168 条记录，检查期间源码未变，380 个散列在本轮文档修改前与工作树一致。`known-gaps/fused-trailing-button.json` 的两遍回放仍分别得到对白与按钮粘连的源文，登记为一个已知缺口，详见[OCR 稳定合同](inline-ocr-stability.md)。本次只做文档和安装身份核对；文档变动不作为一次新的核心、桌面或设备验收。
+
+六条审查的独立判断、根因、五个提交、失败与通过命令、工作树范围及未验证边界已汇总到[审查记录](review-speaker-routing-20261011.md)。本机仍为 build 67，当前无需重复验收尚未安装的审查修补；后续安装新版本时定向检查贴底／贴左姓名栏和正文首行自报姓名，并核对实时原文、译文与最近台词。该组源码回归不替代 build 67 混合画面／纯菜单的原待验收项。
 
 ### build 59 文档收尾的历史范围
 

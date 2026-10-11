@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Headless, isolated production pipeline. No FY_TEST_ALLOW_UI required.
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
 OUT="$ROOT_DIR/.build/layout-debug"
 mkdir -p "$OUT"
-clang -DFY_ENABLE_LAYOUT_DEBUG=1 -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" -DFY_ENABLE_LAYOUT_DEBUG=1 -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -Wno-nullability-completeness -Wno-unused-function -Wno-nonnull \
   -fmodules-cache-path="$OUT/module-cache" -include "$ROOT_DIR/tests/FYTestIsolation.h" \
   -I objc -I objc/learning \

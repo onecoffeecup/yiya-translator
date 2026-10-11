@@ -8,6 +8,7 @@
 #   scripts/run-capture-card-check.sh authorize     触发一次相机权限申请（会弹系统提示）
 #   scripts/run-capture-card-check.sh capture <设备显示名> [帧数]
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 umask 077
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -30,7 +31,7 @@ FRAMEWORKS=(
 )
 
 build() { # build <工具源文件> <输出可执行名>
-  clang -fobjc-arc -fmodules -fmodules-cache-path="$MODULE_CACHE" \
+  clang "$FY_OPT" -fobjc-arc -fmodules -fmodules-cache-path="$MODULE_CACHE" \
     -mmacosx-version-min=13.0 -Wall -Wno-nullability-completeness -Wno-unused-function -Wno-nonnull \
     -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
     "$1" "${LINK_SOURCES[@]}" -o "$OUT/$2" "${FRAMEWORKS[@]}"
@@ -49,6 +50,7 @@ bundle_tool() { # bundle_tool <工具源文件> <可执行名> <bundle 名> <bun
   local source="$1" exe="$2" name="$3" identifier="$4" camera_note="$5"
   local bundle="$OUT/$name.app"
   local binary="$bundle/Contents/MacOS/$exe"
+  local optimization="$OUT/$exe.optimization"
   # Serialize rebuilding/signing the same tool. FD 9 is inherited by Python;
   # its flock remains held by this command-substitution shell until FD closes.
   exec 9>"$OUT/$exe.lock"
@@ -56,6 +58,7 @@ bundle_tool() { # bundle_tool <工具源文件> <可执行名> <bundle 名> <bun
   # 复用已签名的 bundle：ad-hoc 签名重编后 cdhash 变化会让相机权限授权失效，
   # 工具/生产源码、头文件、inc 或构建清单变更时重建；也可显式强制重建。
   if [ -x "$binary" ] && [ -z "${FY_CAPTURE_CARD_FORCE_REBUILD:-}" ] &&
+     [ -f "$optimization" ] && [ "$(cat "$optimization")" = "$FY_OPT" ] &&
      [ "$ROOT_DIR/scripts/run-capture-card-check.sh" -ot "$binary" ] &&
      [ "$ROOT_DIR/scripts/lib-sources.sh" -ot "$binary" ] &&
      [ -z "$(find "$ROOT_DIR/tools" "$ROOT_DIR/objc" \( -name '*.m' -o -name '*.h' -o -name '*.inc' \) -newer "$binary" -print -quit 2>/dev/null)" ]; then
@@ -90,6 +93,7 @@ PLIST
   # ad-hoc 签名每次重编 cdhash 都变，只有基于标识的需求才能让相机权限授权跨重编保留。
   codesign --force --deep --sign - --identifier "$identifier" \
     --requirements "=designated => identifier \"$identifier\"" "$bundle" >/dev/null
+  printf '%s\n' "$FY_OPT" > "$optimization"
   exec 9>&-
   echo "$bundle"
 }
@@ -112,7 +116,14 @@ if [ "$MODE" = "offline" ]; then
   # cannot overwrite a shared request.json or read each other's OCR results.
   OCR_ARGS=("$FRAME" "$REQUIRED" --dialogue-must-contain "$REQUIRED" --report "$REPORT")
   if [ "${FY_CAPTURE_CARD_FAST_OCR:-0}" = "1" ]; then OCR_ARGS+=(--fast); fi
-  open -W -n "$CHECK_APP" --args "${OCR_ARGS[@]}"
+  # 短任务可能在 open 注册 kevent 等待前已退出；本次唯一目录的原子报告仍可核对结果。
+  if ! open -W -n "$CHECK_APP" --args "${OCR_ARGS[@]}"; then
+    if [ ! -s "$REPORT" ]; then
+      echo "离线核对启动或等待失败，且未生成本次报告" >&2
+      exit 1
+    fi
+    echo "LaunchServices 等待异常，继续核对本次已完成的独立报告" >&2
+  fi
   cat "$REPORT" 2>/dev/null || echo "离线核对没有生成报告"
   grep -q "^PASS" "$REPORT" 2>/dev/null || { echo "离线核对失败" >&2; exit 1; }
   echo "离线核对通过：真实画面经生产 OCR／对白提取完成（报告 ${REPORT}）。"

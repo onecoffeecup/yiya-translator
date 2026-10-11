@@ -65,6 +65,9 @@ dsymutil "$BUILD_DIR/LiveCaptionTranslator" -o "$DSYM"
 diff <(dwarfdump --uuid "$BUILD_DIR/LiveCaptionTranslator" | awk '{print $2, $3}' | sort) \
      <(dwarfdump --uuid "$DSYM" | awk '{print $2, $3}' | sort)
 
+# dSYM 已收完 DWARF；去掉含本机绝对路径的 debug map 和本地符号，strip 不改 LC_UUID。
+strip -S -x "$BUILD_DIR/LiveCaptionTranslator"
+
 for arch in $ARCHS; do
   rm -f "$BUILD_DIR/LiveCaptionTranslator.$arch"
 done

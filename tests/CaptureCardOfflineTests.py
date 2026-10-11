@@ -14,7 +14,7 @@ EXPECTED = "Welcome to the test garden"
 
 
 class CaptureCardOfflineTests(unittest.TestCase):
-    def run_check(self, *args, fast=False, force_rebuild=False):
+    def run_check(self, *args, fast=False, force_rebuild=False, open_directory=None):
         env = dict(os.environ, FY_CAPTURE_CARD_ALLOW_HARDWARE="0")
         for key in ("FUYI_DIAG", "FY_CAPTURE_CARD_FAST_OCR", "FY_CAPTURE_CARD_FORCE_REBUILD"):
             env.pop(key, None)
@@ -22,6 +22,8 @@ class CaptureCardOfflineTests(unittest.TestCase):
             env["FY_CAPTURE_CARD_FAST_OCR"] = "1"
         if force_rebuild:
             env["FY_CAPTURE_CARD_FORCE_REBUILD"] = "1"
+        if open_directory:
+            env["PATH"] = str(open_directory) + os.pathsep + env["PATH"]
         return subprocess.run(["bash", str(SCRIPT), *map(str, args)], cwd=ROOT,
                               env=env, capture_output=True, text=True, timeout=120)
 
@@ -50,6 +52,34 @@ class CaptureCardOfflineTests(unittest.TestCase):
             result = self.run_check("offline", Path(directory) / "missing.png")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("找不到", result.stderr)
+
+    def run_with_wait_failure(self, required, launch=True):
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = Path(directory) / "open"
+            # Keep real LaunchServices/OCR processing; fail only its wait status.
+            wrapper.write_text('#!/bin/bash\n' + ('/usr/bin/open "$@"\n' if launch else '') +
+                               'echo "synthetic open wait failure" >&2\nexit 1\n')
+            wrapper.chmod(0o700)
+            return self.run_check("offline", IMAGE, required, fast=True, open_directory=directory)
+
+    def test_wait_failure_with_completed_real_ocr_report(self):
+        result = self.run_with_wait_failure(EXPECTED)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("synthetic open wait failure", result.stderr)
+        self.assertIn("识别级别: fast", result.stdout)
+        self.assertIn(f"对白提取: {EXPECTED}", result.stdout)
+        self.assertIn("\nPASS\n", result.stdout)
+
+    def test_wait_failure_cannot_override_failed_real_ocr_report(self):
+        result = self.run_with_wait_failure("FY_SENTINEL_MISSING_CAPTURE_ASSERTION")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("OCR 文本缺少", result.stdout)
+        self.assertNotIn("\nPASS\n", result.stdout)
+
+    def test_wait_failure_without_report_cannot_claim_pass(self):
+        result = self.run_with_wait_failure(EXPECTED, launch=False)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("\nPASS\n", result.stdout)
 
     def test_hardware_modes_remain_blocked_without_opt_in(self):
         for mode in ("inspect", "authorize", "authorize-ui", "capture"):

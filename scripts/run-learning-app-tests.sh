@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib-sources.sh"
 cd "$ROOT_DIR"
@@ -13,7 +14,7 @@ TEST_OUTPUT="${2:-$ROOT_DIR/.build/test-results/$TEST_SOURCE}"
 mkdir -p "$ROOT_DIR/.build/release" "$TEST_OUTPUT"
 LAYOUT_DEBUG_FLAGS=()
 if [[ "$TEST_SOURCE" == "InlineLayoutDebugUITests" ]]; then LAYOUT_DEBUG_FLAGS=(-DFY_ENABLE_LAYOUT_DEBUG=1); fi
-clang ${LAYOUT_DEBUG_FLAGS[@]+"${LAYOUT_DEBUG_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-nullability-completeness -Wno-unused-function \
+clang "$FY_OPT" ${LAYOUT_DEBUG_FLAGS[@]+"${LAYOUT_DEBUG_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-nullability-completeness -Wno-unused-function \
   -fmodules-cache-path="$FY_TEST_MODULE_CACHE" \
   -DFY_TEST_REQUIRES_UI=1 -include "$ROOT_DIR/tests/FYTestIsolation.h" \
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \

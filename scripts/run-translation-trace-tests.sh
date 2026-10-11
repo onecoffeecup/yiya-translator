@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib-sources.sh"
 OUT="$ROOT_DIR/.build/translation-trace-tests"
 mkdir -p "$OUT"
-clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wextra \
+clang "$FY_OPT" -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wextra \
   -fmodules-cache-path="$OUT/module-cache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationTraceTests.m" "${FY_RUNTIME_BASE_SOURCES[@]}" \
   -framework Cocoa -framework Foundation -o "$OUT/TranslationTraceTests"
@@ -13,7 +14,7 @@ clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wextra \
 # Headless integration with the real timer/cache/HTTP response code. The forced
 # test isolation header replaces capture and rejects all unmocked networking.
 cd "$ROOT_DIR"
-clang -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -Wno-nullability-completeness -Wno-unused-function -Wno-nonnull \
   -fmodules-cache-path="$OUT/module-cache" -include "$ROOT_DIR/tests/FYTestIsolation.h" \
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \

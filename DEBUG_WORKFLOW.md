@@ -172,6 +172,10 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 
 ## 当前覆盖与产品缺口
 
+2026-10-11 翻译服务修复：`8dbf649` 已推送 Mac 分支。新增失败回归先确认 Anthropic `refusal`／`max_tokens` 的 text 被接受，以及模型框真实 field editor 的 Enter 触发两次保存；修复后解码在 content 之前返回固定中文 NSError，学习拒答同样失败，服务框仅保留结束编辑委托。`anthropic-refusal-recovery.json` 与 `anthropic-truncation-recovery.json` 验证失败不缓存、不进入历史、4 秒节流后重试及成功缓存复用；翻译解码 14 项、学习套件和三组设置 UI 均通过。该轮统一 Debug 为 166 条全通过、378 个散列一致，报告 `.build/debug/20261011T141237Z-98526c/summary.json`；命令与前后证据见[服务组件记录](docs/translation-service-settings.md)。该轮未安装、未调用真实翻译服务。
+
+2026-10-11 后续审查基线：本机追加提交截至 `54cfec0` 的工作树报告为 `.build/debug/20261011T141946Z-f2f2a5/summary.json`，168 条记录中 166 条通过、2 条 `known_gap_reproduced`；整体为 `baseline_passed_with_known_gaps`，380 个源码／夹具／媒体散列在文档同步前与当前文件一致。两条失败来自同一 `known-gaps/fused-trailing-button.json` 的两遍回放，表示按钮与对白粘在一个 OCR item 时仍无法单独去掉按钮文字；缺口尚未修复，不能写成全部产品要求通过。它在上述 166 条服务报告之后登记，历史零缺口记录不代表当前基线；边界见[OCR 稳定合同](docs/inline-ocr-stability.md)与[维护状态](docs/project-maintenance.md)。六条独立判断、失败证据、五个提交及定向验收见[审查记录](docs/review-speaker-routing-20261011.md)。本次仅同步文档，不重跑或扩大代码、桌面与设备验收范围。
+
 2026-10-11 窗口与实时阅读集成：功能提交 `4956d21` 与翻译服务提交 `73c306e` 已推送 Mac 分支 `dev0.2.1_261009`，本机已安装 0.2.1 build 59。原生外框驱动内部画布，AI 侧栏按用户选择只手动开关，展开 / 收起最小内容宽度为 1100 / 720 pt；保留中文优先和紧凑空状态。新增缩放回归先复现外框锁宽与 960 → 958 pt 时侧栏释放导致画面跳变，再验证修补；缩放回归、五组相关 UI、111 项核心检查及双架构打包通过。完整 `PixelAdventureUITests` 的「已选中」徽标断言在 build 58 基线也失败，未记为通过。正式 build 59 的真实鼠标体验、真实设备及跨机器仍待验收，公开 Release / Sparkle 仍为 build 17；具体证据和最短步骤见[窗口缩放记录](docs/window-resize.md)，阅读规则见[阅读布局](docs/live-reading-layout.md)。下方 build 52 / 51 等安装号保留各轮历史含义。
 
 2026-10-11 最近台词收录修补：`54cf83b` 在 Mac 开发分支 `dev0.2.1_261009` 中，只把最新版本已有非空译文的记录计入列表和最近 5 条额度；保留原有原文工作集以支持在途身份、重试和固定阅读。新增隔离学习库检查先复现无译文入列表，再验证 Unicode 空白、失败不挤掉成功历史、回填清理事务回滚及旧版本隔离；生产 timer/HTTP 回归覆盖窗口与采集卡的取消、迟到结果，以及对白、实时界面和手动界面的失败/恢复。完整核心检查 111 项执行记录通过，本机已安装 0.2.1 build 52，签名、双架构 UUID 与凭据元数据核对通过；桌面历史套件仅编译，真实游戏体验尚未验收。此次源码及文档通过开发分支交付，公开 Release 附件与 Sparkle 清单未更新。详细根因、命令与报告见 [最近台词收录规则](docs/dialogue-history-translated-only.md)。

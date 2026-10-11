@@ -13,6 +13,12 @@ reference = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(reference)
 
 
+def verify_no_debug_map(binary):
+    output = subprocess.check_output(["nm", "-ap", str(binary)], text=True)
+    if re.search(r"\s(?:OSO|SO)(?:\s|$)", output):
+        raise ValueError("发布版可执行文件未 strip：仍包含 SO/OSO debug map")
+
+
 def main(directory):
     app = directory / "译芽.app"
     contents = app / "Contents"
@@ -21,6 +27,7 @@ def main(directory):
     if info["CFBundleIdentifier"] != "com.nanami.fuyi" or info["CFBundleShortVersionString"] != version:
         raise ValueError("App 身份或版本与源码不匹配")
     binary = contents / "MacOS/LiveCaptionTranslator"
+    verify_no_debug_map(binary)
     import json
     updates = json.loads((ROOT / "resources/updates/sparkle-config.json").read_text())
     if info.get("SUFeedURL") != updates["feed_url"] or info.get("SUPublicEDKey") != updates["public_key"]:

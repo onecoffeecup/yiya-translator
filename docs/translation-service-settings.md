@@ -2,7 +2,7 @@
 
 2026-10-11，用户要求把「服务设置界面＋预设列表」从主窗口拆出，并按已确认的交互预览接入正式源码。此次开发位于 Mac 分支 `dev0.2.1_261009`；不涉及 iPadOS 或 Windows。
 
-当前服务组件提交 `73c306e` 已推送，窗口与阅读布局集成提交为 `4956d21`，本机安装已更新至 0.2.1 build 59。主窗口现按用户选择只手动开关 AI 侧栏，展开时最小内容宽度 1100 pt，收起后为 720 pt；窄窗检查先手动收起侧栏，独立服务组件仍覆盖 400 pt 紧凑表单。最终 `TranslationServiceViewTests`、相关 UI 及 111 项核心检查通过，最新安装和范围见[窗口集成记录](window-resize.md)。以下 build 57 和提交前临时副本的窗口规则、源码哈希仅对应当时验证；真实服务调用与公开发布仍未由隔离检查代替。
+服务组件初始提交为 `73c306e`，窗口与阅读布局集成为 `4956d21`；本次拒答／截断与 Enter 保存修复 `8dbf649` 已推送 Mac 开发分支。本机仍为 0.2.1 build 67，未包含本次修复，安装身份见[维护状态](project-maintenance.md)。主窗口按用户选择只手动开关 AI 侧栏，展开时最小内容宽度 1100 pt，收起后为 720 pt；窄窗检查先手动收起侧栏，独立服务组件仍覆盖 400 pt 紧凑表单。下文 build 57／59、111 项核心检查与临时副本哈希保留其历史范围；本次服务修复的证据与未验收范围另列如下。
 
 ## 维护边界
 
@@ -21,6 +21,7 @@
 - 预设模型使用普通 `NSTextField`，可直接输入、粘贴和修改。旁边的「常用模型」是独立选择入口，选择后复制到文本框并回到提示项，文本框继续可编辑；只有一个或没有常用模型时隐藏该入口。
 - 「自定义 URL」只填写服务地址、翻译模型和已有 API Key，不显示接口类型。预设地址行的「改为自定义」复制当前地址和已编辑模型；顶部模式切换保留独立草稿。
 - 预设模型修改、当前配置方式和自定义草稿保存在已有设置字典。旧设置继续优先迁移非空 `model`，为空才读旧 `realtimeModel`；已保存的地址及有效模型不被预设默认值覆盖。新的空模型保留为空，实际翻译会提示先填写模型，不偷偷替换服务模型。
+- 输入框结束编辑只通过 `controlTextDidEndEditing:` 委托同步字段并通知宿主保存；没有重复提交同一通知的 target/action。模型框按 Enter 的原生 field editor 回归确认 `saveSettings:` 只调用一次，并提交实际编辑值。
 - API Key 沿用 [本机保存合同](api-key-storage.md)，仍由宿主保存和清空；不进入组件配置字典或普通偏好设置。切换预设不会清空或自动换 Key。测试使用同一翻译模型，结果仍位于服务页，不覆盖游戏字幕。
 
 模型建议来自预设目录，是可编辑的静态默认值；不自动请求模型列表，也不能代替玩家账户的模型权限。各服务地域与 Key 来源见表单说明。
@@ -29,13 +30,34 @@
 
 普通地址继续使用 OpenAI 兼容的 `chat/completions`。精确的 `api.anthropic.com` 主机或玩家明确填写的完整 `/messages` 地址使用 Claude Messages；不会根据模型名猜测接口，因而通过 OpenRouter 等平台调用 Claude 仍走平台自己的兼容接口。其他第三方地址需要服务提供 OpenAI 兼容调用；Messages 代理可填写其完整 `/messages` 地址。
 
-Claude 的系统提示放在独立 `system` 字段，使用 `x-api-key` 与 `anthropic-version`，读取返回的 text blocks 并忽略 thinking blocks。不发送新版 Claude 已不支持的 temperature 参数。翻译保持 15 秒短请求和现有长批次超时，学习保持 30 秒、取消代次和完整 JSON 校验；学习遇到 `max_tokens` 截断仍失败。接口依据：[Claude Messages](https://platform.claude.com/docs/en/api/messages/create)、[认证与版本](https://platform.claude.com/docs/en/api/overview)。
+Claude 的系统提示放在独立 `system` 字段，使用 `x-api-key` 与 `anthropic-version`。翻译解码先检查顶层 `stop_reason`：`refusal` 返回“翻译模型拒绝翻译这段内容。”，`max_tokens` 返回“翻译接口输出被截断，没有返回完整译文。”，均为 `LiveCaptionTranslator` 域的 NSError，且不引用响应正文或 `stop_details`。其他值或缺失沿用 text blocks 合并并忽略 thinking blocks 的逻辑。不发送新版 Claude 已不支持的 temperature 参数。翻译保持 15 秒短请求和现有长批次超时，学习保持 30 秒、取消代次和完整 JSON 校验；学习拒答返回 `FYLearningAnalyzer` 域的“学习模型拒绝分析这段内容。”，原 `max_tokens` 错误保持不变。接口依据：[Claude Messages](https://platform.claude.com/docs/en/api/messages/create)、[认证与版本](https://platform.claude.com/docs/en/api/overview)。
+
+解码错误经 `FYTranslationManager taskWithRequest:` 和宿主主队列交付原样返回；`translateDialogueText:identity:systemPrompt:completion:` 的现有缓存门要求 `!error`，只有成功译文才能回填学习记录。失败不缓存，下一周期经过既有节流可重试；没有新增专用缓存分支、自动换模型或清空 Key。
 
 预设中的 Sonnet 5.5 使用 `between_tools`，Haiku 5.5 使用 `disabled`；Opus 5.5 保留必须启用的思考。已知的 Claude 5.5 型号设低 effort。官方 GLM 5.3、Kimi K3 和 Gemini 3 型号同样设低 effort，不强行关闭思考；Kimi 省略其不支持的 temperature。需要思考的这些型号，输出总预算为 `max(4096, 请求译文预算 + 2048)`，保持有界，并给最终文本留空间。规则按已知型号和精确官方主机选择（Messages 中的已知 Claude 型号除外），不对未知服务和未知模型猜测参数；这些适配不会出现在玩家表单里。依据：[Claude 思考规则](https://platform.claude.com/docs/en/build-with-claude/thinking)、[GLM 5.3 Flash](https://docs.z.ai/guides/vlm/glm-5.3-flash)、[Kimi 参数](https://platform.kimi.com/docs/api/models-overview)、[Gemini 兼容接口](https://ai.google.dev/gemini-api/docs/openai)。
 
 地址校验与原有 HTTPS/本机回环 HTTP 规则共用，不因新适配而放宽凭据传输限制。预设和回归不读取玩家凭据、不自动测试服务、不消耗真实 API Token。
 
-## 本轮检查
+## 2026年10月11日拒答截断与保存修复
+
+修复前先增加合成回归：`refusal` 与 `max_tokens` 携带 text 的翻译被错误接受；学习拒答携带完整合法 JSON 仍被接受；实际 AppKit field editor 的 `insertNewline:` 让 `saveSettings:` 被调用两次。最小修复只涉及响应终止原因检查与输入框重复提交入口。
+
+| 实际命令 | 修复后结果 |
+| --- | --- |
+| `.build/refusal-enter-fix/AnthropicTranslationTests` | 14 项通过；覆盖拒答、截断、`end_turn`、其他终止原因、固定错误及原有缺失终止原因用例。完整 clang 编译命令保存在下述证据文件。 |
+| `bash scripts/run-learning-tests.sh` | 通过；学习拒答用完整 JSON 验证终止原因门，不依赖 JSON 解析失败。 |
+| `FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh TranslationServiceViewTests` | 通过；真实模型框 Enter 保存次数从 2 变为 1，实际编辑值已保存；无 sleep。 |
+| `FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh SettingsInteractionTests` | 通过。 |
+| `FY_TEST_ALLOW_UI=1 bash scripts/run-learning-app-tests.sh LocalCredentialSettingsTests` | 10 项隔离凭据设置检查通过。 |
+| `python3 scripts/debug.py check` | 本次服务修复工作树的 166 条执行记录全部通过，`source_unchanged=true`；当时的 378 个散列已核对一致。 |
+
+新增 `anthropic-refusal-recovery.json` 与 `anthropic-truncation-recovery.json`，均调用生产 timer、HTTP 解码、交付、历史与缓存路径；修复前失败于预期 1 次错误、实际 0 次，修复后各通过 7 个检查点、551 项断言，并纳入统一 Debug 的两遍重复检查。验证失败不进入历史、节流内不重试、4 秒后重新请求、恢复成功后复用译文缓存。输入、响应和 Key 均为合成值，不读取真实凭据或发真实翻译请求。
+
+本机证据目录为 `.build/refusal-enter-fix/`：`evidence.json` 关联完整命令、前后日志、源码散列及提交／推送核对；独立核心报告为 `.build/debug/20261011T141237Z-98526c/summary.json`。提交仅包含三个生产文件、三个测试文件与两个 Replay 夹具；166 条记录属于当时工作树，不代表随后的审查追加提交也已全部验收。最新 168 条记录及一个已知缺口见[维护状态](project-maintenance.md)。
+
+本次没有重建安装正式应用或更新 Release／Sparkle；真实 Claude 服务、游戏设备和跨机器体验待验收。下次安装包含修复的构建后，最短复查是修改模型名、按 Enter、重新打开设置确认值保留；实际拒答或截断应显示固定错误，恢复成功后不显示旧错误译文。无需为这两个回归开启原始画面／文字诊断。
+
+## 服务组件初次交付检查
 
 - `AnthropicTranslationTests`：修改前失败于认证/版本头断言，修改后 8 项合成检查通过，覆盖请求字段、超时、多文本块、思考块和畸形返回。
 - `TranslationServiceSettingsTests`：63 项通过，涵盖 10 个预设默认型号的实际请求构造、思考预算与参数、旧模型迁移、模型草稿、模式切换、重新读取、空模型保留、无 Key 设置字典及 URL 安全边界。

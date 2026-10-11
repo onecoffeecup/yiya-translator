@@ -26,6 +26,7 @@
 - 用户于 2026-10-11 确认 AI 侧栏只手动开关；拖动窗口及切页不自动改变显隐。展开时最小内容宽度 1100 pt，手动收起后为 720 pt；窄窗手动展开可放宽窗口，保留同一聊天视图、会话和草稿。
 - 原生外框尺寸驱动内部页面画布，不能重新给最外层 `contentView` 加固定宽度锁。改动须覆盖 `MainWindowResizeTests` 的拖动优先级、释放保持、双向缩放、手动侧栏及切页断言，不通过人为调用缩放回调绕过边界。机制与未验收范围见 `docs/window-resize.md`。
 - 实时页沿用「画面 → 中文翻译 → 当前对白 → 语法」、紧凑空状态和按实际栏宽重测原文；保留字符、选择索引及固定身份，相关回归为 `PreviewLayoutTests`。阅读合同见 `docs/live-reading-layout.md`。
+- 用户于 2026-10-11 查看小画面示意后确认沿用现有贴译显示：普通长卡遵守高度上限，超出内容在卡内滚动；保留已有空间不足时的折叠和避让。`InlineAdaptiveAcceptanceTests` 的同一 520×170 pt 场景在 `-O0` / `-O2` 下均为两条旧预期失败，不为使其通过而改变当前显示，也不将桌面验收记为全通过；详情见 `docs/subtitle-appearance.md`。
 - 服务表单改 `FYTranslationServiceView`，预设与配置改 `FYTranslationServiceSettings`，宿主保留运行编排及 Key 保存；边界见 `docs/translation-service-settings.md`。共享文件有其它已集成改动时按项修改，不整文件回退或覆盖。
 
 ## 平台分支规则

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib-sources.sh"
 OUT="$ROOT_DIR/.build/module-tests"
@@ -12,77 +13,77 @@ elif [[ "${FY_TEST_UBSAN:-0}" == "1" ]]; then
   SANITIZER_FLAGS=(-fsanitize=undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer -g)
 fi
 mkdir -p "$OUT"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/GeometryManagerTests.m" "$ROOT_DIR/objc/FYGeometryManager.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/GeometryManagerTests"
 "$OUT/GeometryManagerTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/OCRPostprocessingTests.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/OCRPostprocessingTests"
 "$OUT/OCRPostprocessingTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/ContentRouterTests.m" "${FY_OCR_SOURCES[@]}" "$ROOT_DIR/objc/learning/FYLearningModels.m" \
   -framework Cocoa -framework Vision -o "$OUT/ContentRouterTests"
 "$OUT/ContentRouterTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/SpeakerPlateTests.m" "${FY_OCR_SOURCES[@]}" "$ROOT_DIR/objc/learning/FYLearningModels.m" \
   -framework Cocoa -framework Vision -framework ImageIO -o "$OUT/SpeakerPlateTests"
 "$OUT/SpeakerPlateTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/OCRVisionConfigurationTests.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/OCRVisionConfigurationTests"
 "$OUT/OCRVisionConfigurationTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/InlineOCRFrameStabilizerTests.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/InlineOCRFrameStabilizerTests"
 "$OUT/InlineOCRFrameStabilizerTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationManagerTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/TranslationManagerTests"
 "$OUT/TranslationManagerTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/AnthropicTranslationTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/AnthropicTranslationTests"
 "$OUT/AnthropicTranslationTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationServiceSettingsTests.m" "$ROOT_DIR/objc/FYTranslationServiceSettings.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/TranslationServiceSettingsTests"
 "$OUT/TranslationServiceSettingsTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-unused-function \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-unused-function \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/LocalAPIKeyStoreTests.m" \
   -framework Foundation -o "$OUT/LocalAPIKeyStoreTests"
 "$OUT/LocalAPIKeyStoreTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/InlineTextPolicyTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \
   -framework Cocoa -o "$OUT/InlineTextPolicyTests"
 "$OUT/InlineTextPolicyTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/LocalFontTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" "$ROOT_DIR/objc/learning/FYLearningViews.m" \
   -framework Cocoa -framework CoreText -o "$OUT/LocalFontTests"
 python3 "$ROOT_DIR/scripts/run-headless-test.py" --sample "$OUT/LocalFontTests.sample.txt" "$OUT/LocalFontTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/InlineFontStabilityTests.m" "$ROOT_DIR/objc/FYInlineLayout.m" \
   -framework Cocoa -o "$OUT/InlineFontStabilityTests"
 python3 "$ROOT_DIR/scripts/run-headless-test.py" --sample "$OUT/InlineFontStabilityTests.sample.txt" "$OUT/InlineFontStabilityTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/TranslationTaskTests.m" "$ROOT_DIR/objc/FYTranslationManager.m" \
   -framework Foundation -o "$OUT/TranslationTaskTests"
 "$OUT/TranslationTaskTests"
-clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+clang "$FY_OPT" ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/WindowPolicyTests.m" "$ROOT_DIR/objc/FYWindowManager.m" \
   -framework Cocoa -o "$OUT/WindowPolicyTests"

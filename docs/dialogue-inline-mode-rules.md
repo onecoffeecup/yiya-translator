@@ -1,6 +1,6 @@
 # 对白和贴译判定规则与审查清单
 
-整理日期：2026-10-11。依据 Mac 分支 dev0.2.1_261009 的混合路由与文字保留修复。修复基线为 03a1c66ae96b973c1a05b4766488989761dddd28，本文与生产修改及合成回归一并提交；只检出该基线不能得到全部规则。源码快照以第 12 节散列为准。
+整理日期：2026-10-11。依据 Mac 分支 dev0.2.1_261009 的混合路由、文字保留及后续六条审查。原路由修复基线为 03a1c66ae96b973c1a05b4766488989761dddd28，只检出该基线不能得到全部规则；后续提交与验证范围见[审查记录](review-speaker-routing-20261011.md)。源码快照见第 12 节，已安装版本与当前源码分开记录。
 
 本文记录实现现状，不代表所有规则合理，也不代表所有场景已经通过验收。示例和审查场景均为合成输入，不包含私有诊断中的真实对白。2026-10-11 模块提取后已更新本文：规则实现集中到 FYContentRouter，阈值、优先级和主链路闸门保持原行为。模块边界见 [内容路由模块](content-router-module.md)。随后独立姓名栏改为统一排除，并补上学习身份与历史代表保护。最新混合路由、英语过滤及句尾保留修改见 [专项修复记录](dialogue-inline-routing-fix.md)；这些行为变化不属于此前保持行为的模块提取。
 
@@ -284,11 +284,11 @@ isShortDialogueAnchor 的注释说纯数字或日期不当对白，但当前函�
 
 `FYOCRManager itemsByMarkingSpeakerLabels:inImage:` 使用现有完整源图和字幕带测试独立填色姓名栏。字幕带不足两项且整帧恰有两项时，退回原阅读顺序测试，避免很短正文被旧锚点门排除。当前已取消全窗口纵坐标门，嵌入视频也按局部姓名栏和正文结构判定。
 
-候选须为单行，宽度不超过 max(正文最大宽 × 0.6, 两行最大高 H × 2.5)，高度为参照正文的 0.35 到 1.8 倍；候选 minY 减正文 maxY 为 −0.25H 到 1.2H，左边不超过正文左边 + 0.5H。缓冲最多 480 像素宽；各框采样 9 × 7 点。姓名栏同色群至少占 55%，RGB 同色容差为每通道 22；正文至少 80% 点与姓名栏有某通道至少 45 的差异。依次尝试姓名框四周扩自身字高 20% 和原框，正文左右扩字高 15%、上下扩 10%。姓名栏上方和右侧共 10 个外部点必须可采样，至少 8 点与底色不同，排除宽阔背景色。
+候选须为单行，宽度不超过 max(正文最大宽 × 0.6, 两行最大高 H × 2.5)，高度为参照正文的 0.35 到 1.8 倍；候选 minY 减正文 maxY 为 −0.25H 到 1.2H，左边不超过正文左边 + 0.5H。缓冲最多 480 像素宽；各框采样 9 × 7 点，越界点跳过，姓名框和正文框各自至少 60% 点有效（至少 38 点）。姓名栏同色群至少占有效点的 55%，RGB 同色容差为每通道 22；正文至少 80% 有效点与姓名栏有某通道至少 45 的差异。依次尝试姓名框四周扩自身字高 20% 和原框，正文左右扩字高 15%、上下扩 10%。姓名栏上方和右侧共 10 个外部点必须可采样，至少 8 点与底色不同，排除宽阔背景色；这些外部点的完整可见门没有放宽。
 
 符合后仅复制首项并附 `speakerLabel = YES`，保留文字、坐标、置信度及来源。`isExcludedSpeakerLabelItem` 直接返回该标记：正确姓名和错读姓名都从对白正文、稳定比较、在途匹配及学习原文排除，不再分“明确”与“未知”。无标记的姓名启发式继续用于标签簇与姓名-only 判断，不能代替像素角色。
 
-姓名已经排除时，旧的残缺帧身份不能把它补回；相同正文短暂丢失角色证据时沿用已确认排除关系，换正文不继承。最近列表只在旧首行匹配正向姓名角色且剩余正文完全对应时采用纯正文代表，不改写旧快照。细节与验收见 [对白姓名排除](dialogue-speaker-exclusion.md)。
+姓名已经排除时，旧的残缺帧身份不能把它补回；相同正文短暂丢失角色证据时沿用已确认排除关系，换正文不继承。学习录入比较中每个已确认姓名比较键最多剥一行前缀，正文首行再次自报同名时保留。最近列表只在旧首行匹配正向姓名角色且剩余正文完全对应时采用纯正文代表，不改写旧快照。细节与验收见 [对白姓名排除](dialogue-speaker-exclusion.md)。
 
 没有源图、底色同一、无界色块、几何不符或缺正文时保留原行。普通短句不会仅凭假名、英文、重复字符或短宽度被当姓名删除；不同样式、透明姓名栏及局部采样不足仍可能不命中。
 
@@ -361,7 +361,11 @@ today, web, back, 戻る, 戻, 詳細, 閉じる, ルームへ,
 
 过滤后，若相邻两个保留观察满足第 5 节的同行片段条件，直接按当前字符串接为一行；其它观察继续以换行拼接。不会补写未识别的引号或修改原观察对象。`dialogueTextWithoutTrailingButton` 当前只清理首尾空白，不再凭标点后 2 到 4 个汉字截断。`うん、約束` 保留完整；OCR 已将按钮粘入同一块时也会保留，须另有角色或几何证据才能安全剥离。
 
+`思い出した。使用` → `思い出した。` 的目标行为已在[粘连按钮已知缺口](../tests/fixtures/replay/known-gaps/fused-trailing-button.json)登记，当前仍失败；几何过滤只能处理独立观察，不能据此声明粘连案例已修复。
+
 ### 界面贴译过滤
+
+主控制器的 `filteredInlineTextItems:` 与 `shouldIgnoreInlineText:...strict:` 读取当前语言控件，约定仅在主线程调用；实时和手动界面 OCR 的生产调用均在主队列回调内。该约定由源码注释说明，没有增加后台调用保护。
 
 modalScopedBlocks 先经 FYInlineGrouper 分组，再用 filteredInlineTextItems strict = NO：
 
@@ -457,7 +461,7 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 | R11 | OCR 空帧或错误不在主链路此处重置模式候选，译芽交互面板存在时暂停观察 | 两次不同模式读数中间有空帧时是否仍切换；阅读卡长期打开期间页面真实变化如何处理 |
 | R12 | 对白稳定与在途匹配用全帧文字，混合两路共享内容修订 | 无关背景或选项变化能否延迟对白、取消另一条在途结果，或产生不必要的重复请求 |
 | R13 | 单字观察在 Vision 适配器已被删除；正文层又声称不因字少删除有效日文 | 单独一字台词和拆成单字的 OCR 是否根本无法到达后处理，不能只测过滤函数 |
-| R14 | 已取消无角色证据的尾部汉字截断；姓名启发式仍无词典 | 正常约束句尾已补交付；OCR 粘连按钮和未标记片假名标签仍待验证 |
+| R14 | 已取消无角色证据的尾部汉字截断；姓名启发式仍无词典 | 正常约束句尾已补交付；`思い出した。使用` 粘连案例登记为仍失败的已知缺口，未标记片假名标签仍待验证 |
 | R15 | 混合选项不经过整帧界面的字段分组、文字过滤和字段稳定器 | 多行选项被拆块、局部错读、同位置抖动时，是否产生碎片贴译或请求；不能把界面稳定器的测试算作混合选项覆盖 |
 
 建议合成场景至少包含：
@@ -489,11 +493,14 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 
 | 文件 | 相关覆盖 |
 | --- | --- |
-| [SpeakerPlateTests.m](../tests/SpeakerPlateTests.m) | 独立姓名栏正向像素证据、普通背景/无界色块反例、元数据不可变、普通短句与姓名栏下短句保留；41 条断言 |
+| [SpeakerPlateTests.m](../tests/SpeakerPlateTests.m) | 独立姓名栏正向像素证据、普通背景/无界色块反例、元数据不可变、短句保留、底边正文与左边紧字框、有效样本不足反例；49 条断言 |
 | [speaker-plate-ocr-noise.json](../tests/fixtures/replay/speaker-plate-ocr-noise.json) | 生产主循环：在途时已确认姓名栏变化只请求一次且不取消，回包后正常交付，学习原文不污染；统一姓名排除和历史代表修补见姓名排除专项回归 |
-| [ContentRouterTests.m](../tests/ContentRouterTests.m) | 独立规则接口、混合输出、模式锁定、过滤原因、映射限制、同句与稳定、同行短片段及反例；当前 181 条断言 |
+| [ContentRouterTests.m](../tests/ContentRouterTests.m) | 独立规则接口、混合输出、模式锁定、过滤原因、映射限制、同句与稳定、同行短片段及反例；当前 200 条断言 |
 | [mixed-dialogue-options-auto-mode.json](../tests/fixtures/replay/mixed-dialogue-options-auto-mode.json) | 两个选项加对白、两路同时在途、对白先交付、选项后交付、静止去重 |
-| [OCRPostprocessingTests.m](../tests/OCRPostprocessingTests.m) | UI 词、注音、短对白豁免、纯选项、强短锚点、字幕带扩张、姓名、对白与远处选项拆分 |
+| [OCRPostprocessingTests.m](../tests/OCRPostprocessingTests.m) | UI 词、注音、短对白豁免、纯选项、强短锚点、字幕带扩张、姓名、对白与远处选项拆分；274 条断言 |
+| [LearningTests.m](../tests/LearningTests.m) | 姓名排除历史代表及两个自报姓名录入方向；隔离持久化、源文和身份 |
+| [TranslationTracePipelineTests.m](../tests/TranslationTracePipelineTests.m) | 真实生产 timer 链路计数：关闭诊断时混合区域计算两次，字幕正常交付 |
+| [fused-trailing-button.json](../tests/fixtures/replay/known-gaps/fused-trailing-button.json) | 仍失败的粘连按钮源文检查点，按精确预期／实际登记已知缺口 |
 | [short-dialogue-ellipsis-auto-mode.json](../tests/fixtures/replay/short-dialogue-ellipsis-auto-mode.json) | 窄省略号对白、静止去重、纯四项菜单、返回对白的 10 步链路 |
 | [short-stacked-dialogue.json](../tests/fixtures/replay/short-stacked-dialogue.json) | 堆叠短对白自动模式 |
 | [lower-choice-menu-auto-mode.json](../tests/fixtures/replay/lower-choice-menu-auto-mode.json) | 下半屏纯选择菜单保持 UI |
@@ -539,9 +546,10 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 | 同文件 | 在途匹配、beginContentTranslation、beginInlineContentTranslation、在途长批映射 |
 | 同文件 | 整帧界面分组、过滤、采集会话和实际窗口显示 |
 | [FYLearningModels.m](../objc/learning/FYLearningModels.m) | FYDialogueComparisonKey，共享身份归一化 |
+| [FYLearningCoordinator.m](../objc/learning/FYLearningCoordinator.m) | FYDialogueBodyExcludingLabels、recordDialogueText:excludingSpeakerLabels:；姓名前缀与正文身份比较 |
 | [FYTranslationManager.m](../objc/FYTranslationManager.m) | 同文重试节流状态 |
 
-整理时 SHA-256：
+2026-10-11 六条审查收尾时的源码 SHA-256（文档同步只核对文件，没有重新执行功能检查；报告及工作树范围见[审查记录](review-speaker-routing-20261011.md)）：
 
 ~~~text
 objc/FYContentRouter.h
@@ -551,16 +559,19 @@ objc/FYContentRouter.m
 db772400e90f7e3dae1508a9198f81a63256c522225500b4bde7412a66dea9e6
 
 objc/FYOCRManager.m
-fafdb38b94bbf5b38db16b4350c28a39c0ebbd3fadb30022405d7dd19a0de958
+daf61fd2d26e88d201fc3d92b2a9d9edd91314b01bc9706a2ebfa8caa2d6712e
 
 objc/LiveCaptionTranslator.m
-08bbbb40c14d27f54760af253fd5e509bc761458db8f93ac1b06140a747c8f18
+9ec1087b018c59ad6dcac84e3cd9828db9566e0ae82cd6863d9184e3e2525020
 
 objc/learning/FYLearningModels.m
 a1d6b480e0e20eb7b0f40e3f2b78753044b7afd405799b74ee808ecf18630edf
 
+objc/learning/FYLearningCoordinator.m
+2ab7fb6468c769f43c01141c96af00ed5969683a371e4fa990c9420a4d9532ba
+
 objc/FYTranslationManager.m
-8d78c6e79e3bcbd851145ae0580a8ba007614927c71746ec08ddfc9bedcae8dd
+8f3a89f6f3e31508337ad673b3879070e9dd441b6b1cb81cca7a910c7ce7d339
 
 tests/ContentRouterTests.m
 25773a1b984b9c13fcdbf52556f62e88136d636696a5f7a22ee8bda78c10d0b0

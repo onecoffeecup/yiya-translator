@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib-sources.sh"
@@ -10,7 +11,7 @@ fy_test_ui_gate
 BIN="$ROOT_DIR/.build/release/InlineTranslationTests"
 mkdir -p "$ROOT_DIR/.build/release"
 
-clang \
+clang "$FY_OPT" \
   -fobjc-arc \
   -fmodules \
   -fmodules-cache-path="$FY_TEST_MODULE_CACHE" \
