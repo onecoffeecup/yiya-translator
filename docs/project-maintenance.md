@@ -14,13 +14,13 @@
 
 | 事实面 | 状态与依据 |
 | --- | --- |
-| 代码与远端 | `verified-current`：Mac 分支 `dev0.2.1_261009` 的姓名排除 / 学习身份 / 最近台词修补 `163e48f` 已推送；此前窗口与阅读 `4956d21`、服务组件 `73c306e`、字号 `94174ac`、查句悬停 `9f41479` 均已在远端。iPadOS / Windows 独立维护；本次交付仅包含 Mac 生产链路及其合成回归。后续文档提交不改变功能验证范围。 |
-| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 66；含 19 pt 字号修补、查句悬停及姓名过滤后被旧学习身份补回、最近列表重新选中旧姓名前缀的修补。严格签名、安装 / 打包 / release / dSYM 双架构 UUID 与 Key 元数据已独立核对。[姓名过滤及联合安装记录](dialogue-speaker-exclusion.md)保存当前身份；[窗口记录](window-resize.md)保留 build 59 历史。 |
+| 代码与远端 | `verified-current`：Mac 分支 `dev0.2.1_261009` 的混合路由、文字保留及 20 个合成 Replay 已提交并推送为 `a6ad14b`；之前姓名排除 / 学习身份 / 最近台词的 `163e48f` 及其它改动已有远端记录。本轮仅影响 Mac 生产处理；后续交付状态文档提交不改变功能验证范围。 |
+| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 67，含原 build 66 的姓名与历史修补，以及本轮混合路由、英语字段和句尾保留。严格签名、安装 / 打包 / release / dSYM 双架构 UUID 及 Key 元数据已核对，见 [混合路由修复与安装记录](dialogue-inline-routing-fix.md)。build 66 的此前用户确认见 [姓名排除记录](dialogue-speaker-exclusion.md)。 |
 | 公开交付 | `verified-current`：GitHub 最新 Release 仍为 v0.2.1，Sparkle 清单仍为 build 17；dev 推送和本机安装没有更新公开附件。 |
-| 文档与规则 | `changed-and-verified`：源码 README、两层 AGENTS 与内部视觉规范同步手动侧栏、原生窗口尺寸和阅读布局规则；具体合同分别在[窗口缩放](window-resize.md)、[阅读布局](live-reading-layout.md)、[服务组件](translation-service-settings.md)。 |
-| 用户体验 | `partially-verified`：用户于 2026-10-11 对 build 66 本机复测后回复「好了，commit 然后提交吧」，确认本轮对白姓名排除及最近台词通过。该场景有采集卡实时页、最近列表和点击原句的现场核对；其它游戏样式与长时间运行仍待验证。正式 build 59 的右边缘 / 右下角真实鼠标体验、另一台 Mac、Intel 实机尚未验收；完整视觉套件仍有修改前已复现的「已选中」徽标失败。 |
+| 文档与规则 | `changed-and-verified`：对白规则已同步统一姓名排除与本轮路由修复；源码 README、两层 AGENTS 与内部视觉规范同步手动侧栏、原生窗口尺寸和阅读布局规则；具体合同分别在[窗口缩放](window-resize.md)、[阅读布局](live-reading-layout.md)、[服务组件](translation-service-settings.md)。 |
+| 用户体验 | `partially-verified`：用户于 2026-10-11 对 build 66 本机复测后回复「好了，commit 然后提交吧」，确认本轮对白姓名排除及最近台词通过。该场景有采集卡实时页、最近列表和点击原句的现场核对；本轮 build 67 的实际混合画面及纯菜单尚待针对性抽查，不要求重走窗口、侧栏或整套视觉验收；其它游戏样式与长时间运行仍待验证。正式 build 59 的右边缘 / 右下角真实鼠标体验、另一台 Mac、Intel 实机尚未验收；完整视觉套件仍有修改前已复现的「已选中」徽标失败。 |
 | Agent 记忆 | `out-of-scope`：本次只更新项目文件与约束，不手改平台生成记忆。 |
-| 工作区 | `verified-current`：现役仓库只有一个 worktree；本机 build 66 对应的姓名排除、学习身份及历史代表选择修补已提交、推送为 `163e48f`。最终核心检查 121 项记录通过，333 个源码 / 媒体散列与提交文件一致，见[修复记录](dialogue-speaker-exclusion.md)。本次文档收尾记录用户验收与提交状态，不重建或重新安装应用。历史分支、私有日志、签名产物和备份保留。 |
+| 工作区 | `verified-current`：现役仓库仅一个 worktree，功能修复提交 `a6ad14b` 已推送。本次文档收尾同步 build 67 和提交状态，不重新构建或安装；最终核心检查 161 项记录通过，20 个新增 Replay 各两遍、373 个源码 / 夹具 / 媒体散列与已提交文件一致。注册 known gap 数为 0 不代表背景角色、混合两路共享取消等未注册边界已解决；详见 [专项范围](dialogue-inline-routing-fix.md)。历史分支、私有日志、签名产物与备份保留。 |
 
 查句悬停在用户确认预览后共用实时页的生产组件。新增 `QuickSentenceHoverTests` 与五组相关原生 UI 回归通过，覆盖词义／语法优先级、选择复制、自然高度、外层滚动、关闭及迟到回调隔离；安装前后 65 个生产源码散列一致，正式应用打开后为暂停空状态。命令、build 61 安装 UUID、Key 元数据及最短手动验收见[阅读布局](live-reading-layout.md)。真实游戏、设备与物理鼠标体验仍待确认。
 
