@@ -374,18 +374,20 @@ FYContentModeStability 维护 detectedMode、candidateMode、candidateHits：
 
 ### 对白文本稳定
 
-模式为 0 时，在混合分流和正文过滤之前，对全帧 normalized 进行稳定确认，通常要 2 次等价观察。
+模式为 0 时，在混合分流和正文过滤之前，对全帧比较文本进行稳定确认，通常要 2 次等价观察。日语先保留各行边界，调用共享比较键完成逐行归一后才连接；不能先用通用空白清理删除换行，否则后续行的行首省略号会变成句中标点。未知姓名栏仍在比较前按已有结构标记排除。
 
 日语对白还满足“与已显示文本相似度 >= 0.85，但不属于同一句”时，需要候选达到 3 次。这用于确认真实细微修正。
 
 日语同句判断采用 FYDialogueComparisonKey，不用高相似度直接吞掉字词变化：
 
-- 每行去首尾空白。
-- 删除行首连续的装饰字符“・･…‥•。．._＿”。
+- 逐行先删除空白，包括省略号字符之间的空白，再判断行首。
+- 删除行首连续的装饰字符“・･…⋯‥•。．._＿”。开引号/括号“「『（(【［[〈《“‘\"”保留在键中；其后的装饰点号仅在后接日文字符时忽略，不把括号中的 .5 或非日文记号改成另一数值。支持多个开括号以及点号与开括号交错的前缀。
 - 行首连续的字符“-－‐‑‒–—ー”与空白，仅在后接 U+3041 到 U+30FA 或 U+3400 到 U+9FFF 时去掉。
-- 删除内部空白。
-- 日文结尾的省略号及点号串归一为“…”；单独的日文句末“.”、“．”、“。”可忽略。
-- 各行直接连接成比较键，不保留换行边界。内部小数和内部横线不按这些行首、行尾规则删除。
+- 日文字符之后的连续省略号及点号串归一为“…”：包含显式“…”、“⋯”（U+22EF）、“‥”，或至少两个“・･•.．。”时成立；行尾的单个“・”、“･”、“•”保持原有归一行为。句中停顿及其它已展平的比较调用仍兼容这一规则；行首身份必须在展平前处理。
+- 单独的日文句末“.”、“．”、“。”可忽略。各行直接连接成比较键，不保留换行边界；内部小数、单个姓名分隔中点、横线和非日文数学记号保持区别。比较键不改写 OCR 原文或已保存快照。
+- 非空的单字日文比较键可复用同句；空键不能确认对白，也不能把纯标点当作已显示的台词。此前行首省略号被去掉后若只剩一字，原两字长度门会阻断同句匹配。
+
+行首边界的失败回归、修正和验证见 [行首省略号记录](dialogue-leading-ellipsis.md)。
 
 非上述日语对白路径：最大长度 <= 6 时要求等长且相似度 >= 0.84；更长时相似度 >= 0.90。
 
@@ -479,6 +481,9 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 | [pending-dialogue-single-frame-recurrence.json](../tests/fixtures/replay/pending-dialogue-single-frame-recurrence.json) | N1 单帧旧对白回现，不提前取消在途新对白 |
 | [cancelled-dialogue-recurrence.json](../tests/fixtures/replay/cancelled-dialogue-recurrence.json) | 已取消对白再次出现 |
 | [ellipsis-jitter.json](../tests/fixtures/replay/ellipsis-jitter.json) | 省略号身份抖动 |
+| [middle-line-ellipsis-history.json](../tests/fixtures/replay/middle-line-ellipsis-history.json) | 中间正文行的 U+2026 / U+22EF 与点号数量变化；在途保留、静止身份去重、真实标点变化及 A→B→A；详见 [追加记录](dialogue-history-ellipsis.md) |
+| [leading-ellipsis-history.json](../tests/fixtures/replay/leading-ellipsis-history.json) | 多行行首、引号后、夹空白、漏识别及单独省略号行；在途保留、原文快照、静止去重、问号变化和 A→B→A |
+| [leading-ellipsis-short-reply.json](../tests/fixtures/replay/leading-ellipsis-short-reply.json) | 去掉行首省略号后仅剩一字的回复仍正常确认、翻译及去重 |
 | [english-period.json](../tests/fixtures/replay/english-period.json) 与 [english-inline-period.json](../tests/fixtures/replay/english-inline-period.json) | 英文句号保留，不等于完整英文自动模式覆盖 |
 | [refinement-dialogue-oscillation.json](../tests/fixtures/replay/refinement-dialogue-oscillation.json) | 首遍稳定而精读抖动 |
 | [refinement-correction-and-missing-line.json](../tests/fixtures/replay/refinement-correction-and-missing-line.json) | 精读修正及缺行 |

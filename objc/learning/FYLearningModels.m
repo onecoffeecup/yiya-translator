@@ -6,15 +6,32 @@ NSString *FYDialogueComparisonKey(NSString *text) {
     NSCharacterSet *dashes = [NSCharacterSet characterSetWithCharactersInString:@"-－‐‑‒–—ー"];
     NSCharacterSet *periods = [NSCharacterSet characterSetWithCharactersInString:@".．。"];
     for (NSString *rawLine in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
-        NSString *line = [rawLine stringByTrimmingCharactersInSet:spacing];
+        // Compact each line before scanning its prefix: Vision also inserts
+        // spaces between the dots. Keep newlines until every prefix is handled.
+        NSString *line = [[rawLine componentsSeparatedByCharactersInSet:spacing] componentsJoinedByString:@""];
         // A leading run of middle dots / ellipsis / bullets is decoration that
         // OCR returns with a variable count (・×11 vs …••••), so it must not
-        // split one dialogue into several identities. Only the line start is
-        // normalized; internal decimals (1.5) and internal dashes stay intact.
-        NSCharacterSet *leadingNoise = [NSCharacterSet characterSetWithCharactersInString:@"・･…‥•。．._＿"];
+        // split one dialogue into several identities. Opening quotes/brackets
+        // remain in the key, but do not hide a Japanese line's leading dots.
+        NSCharacterSet *leadingNoise = [NSCharacterSet characterSetWithCharactersInString:@"・･…⋯‥•。．._＿"];
+        NSCharacterSet *openers = [NSCharacterSet characterSetWithCharactersInString:@"「『（(【［[〈《“‘\""];
+        NSMutableString *opening = [NSMutableString new];
         NSUInteger noise = 0;
-        while (noise < line.length && [leadingNoise characterIsMember:[line characterAtIndex:noise]]) { noise++; }
-        if (noise > 0) { line = [line substringFromIndex:noise]; }
+        while (noise < line.length) {
+            unichar c = [line characterAtIndex:noise];
+            if ([openers characterIsMember:c]) { [opening appendFormat:@"%C", c]; }
+            else if (![leadingNoise characterIsMember:c]) { break; }
+            noise++;
+        }
+        unichar firstAfterNoise = noise < line.length ? [line characterAtIndex:noise] : 0;
+        BOOL quotedJapanese = (firstAfterNoise >= 0x3041 && firstAfterNoise <= 0x30FF) ||
+            (firstAfterNoise >= 0x3400 && firstAfterNoise <= 0x9FFF) ||
+            (firstAfterNoise >= 0xFF66 && firstAfterNoise <= 0xFF9D);
+        // Do not turn a bracketed decimal (.5) or non-Japanese notation into
+        // another value. The unquoted prefix retains the existing policy.
+        if (noise > opening.length && (!opening.length || quotedJapanese)) {
+            line = [opening stringByAppendingString:[line substringFromIndex:noise]];
+        }
         NSUInteger prefix = 0;
         while (prefix < line.length && ([dashes characterIsMember:[line characterAtIndex:prefix]] ||
                                        [spacing characterIsMember:[line characterAtIndex:prefix]])) { prefix++; }
@@ -26,25 +43,35 @@ NSString *FYDialogueComparisonKey(NSString *text) {
                 line = [line substringFromIndex:prefix];
             }
         }
-        line = [[line componentsSeparatedByCharactersInSet:spacing] componentsJoinedByString:@""];
-        // Sentence-final ellipsis dots fluctuate between ・, ・・・, … and
-        // ASCII/full-width dot runs. Keep one ellipsis in the comparison key
-        // without rewriting the captured source or stripping internal dots.
-        NSCharacterSet *ellipsis = [NSCharacterSet characterSetWithCharactersInString:@"・･…‥•"];
-        NSUInteger ellipsisStart = line.length;
-        BOOL hasEllipsisGlyph = NO;
-        while (ellipsisStart > 0) {
-            unichar c = [line characterAtIndex:ellipsisStart - 1];
-            if (![ellipsis characterIsMember:c] && ![periods characterIsMember:c]) { break; }
-            hasEllipsisGlyph |= [ellipsis characterIsMember:c];
-            ellipsisStart--;
-        }
-        if (ellipsisStart > 0 && (hasEllipsisGlyph || line.length - ellipsisStart >= 2)) {
-            unichar last = [line characterAtIndex:ellipsisStart - 1];
-            if ((last >= 0x3041 && last <= 0x30FF) || (last >= 0x3400 && last <= 0x9FFF)) {
-                line = [[line substringToIndex:ellipsisStart] stringByAppendingString:@"…"];
+        // Vision can alternate … (U+2026), ⋯ (U+22EF) and dot-run lengths.
+        // Also accept internal pauses and callers that already supply flattened
+        // text, where a middle body line's ending becomes an internal run.
+        // Preserve single internal separators, decimals and non-Japanese
+        // notation; only the comparison key changes, never the source snapshot.
+        NSCharacterSet *ellipsis = [NSCharacterSet characterSetWithCharactersInString:@"・･…⋯‥•"];
+        NSCharacterSet *symbols = [NSCharacterSet characterSetWithCharactersInString:@"…⋯‥"];
+        NSMutableString *folded = [NSMutableString string];
+        for (NSUInteger start = 0; start < line.length;) {
+            unichar c = [line characterAtIndex:start];
+            if (![ellipsis characterIsMember:c] && ![periods characterIsMember:c]) {
+                [folded appendFormat:@"%C", c]; start++; continue;
             }
+            NSUInteger end = start;
+            BOOL hasSymbol = NO, hasEllipsisGlyph = NO;
+            while (end < line.length) {
+                unichar dot = [line characterAtIndex:end];
+                if (![ellipsis characterIsMember:dot] && ![periods characterIsMember:dot]) { break; }
+                hasSymbol |= [symbols characterIsMember:dot];
+                hasEllipsisGlyph |= [ellipsis characterIsMember:dot];
+                end++;
+            }
+            unichar previous = start > 0 ? [line characterAtIndex:start - 1] : 0;
+            BOOL japanese = (previous >= 0x3041 && previous <= 0x30FF) || (previous >= 0x3400 && previous <= 0x9FFF);
+            BOOL isEllipsis = hasSymbol || end - start >= 2 || (end == line.length && hasEllipsisGlyph);
+            [folded appendString:japanese && isEllipsis ? @"…" : [line substringWithRange:NSMakeRange(start, end - start)]];
+            start = end;
         }
+        line = folded;
         NSUInteger end = line.length;
         while (end > 0 && [periods characterIsMember:[line characterAtIndex:end - 1]]) { end--; }
         if (end > 0 && end < line.length) {

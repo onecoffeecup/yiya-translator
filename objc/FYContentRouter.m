@@ -150,15 +150,18 @@ static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
                      mode:(NSInteger)mode japanese:(BOOL)japanese comparisonKey:(FYContentComparisonKey)key {
     NSString *left = text ?: @"";
     NSString *right = previous ?: @"";
-    if (left.length < 2 || right.length < 2) { return NO; }
-    if ([left isEqualToString:right]) { return YES; }
     if (mode == FYContentModeDialogue && japanese) {
         // A long sentence with one changed negation/number can still be >90%
         // similar. Only harmless OCR punctuation shares the frame identity;
         // clipped frames are checked directionally against the complete source
         // by the learning coordinator, after consecutive-frame confirmation.
-        return [key(left) isEqualToString:key(right)];
+        NSString *leftKey = key(left), *rightKey = key(right);
+        // Removing a leading ellipsis can leave a valid one-character reply;
+        // pure punctuation has no identity and cannot confirm a dialogue.
+        return leftKey.length && rightKey.length && [leftKey isEqualToString:rightKey];
     }
+    if (left.length < 2 || right.length < 2) { return NO; }
+    if ([left isEqualToString:right]) { return YES; }
 
     NSUInteger maxLength = MAX(left.length, right.length);
     NSUInteger lengthDelta = left.length > right.length ? left.length - right.length : right.length - left.length;

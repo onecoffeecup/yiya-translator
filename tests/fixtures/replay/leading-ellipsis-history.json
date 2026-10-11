@@ -1,0 +1,444 @@
+{
+  "schema_version": 1,
+  "name": "leading-ellipsis-history",
+  "mode": "dialogue",
+  "source": "window",
+  "responses": [
+    {
+      "source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "translation": "行首测试译文甲",
+      "hold": true
+    },
+    {
+      "source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう？」",
+      "translation": "行首测试译文乙"
+    },
+    {
+      "source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "translation": "行首再次译文甲"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "青木\n今日は図書館へ行こう。\n「帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "青木\n… …今日は図書館へ行こう。\n「… …帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "青木\n⋯ ⋯今日は図書館へ行こう。\n「⋯ ⋯帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "text": "青木\n… ⋯ ・今日は図書館へ行こう。\n「… ⋯ ・帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "text": "青木\n......今日は図書館へ行こう。\n「......帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 3500,
+      "action": "frame",
+      "text": "青木\n．．．今日は図書館へ行こう。\n「．．．帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 4000,
+      "action": "frame",
+      "text": "青木\n‥今日は図書館へ行こう。\n「‥帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 4500,
+      "action": "frame",
+      "text": "青木\n・今日は図書館へ行こう。\n「・帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 5000,
+      "action": "frame",
+      "text": "青木\n･今日は図書館へ行こう。\n「･帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 5500,
+      "action": "frame",
+      "text": "青木\n•今日は図書館へ行こう。\n「•帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 6000,
+      "action": "frame",
+      "text": "青木\n⋯ ⋯\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending",
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 6500,
+      "action": "release",
+      "request": 0,
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "pending": [],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 7000,
+      "action": "frame",
+      "text": "青木\n今日は図書館へ行こう。\n「帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 7500,
+      "action": "frame",
+      "text": "青木\n… …今日は図書館へ行こう。\n「… …帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 8000,
+      "action": "frame",
+      "text": "青木\n⋯ ⋯今日は図書館へ行こう。\n「⋯ ⋯帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 8500,
+      "action": "frame",
+      "text": "青木\n… ⋯ ・今日は図書館へ行こう。\n「… ⋯ ・帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 9000,
+      "action": "frame",
+      "text": "青木\n......今日は図書館へ行こう。\n「......帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 9500,
+      "action": "frame",
+      "text": "青木\n．．．今日は図書館へ行こう。\n「．．．帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 10000,
+      "action": "frame",
+      "text": "青木\n‥今日は図書館へ行こう。\n「‥帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 10500,
+      "action": "frame",
+      "text": "青木\n・今日は図書館へ行こう。\n「・帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 11000,
+      "action": "frame",
+      "text": "青木\n･今日は図書館へ行こう。\n「･帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 11500,
+      "action": "frame",
+      "text": "青木\n•今日は図書館へ行こう。\n「•帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 12000,
+      "action": "frame",
+      "text": "青木\n⋯ ⋯\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "行首测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」"
+      }
+    },
+    {
+      "at_ms": 12500,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう？」",
+      "expect": {
+        "requests": 1,
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 13000,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう？」",
+      "expect": {
+        "requests": 1,
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 13500,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう？」",
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 14000,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 14500,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 15000,
+      "action": "frame",
+      "text": "青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」",
+      "expect": {
+        "requests": 3,
+        "dialogue_identity_count": 3,
+        "cancel_calls": 0,
+        "captions": [
+          "行首测试译文甲",
+          "行首测试译文乙",
+          "行首再次译文甲"
+        ],
+        "pending": []
+      }
+    }
+  ],
+  "notes": "Synthetic multi-line dialogue: line-leading, quoted, spaced, missing and standalone ellipsis variants must retain one in-flight request, source snapshot and history identity. Real question changes and A/B/A recurrence remain separate. Runs the production timer, frame gate, learning and HTTP delivery."
+}

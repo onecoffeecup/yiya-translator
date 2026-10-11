@@ -135,10 +135,111 @@ static void TestTokenizerTextSnapshots(void) {
           @"all snapshot requests complete");
 }
 
+static void TestDialogueEllipsisHistory(void) {
+    // Synthetic text: the middle body line ends in punctuation that Vision
+    // alternates between U+2026, U+22EF and different dot-run lengths.
+    NSString *source = @"青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。";
+    NSMutableArray<FYSentenceRecord *> *oldRows = [NSMutableArray new];
+    NSArray<NSString *> *marks = @[@"……", @"…⋯⋯", @"⋯", @"⋯⋯⋯", @"・・・", @"......", @"．．．", @"‥", @"・", @"･", @"•"];
+    for (NSUInteger i = 0; i < marks.count; i++) {
+        FYSentenceRecord *row = [FYSentenceRecord new];
+        row.sentenceID = [NSString stringWithFormat:@"ellipsis-%lu", (unsigned long)i];
+        row.kind = FYSentenceKindDialogue;
+        row.latestVersion = 1;
+        row.latestText = [source stringByReplacingOccurrencesOfString:@"……" withString:marks[i]];
+        row.latestTranslation = i == 2 ? nil : @"测试译文";
+        row.occurredAt = [NSDate dateWithTimeIntervalSince1970:100 - i];
+        [oldRows addObject:row];
+    }
+    NSArray<FYSentenceRecord *> *display = [FYLearningCoordinator displayHistoryRecords:oldRows];
+    Check(display.count == 1 && display.firstObject == oldRows.firstObject,
+          @"all Unicode ellipsis variants in a middle body line collapse into one recent-dialogue card");
+    Check([oldRows[1].latestText containsString:@"…⋯⋯"] && oldRows[2].latestTranslation == nil,
+          @"history grouping preserves original source, identity and translation snapshots");
+
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [NSString stringWithFormat:@"fuyi-ellipsis-%@.sqlite3", NSUUID.UUID.UUIDString]];
+    FYLearningStore *store = [[FYLearningStore alloc] initWithDatabasePath:path];
+    FYLearningCoordinator *coordinator = [[FYLearningCoordinator alloc] initWithStore:store
+        analyzer:[FYLearningAnalyzer new] tokenizer:[FYJapaneseTokenizer new] catalog:LoadCatalog()];
+    FYRequestIdentity *first = [coordinator recordText:source kind:FYSentenceKindDialogue];
+    [coordinator setTranslation:@"同句译文" forIdentity:first];
+    [coordinator pinCurrent];
+    for (FYSentenceRecord *row in oldRows) {
+        FYRequestIdentity *identity = [coordinator recordText:row.latestText kind:FYSentenceKindDialogue];
+        Check([identity.sentenceID isEqualToString:first.sentenceID],
+              @"consecutive ellipsis variants keep one persisted dialogue identity");
+        Check([identity.sourceText isEqualToString:source] && !coordinator.hasNewerSentence,
+              @"ellipsis fluctuations preserve complete pinned source and do not announce a new sentence");
+    }
+    __block NSArray<FYSentenceRecord *> *saved;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records, NSError *error) {
+        Check(error == nil, @"synthetic ellipsis history is readable"); saved = records;
+    }];
+    PumpUntil(^BOOL { return saved != nil; });
+    Check(saved.count == 1 && [saved.firstObject.latestTranslation isEqualToString:@"同句译文"],
+          @"ellipsis fluctuations persist one row with its successful translation");
+    FYRequestIdentity *changed = [coordinator recordText:@"青木\n旅程、天気？\n詳しく知りたいなら、\nいつでも連絡して。" kind:FYSentenceKindDialogue];
+    FYRequestIdentity *again = [coordinator recordText:source kind:FYSentenceKindDialogue];
+    Check(![changed.sentenceID isEqualToString:first.sentenceID] && ![again.sentenceID isEqualToString:first.sentenceID],
+          @"a real question and subsequent A/B/A recurrence retain separate identities");
+    __block BOOL closed = NO;
+    [store closeWithCompletion:^(NSError *error) {
+        Check(error == nil, @"synthetic ellipsis store closes without errors"); closed = YES;
+    }];
+    PumpUntil(^BOOL { return closed; });
+    Check(closed, @"synthetic ellipsis store closes");
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+}
+
+static void TestDialogueLeadingEllipsisHistory(void) {
+    NSString *source = @"青木\n……今日は図書館へ行こう。\n「……帰りに本を返そう。」";
+    NSMutableArray<FYSentenceRecord *> *rows = [NSMutableArray new];
+    for (NSString *marks in @[@"… …", @"⋯ ⋯", @"… ⋯ ・", @"", @"……", @"......", @"．．．", @"‥", @"・", @"･", @"•"]) {
+        FYSentenceRecord *row = [FYSentenceRecord new]; row.kind = FYSentenceKindDialogue;
+        row.sentenceID = NSUUID.UUID.UUIDString; row.latestVersion = 1;
+        row.latestText = [source stringByReplacingOccurrencesOfString:@"……" withString:marks];
+        row.occurredAt = [NSDate dateWithTimeIntervalSince1970:100 - rows.count];
+        Check([FYDialogueComparisonKey(row.latestText) isEqualToString:FYDialogueComparisonKey(source)],
+              @"line-leading spaced, quoted and missing ellipsis share the production identity key");
+        Check([FYDialogueComparisonKey(FYDialogueComparisonKey(row.latestText)) isEqualToString:FYDialogueComparisonKey(source)],
+              @"canonical frame keys remain stable when compared again");
+        [rows addObject:row];
+    }
+    Check([FYLearningCoordinator displayHistoryRecords:rows].count == 1,
+          @"old leading-ellipsis variants display as one recent-dialogue card");
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [NSString stringWithFormat:@"fuyi-leading-ellipsis-%@.sqlite3", NSUUID.UUID.UUIDString]];
+    FYLearningStore *store = [[FYLearningStore alloc] initWithDatabasePath:path];
+    FYLearningCoordinator *coordinator = [[FYLearningCoordinator alloc] initWithStore:store
+        analyzer:[FYLearningAnalyzer new] tokenizer:[FYJapaneseTokenizer new] catalog:LoadCatalog()];
+    FYRequestIdentity *first = [coordinator recordText:source kind:FYSentenceKindDialogue];
+    [coordinator setTranslation:@"行首测试译文" forIdentity:first]; [coordinator pinCurrent];
+    for (FYSentenceRecord *row in rows) {
+        FYRequestIdentity *identity = [coordinator recordText:row.latestText kind:FYSentenceKindDialogue];
+        Check([identity.sentenceID isEqualToString:first.sentenceID] && [identity.sourceText isEqualToString:source] && !coordinator.hasNewerSentence,
+              @"leading-ellipsis OCR variants reuse the stored identity and preserve pinned source");
+    }
+    __block NSArray<FYSentenceRecord *> *saved;
+    [store fetchRecentSentencesWithLimit:5 completion:^(NSArray<FYSentenceRecord *> *records, NSError *error) {
+        Check(error == nil, @"synthetic leading-ellipsis history is readable"); saved = records;
+    }];
+    PumpUntil(^BOOL { return saved != nil; });
+    Check(saved.count == 1 && [saved.firstObject.latestText isEqualToString:source] &&
+          [saved.firstObject.latestTranslation isEqualToString:@"行首测试译文"],
+          @"leading-ellipsis history persists one original source and its translation");
+    __block BOOL closed = NO;
+    [store closeWithCompletion:^(NSError *error) { Check(error == nil, @"leading-ellipsis store closes"); closed = YES; }];
+    PumpUntil(^BOOL { return closed; });
+    [[NSFileManager defaultManager] removeItemAtPath:path error:NULL];
+}
+
 int main(void) {
     @autoreleasepool {
         TestTokenizerTextSnapshots();
         TestReadingCueEnumeration();
+        TestDialogueEllipsisHistory();
+        TestDialogueLeadingEllipsisHistory();
         FYVocabularyEntry *first=[FYVocabularyEntry new], *second=[FYVocabularyEntry new];
         first.vocabularyID=@"first"; second.vocabularyID=@"second";
         Check([FYLearningCoordinator vocabularyInList:@[first,second] identifier:@"second" fallbackIndex:0]==second, @"词条稳定身份优先于旧位置");

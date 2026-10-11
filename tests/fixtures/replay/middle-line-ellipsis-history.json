@@ -1,0 +1,344 @@
+{
+  "schema_version": 1,
+  "name": "middle-line-ellipsis-history",
+  "mode": "dialogue",
+  "source": "window",
+  "responses": [
+    {
+      "source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "translation": "测试译文甲",
+      "hold": true
+    },
+    {
+      "source": "青木\n旅程、天気？\n詳しく知りたいなら、\nいつでも連絡して。",
+      "translation": "测试译文乙"
+    },
+    {
+      "source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "translation": "再次译文甲"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "青木\n旅程、天気…⋯⋯\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "青木\n旅程、天気⋯\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "text": "青木\n旅程、天気⋯⋯⋯\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "text": "青木\n旅程、天気・・・\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "text": "青木\n旅程、天気......\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 3500,
+      "action": "frame",
+      "text": "青木\n旅程、天気．．．\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 4000,
+      "action": "frame",
+      "text": "青木\n旅程、天気‥\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 4500,
+      "action": "frame",
+      "text": "青木\n旅程、天気・…．\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 5000,
+      "action": "release",
+      "request": 0,
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "pending": [],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 5500,
+      "action": "frame",
+      "text": "青木\n旅程、天気…⋯⋯\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 6000,
+      "action": "frame",
+      "text": "青木\n旅程、天気⋯\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 6500,
+      "action": "frame",
+      "text": "青木\n旅程、天気⋯⋯⋯\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 7000,
+      "action": "frame",
+      "text": "青木\n旅程、天気・・・\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 7500,
+      "action": "frame",
+      "text": "青木\n旅程、天気......\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 8000,
+      "action": "frame",
+      "text": "青木\n旅程、天気．．．\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 8500,
+      "action": "frame",
+      "text": "青木\n旅程、天気‥\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 9000,
+      "action": "frame",
+      "text": "青木\n旅程、天気・…．\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试译文甲"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。"
+      }
+    },
+    {
+      "at_ms": 9500,
+      "action": "frame",
+      "text": "青木\n旅程、天気？\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "dialogue_identity_count": 1
+      }
+    },
+    {
+      "at_ms": 10000,
+      "action": "frame",
+      "text": "青木\n旅程、天気？\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 1,
+        "dialogue_identity_count": 1
+      }
+    },
+    {
+      "at_ms": 10500,
+      "action": "frame",
+      "text": "青木\n旅程、天気？\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2
+      }
+    },
+    {
+      "at_ms": 11000,
+      "action": "frame",
+      "text": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2
+      }
+    },
+    {
+      "at_ms": 11500,
+      "action": "frame",
+      "text": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2
+      }
+    },
+    {
+      "at_ms": 12000,
+      "action": "frame",
+      "text": "青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。",
+      "expect": {
+        "requests": 3,
+        "dialogue_identity_count": 3,
+        "captions": [
+          "测试译文甲",
+          "测试译文乙",
+          "再次译文甲"
+        ],
+        "cancel_calls": 0,
+        "pending": []
+      }
+    }
+  ],
+  "notes": "Synthetic multi-line dialogue. U+2026/U+22EF and dot counts in a middle body line must retain one in-flight request, one identity and one caption. Real punctuation changes and A/B/A recurrence must still submit separate requests. Uses the production normalized frame, learning and translation boundaries."
+}

@@ -4093,7 +4093,12 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         }
                         // Use the same plate/body distinction before stability,
                         // pending-request matching and rendered-frame dedup.
-                        normalized = NormalizeForComparison([comparisonLines componentsJoinedByString:@"\n"]);
+                        NSString *comparisonText = [comparisonLines componentsJoinedByString:@"\n"];
+                        // Normalize Japanese dialogue while line boundaries
+                        // still exist. Flattening first hides later-line
+                        // prefixes from the shared history/frame identity key.
+                        normalized = languageSegment == 0 ? FYDialogueComparisonKey(comparisonText)
+                            : NormalizeForComparison(comparisonText);
                     }
                     NSArray<OCRTextItem *> *observedUIItems = currentFrameMode == ContentModeUI
                         ? [self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:modalScopedBlocks] strict:NO]

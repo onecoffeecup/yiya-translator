@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "name": "leading-ellipsis-short-reply",
+  "mode": "dialogue",
+  "source": "window",
+  "responses": [
+    {
+      "source": "……え",
+      "translation": "测试单字回复",
+      "hold": true
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "text": "……え",
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "text": "……え",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "……え"
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "text": "… ⋯え",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "text": "・・・え",
+      "expect": {
+        "requests": 1,
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0,
+        "has_reason": "translation_pending"
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "release",
+      "request": 0,
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试单字回复"
+        ],
+        "pending": [],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "text": "⋯ ⋯え",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试单字回复"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "……え"
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "text": "…え",
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "测试单字回复"
+        ],
+        "cancel_calls": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "……え"
+      }
+    }
+  ],
+  "notes": "Synthetic one-character Japanese reply with leading ellipsis. Canonical frame key is one character but must still confirm, retain pending HTTP and suppress repeated submissions; original source retains the leading ellipsis."
+}

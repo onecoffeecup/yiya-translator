@@ -110,8 +110,50 @@ int main(void) {
               @"corner geometry filtering is retained");
 
         FYContentComparisonKey key = ^NSString *(NSString *text) { return FYDialogueComparisonKey(text); };
+        for (NSArray<NSString *> *wrapper in @[@[@"", @""], @[@"「", @"」"], @[@"『", @"』"],
+            @[@"（", @"）"], @[@"(", @")"], @[@"【", @"】"], @[@"“", @"”"], @[@"\"", @"\""],
+            @[@"「（", @"）」"], @[@"…「", @"」"]]) {
+            NSString *source = [NSString stringWithFormat:@"%@……待っている？%@", wrapper[0], wrapper[1]];
+            for (NSString *marks in @[@"… …", @"　⋯ ⋯", @"… ⋯ ・", @"", @"......", @"．．．", @"‥", @"・", @"･", @"•"]) {
+                NSString *variant = [NSString stringWithFormat:@"%@%@待っている？%@", wrapper[0], marks, wrapper[1]];
+                Check([FYContentRouter isSameSubtitleText:source comparedTo:variant mode:0 japanese:YES comparisonKey:key],
+                      @"leading ellipsis OCR variants after quotes or brackets retain one dialogue");
+            }
+        }
+        Check([FYContentRouter isSameSubtitleText:@"え" comparedTo:@"……え" mode:0 japanese:YES comparisonKey:key],
+              @"a canonical one-character Japanese reply still matches its leading-ellipsis source");
+        Check(![FYContentRouter isSameSubtitleText:@"え" comparedTo:@"え" mode:1 japanese:YES comparisonKey:nil] &&
+              ![FYContentRouter isSameSubtitleText:@"a" comparedTo:@"a" mode:0 japanese:NO comparisonKey:nil],
+              @"one-character support does not change UI or English comparison");
+        Check(![FYContentRouter isSameSubtitleText:@"……" comparedTo:@"⋯⋯" mode:0 japanese:YES comparisonKey:key],
+              @"empty punctuation-only keys cannot confirm a dialogue");
+        Check([FYDialogueComparisonKey(@"「… ⋯ｴ」") isEqualToString:FYDialogueComparisonKey(@"「ｴ」")],
+              @"quoted half-width kana retains the same leading-ellipsis policy");
+        for (NSArray<NSString *> *pair in @[@[@"「……待っている？」", @"「……待っている！」"],
+            @[@"……三冊借りる。", @"……四冊借りる。"], @[@"「……行く」", @"「……行かない」"],
+            @[@"「……待っている」", @"『……待っている』"], @[@"（.5）", @"（5）"],
+            @[@"「a⋯b」", @"「a…b」"], @[@"「マリー・アン」", @"「マリー…アン」"]]) {
+            Check(![FYDialogueComparisonKey(pair[0]) isEqualToString:FYDialogueComparisonKey(pair[1])],
+                  @"leading normalization retains meaningful punctuation, numbers, words, wrappers and notation");
+        }
         Check([FYContentRouter isSameSubtitleText:@"待っている……" comparedTo:@"待っている・・・"
             mode:0 japanese:YES comparisonKey:key], @"router reuses production punctuation identity");
+        NSString *ellipsisSource = @"青木\n旅程、天気……\n詳しく知りたいなら、\nいつでも連絡して。";
+        NSString *flatSource = FYNormalizeOCRTextForComparison(ellipsisSource);
+        for (NSString *marks in @[@"…⋯⋯", @"⋯", @"⋯⋯⋯", @"・・・", @"......", @"．．．", @"‥", @"・…．"]) {
+            NSString *variant = FYNormalizeOCRTextForComparison(
+                [ellipsisSource stringByReplacingOccurrencesOfString:@"……" withString:marks]);
+            Check([FYContentRouter isSameSubtitleText:variant comparedTo:flatSource
+                mode:0 japanese:YES comparisonKey:key],
+                @"frame comparison recognizes middle-line ellipsis variants after newline removal");
+        }
+        for (NSArray<NSString *> *pair in @[@[@"天気…良い", @"天気？良い"], @[@"天気…良い", @"天気！良い"],
+            @[@"天気…良い", @"天気。良い"], @[@"天気…良い", @"天気…悪い"],
+            @[@"1.5", @"15"], @[@"a⋯b", @"a…b"], @[@"マリー・アン", @"マリー…アン"],
+            @[@"猫・犬", @"猫犬"], @[@"A...B", @"A…B"]]) {
+            Check(![FYDialogueComparisonKey(pair[0]) isEqualToString:FYDialogueComparisonKey(pair[1])],
+                  @"ellipsis folding preserves semantic punctuation, words, decimals, name separators and non-Japanese notation");
+        }
         NSString *rendered = @"明日は図書館で本を三冊借ります。";
         NSString *corrected = @"明日は図書館で本を四冊借ります。";
         Check(![FYContentRouter isSameSubtitleText:rendered comparedTo:corrected mode:0 japanese:YES comparisonKey:key],
