@@ -5919,6 +5919,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     return block;
 }
 
+// Main-thread only: filtering reads the current languageControl selection.
 - (NSArray<OCRTextItem *> *)filteredInlineTextItems:(NSArray<OCRTextItem *> *)items {
     return [self filteredInlineTextItems:items strict:YES];
 }
@@ -5980,6 +5981,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                   filterObserver:FYContentFilterDiagnosticObserver()];
 }
 
+// Main-thread only; both production OCR callbacks return to the main queue.
 - (BOOL)shouldIgnoreInlineText:(NSString *)text normalized:(NSString *)normalized boundingBox:(CGRect)box strict:(BOOL)strict {
     FYContentTextFilterReason reason = [FYContentRouter filterReasonForText:text normalized:normalized
                                                              boundingBox:box strict:strict
