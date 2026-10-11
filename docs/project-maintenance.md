@@ -14,13 +14,13 @@
 
 | 事实面 | 状态与依据 |
 | --- | --- |
-| 代码与远端 | `verified-current`：Mac 分支 `dev0.2.1_261009` 的功能提交 `4956d21` 与服务组件提交 `73c306e` 已推送；iPadOS / Windows 独立维护。后续文档提交不改变这些功能提交的验证范围。 |
-| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 61；含 19 pt 字号修补与查句悬停，也包含同工作区的其他并行修补。严格签名、安装 / 打包双架构 UUID 与 Key 元数据已核对。[查句安装及回归记录](live-reading-layout.md)保存当前身份；安装不表示其他并行修改已纳入本次提交。 |
+| 代码与远端 | `verified-current`：Mac 分支 `dev0.2.1_261009` 的姓名排除 / 学习身份 / 最近台词修补 `163e48f` 已推送；此前窗口与阅读 `4956d21`、服务组件 `73c306e`、字号 `94174ac`、查句悬停 `9f41479` 均已在远端。iPadOS / Windows 独立维护；本次交付仅包含 Mac 生产链路及其合成回归。后续文档提交不改变功能验证范围。 |
+| 本机运行产物 | `verified-current`：`~/Applications/译芽.app` 为 0.2.1 build 66；含 19 pt 字号修补、查句悬停及姓名过滤后被旧学习身份补回、最近列表重新选中旧姓名前缀的修补。严格签名、安装 / 打包 / release / dSYM 双架构 UUID 与 Key 元数据已独立核对。[姓名过滤及联合安装记录](dialogue-speaker-exclusion.md)保存当前身份；[窗口记录](window-resize.md)保留 build 59 历史。 |
 | 公开交付 | `verified-current`：GitHub 最新 Release 仍为 v0.2.1，Sparkle 清单仍为 build 17；dev 推送和本机安装没有更新公开附件。 |
 | 文档与规则 | `changed-and-verified`：源码 README、两层 AGENTS 与内部视觉规范同步手动侧栏、原生窗口尺寸和阅读布局规则；具体合同分别在[窗口缩放](window-resize.md)、[阅读布局](live-reading-layout.md)、[服务组件](translation-service-settings.md)。 |
-| 用户体验 | `pending`：正式 build 59 的右边缘 / 右下角真实鼠标体验、另一台 Mac、Intel 实机、采集卡及长时间运行尚未验收；完整视觉套件仍有修改前已复现的「已选中」徽标失败。 |
+| 用户体验 | `partially-verified`：用户于 2026-10-11 对 build 66 本机复测后回复「好了，commit 然后提交吧」，确认本轮对白姓名排除及最近台词通过。该场景有采集卡实时页、最近列表和点击原句的现场核对；其它游戏样式与长时间运行仍待验证。正式 build 59 的右边缘 / 右下角真实鼠标体验、另一台 Mac、Intel 实机尚未验收；完整视觉套件仍有修改前已复现的「已选中」徽标失败。 |
 | Agent 记忆 | `out-of-scope`：本次只更新项目文件与约束，不手改平台生成记忆。 |
-| 工作区 | `pending`：现役仓库只有一个 worktree；字号 / 原生选择修补已提交为 `94174ac`，查句悬停本轮单独提交至 Mac 开发分支。其他未提交的并行修改保留，不纳入本次查句提交。工作区联合核心检查 115 项记录通过，查句回归与安装范围见[阅读布局](live-reading-layout.md)。历史分支、日志、签名产物和备份保留。 |
+| 工作区 | `verified-current`：现役仓库只有一个 worktree；本机 build 66 对应的姓名排除、学习身份及历史代表选择修补已提交、推送为 `163e48f`。最终核心检查 121 项记录通过，333 个源码 / 媒体散列与提交文件一致，见[修复记录](dialogue-speaker-exclusion.md)。本次文档收尾记录用户验收与提交状态，不重建或重新安装应用。历史分支、私有日志、签名产物和备份保留。 |
 
 查句悬停在用户确认预览后共用实时页的生产组件。新增 `QuickSentenceHoverTests` 与五组相关原生 UI 回归通过，覆盖词义／语法优先级、选择复制、自然高度、外层滚动、关闭及迟到回调隔离；安装前后 65 个生产源码散列一致，正式应用打开后为暂停空状态。命令、build 61 安装 UUID、Key 元数据及最短手动验收见[阅读布局](live-reading-layout.md)。真实游戏、设备与物理鼠标体验仍待确认。
 
