@@ -4279,7 +4279,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
                     FYTrace(trace, @"stable", @{@"reason": shouldWaitForStableText ? @"accepted" : @"not_required",
                                                @"stable_required": @(shouldWaitForStableText), @"stable_count": @(self.stableCandidateCount)});
-                    {
+                    if (FuyiDiagEnabled()) {
                         NSUInteger tokens = UITokenHitCount(ocrBlocks);
                         NSUInteger substantial = 0;
                         for (OCRTextItem *b in ocrBlocks) {

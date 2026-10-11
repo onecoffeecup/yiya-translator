@@ -933,6 +933,27 @@ static NSArray *Records(NSString *log) {
 static NSUInteger Count(NSArray *records, NSString *event) {
     NSUInteger count = 0; for (NSDictionary *r in records) { if ([r[@"event"] isEqual:event]) { count++; } } return count;
 }
+static void CheckMixedRoutingCalculationCount(void) {
+    Require(!FuyiDiagEnabled(),@"calculation count checks the default diagnostics-off path");
+    TracePipelineApp *app=TraceApp();
+    ((TraceControl *)(id)app.stableTextCheckbox).state=NSControlStateValueOff;
+    MockRequests=0;SubmittedSources=[NSMutableArray new];HoldResponse=NO;
+    SEL selector=NSSelectorFromString(@"separatedDialogueItemsInItems:");
+    Method method=class_getClassMethod(FYContentRouter.class,selector);
+    Require(method!=NULL,@"mixed route calculation exists in the production router");
+    IMP original=method_getImplementation(method);
+    __block NSUInteger calls=0;
+    IMP counted=imp_implementationWithBlock(^NSArray *(id receiver,NSArray *items) {
+        calls++;
+        return ((NSArray *(*)(id,SEL,NSArray *))original)(receiver,selector,items);
+    });
+    method_setImplementation(method,counted);
+    TraceCycle(app,Fixture(@"明日はみんなで図書館に行きましょう。",.65));
+    method_setImplementation(method,original);imp_removeBlock(counted);
+    NSLog(@"Mixed routing calculation count: %lu",(unsigned long)calls);
+    Require(calls==2 && app.captions.count==1,@"a delivered frame computes mixed routing only for mode and dialogue split, without disabled diagnostic work");
+    puts("PASS mixed routing calculation count: mode + dialogue split = 2; diagnostics off; production caption delivered");
+}
 static void CheckPunctuationFiltering(void) {
     // Call the production filter on both routes; no window or mock filtering.
     AppDelegate *app = [AppDelegate new];
@@ -966,6 +987,7 @@ int main(void) { @autoreleasepool {
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class, @selector(shared)), class_getClassMethod(FYTranslationTrace.class, @selector(pipelineTestShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
     CheckPunctuationFiltering();
+    CheckMixedRoutingCalculationCount();
     CheckLatestDialogueWhileTranslating();
     CheckPendingInlineGeometry();
     CheckServiceTestCancellation();
