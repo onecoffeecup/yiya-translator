@@ -52,6 +52,64 @@ int main(void) {
         Check(route.dialogueText.length == 0 && route.optionItems.count == 0 && route.usedFullFrameFallback,
               @"empty route produces no translatable text");
 
+        // OCR may split a quoted word horizontally from its spoken continuation.
+        OCRTextItem *quotedWord = Item(@"友”",.314,.123,.034,.048);
+        OCRTextItem *continuation = Item(@"って呼ばないで。",.354,.117,.183,.050);
+        for (NSNumber *mapping in @[@NO,@YES]) {
+            route = [FYContentRouter dialogueRouteForItems:@[continuation,quotedWord]
+                optionsCanPasteInline:mapping.boolValue filterObserver:nil];
+            Check([route.dialogueItems isEqual:@[quotedWord,continuation]] &&
+                  [route.dialogueText isEqual:@"友”って呼ばないで。"] && route.optionItems.count == 0,
+                  @"same-row quoted word survives narrow width and disjoint horizontal boxes in both inputs");
+        }
+        Check([quotedWord.text isEqual:@"友”"] && CGRectEqualToRect(quotedWord.boundingBox,CGRectMake(.314,.123,.034,.048)),
+              @"recovering a row does not mutate its original observations");
+        OCRTextItem *alignedOption = Item(@"先に行く",.354,.65,.18,.04);
+        route = [FYContentRouter dialogueRouteForItems:@[alignedOption,continuation,quotedWord]
+            optionsCanPasteInline:YES filterObserver:nil];
+        Check([route.dialogueText isEqual:@"友”って呼ばないで。"] && [route.optionItems isEqual:@[alignedOption]],
+              @"a distant choice stays a separate inline option beside a recovered dialogue row");
+        for (NSString *word in @[@"「友」",@"『友』",@"“友”",@"友達",@"えっ"]) {
+            OCRTextItem *piece = Item(word,.313,.123,.035,.048);
+            route = [FYContentRouter dialogueRouteForItems:@[continuation,piece]
+                optionsCanPasteInline:NO filterObserver:nil];
+            Check([route.dialogueText isEqual:[word stringByAppendingString:continuation.text]],
+                  @"same-baseline recovery is structural and preserves quoted or unquoted short speech");
+        }
+        OCRTextItem *before = Item(@"そう呼ぶのは",.19,.122,.118,.048);
+        for (NSArray *pieces in @[@[continuation,quotedWord,before],@[before,continuation,quotedWord],
+            @[quotedWord,before,continuation]]) {
+            route = [FYContentRouter dialogueRouteForItems:pieces optionsCanPasteInline:NO filterObserver:nil];
+            Check([route.dialogueText isEqual:@"そう呼ぶのは友”って呼ばないで。"],
+                  @"three horizontal pieces are read left-to-right independently of observation order");
+        }
+        OCRTextItem *endingWord = Item(@"「友」",.543,.119,.039,.05);
+        route = [FYContentRouter dialogueRouteForItems:@[endingWord,continuation]
+            optionsCanPasteInline:NO filterObserver:nil];
+        Check([route.dialogueText isEqual:[continuation.text stringByAppendingString:endingWord.text]],
+              @"a quoted fragment at the right edge is not dropped or moved to the next line");
+        for (OCRTextItem *unrelated in @[
+            Item(@"「友」",.25,.123,.034,.048), // too far horizontally
+            Item(@"「友」",.314,.19,.034,.048), // another row
+            Item(@"とも",.314,.17,.034,.018), // small ruby
+            Item(@"「友」",.36,.123,.034,.048), // competing overlapping observation
+        ]) {
+            route = [FYContentRouter dialogueRouteForItems:@[unrelated,continuation]
+                optionsCanPasteInline:NO filterObserver:nil];
+            Check([route.dialogueText isEqual:continuation.text] && route.dialogueItems.count == 1,
+                  @"nearby labels, ruby, distant fields and competing observations cannot join the row");
+        }
+        quotedWord.speakerLabel = YES;
+        route = [FYContentRouter dialogueRouteForItems:@[quotedWord,continuation]
+            optionsCanPasteInline:NO filterObserver:nil];
+        Check([route.dialogueItems isEqual:@[continuation]],@"a confirmed name plate is not a horizontal speech fragment");
+        quotedWord.speakerLabel = NO;
+        quotedWord.lineCount = 2;
+        route = [FYContentRouter dialogueRouteForItems:@[quotedWord,continuation]
+            optionsCanPasteInline:NO filterObserver:nil];
+        Check([route.dialogueItems isEqual:@[continuation]],@"multi-line observations keep their existing field boundaries");
+        quotedWord.lineCount = 0;
+
         OCRTextItem *punctuation = Item(@"……",.21,.10,.05,.04);
         __block NSUInteger drops = 0;
         route = [FYContentRouter dialogueRouteForItems:@[name,body,punctuation]

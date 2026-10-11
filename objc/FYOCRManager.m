@@ -78,6 +78,55 @@ static BOOL FYOCRRefinementDuplicatesSingleLine(OCRTextItem *coarse, OCRTextItem
         fabs(CGRectGetMidY(a)-CGRectGetMidY(b))<=MAX(a.size.height,b.size.height)*.25;
 }
 
+static NSArray<NSValue *> *FYOCRQuoteRanges(NSString *text) {
+    // Some games print the closing curly glyph on both sides of a word.
+    NSString *openers=@"「『“”‘’\"'", *closers=@"」』””’’\"'";
+    NSMutableArray *ranges=[NSMutableArray new];
+    for (NSUInteger start=0; start<text.length; start++) {
+        NSRange kind=[openers rangeOfString:[text substringWithRange:NSMakeRange(start,1)]];
+        if (kind.location==NSNotFound) continue;
+        NSString *close=[closers substringWithRange:NSMakeRange(kind.location,1)];
+        NSRange end=[text rangeOfString:close options:0 range:NSMakeRange(start+1,text.length-start-1)];
+        if (end.location==NSNotFound) continue;
+        [ranges addObject:[NSValue valueWithRange:NSMakeRange(start,end.location-start+1)]];
+        start=end.location;
+    }
+    return ranges;
+}
+
+static BOOL FYOCRRefinementLosesQuotation(OCRTextItem *coarse, OCRTextItem *fine) {
+    if (coarse.lineCount>1 || fine.lineCount>1 || coarse.lineTexts.count>1 || fine.lineTexts.count>1 ||
+        [coarse.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound ||
+        [fine.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound) return NO;
+    CGRect a=coarse.boundingBox,b=fine.boundingBox;
+    CGFloat overlap=MIN(CGRectGetMaxX(a),CGRectGetMaxX(b))-MAX(CGRectGetMinX(a),CGRectGetMinX(b));
+    if (!FYOCRRefinementReplacesItem(coarse,fine) || overlap<MAX(a.size.width,b.size.width)*.65) return NO;
+    NSString *original=FYNormalizeOCRTextForComparison(coarse.text), *replacement=FYNormalizeOCRTextForComparison(fine.text);
+    NSArray<NSValue *> *quotes=FYOCRQuoteRanges(original);
+    if (quotes.count!=1) return NO; // Ambiguous/nested or multiple quotations keep the normal policy.
+    NSRange span=quotes.firstObject.rangeValue;
+    NSString *word=[original substringWithRange:NSMakeRange(span.location+1,span.length-2)];
+    NSCharacterSet *quoteGlyphs=[NSCharacterSet characterSetWithCharactersInString:@"「」『』“”‘’\"'"];
+    if ([word rangeOfCharacterFromSet:NSCharacterSet.alphanumericCharacterSet].location==NSNotFound ||
+        [word rangeOfCharacterFromSet:quoteGlyphs].location!=NSNotFound) return NO;
+    NSString *prefix=[original substringToIndex:span.location], *suffix=[original substringFromIndex:NSMaxRange(span)];
+    if (![FYContentRouter containsJapaneseKana:[prefix stringByAppendingString:suffix]] ||
+        replacement.length<prefix.length+suffix.length || (prefix.length && ![replacement hasPrefix:prefix]) ||
+        (suffix.length && ![replacement hasSuffix:suffix])) return NO;
+    NSString *middle=[replacement substringWithRange:NSMakeRange(prefix.length,replacement.length-prefix.length-suffix.length)];
+    NSString *bare=[[middle componentsSeparatedByCharactersInSet:quoteGlyphs] componentsJoinedByString:@""];
+    if ([bare isEqualToString:word]) return NO; // Removing quote punctuation alone did not lose the word.
+    for (NSValue *value in FYOCRQuoteRanges(middle)) {
+        NSRange range=value.rangeValue;
+        NSString *content=[middle substringWithRange:NSMakeRange(range.location+1,range.length-2)];
+        if ([content rangeOfCharacterFromSet:NSCharacterSet.alphanumericCharacterSet].location!=NSNotFound) return NO;
+    }
+    // Reject only deletion/empty quotes or a short malformed quoted reading,
+    // with an otherwise identical sentence. A complete corrected quotation wins.
+    return !middle.length || (middle.length<=span.length &&
+        [middle rangeOfCharacterFromSet:quoteGlyphs].location!=NSNotFound);
+}
+
 @interface FYOCRRefinementTrack : NSObject
 @property(nonatomic, copy) NSString *coarseText, *refinedText;
 @property(nonatomic) CGRect box;
@@ -1232,10 +1281,21 @@ static BOOL FYPlateDominantColor(FYOCRPixelBuffer *buffer, CGRect box, unsigned 
 
 + (NSArray<OCRTextItem *> *)mergeCoarseItems:(NSArray<OCRTextItem *> *)coarse refinedItems:(NSArray<OCRTextItem *> *)refined {
     if (!refined.count) { return [self resolveOverlappingItems:coarse]; }
-    NSMutableArray<OCRTextItem *> *merged = [refined mutableCopy];
+    NSMutableArray<OCRTextItem *> *selected = [refined mutableCopy];
+    for (OCRTextItem *original in coarse) {
+        NSIndexSet *matches=[refined indexesOfObjectsPassingTest:^BOOL(OCRTextItem *fine, NSUInteger index, BOOL *stop) {
+            return FYOCRRefinementReplacesItem(original,fine);
+        }];
+        if (matches.count!=1) continue;
+        OCRTextItem *fine=refined[matches.firstIndex];
+        NSUInteger covered=0;
+        for (OCRTextItem *item in coarse) if (FYOCRRefinementReplacesItem(item,fine)) covered++;
+        if (covered==1 && FYOCRRefinementLosesQuotation(original,fine)) selected[matches.firstIndex]=original;
+    }
+    NSMutableArray<OCRTextItem *> *merged = [selected mutableCopy];
     for (OCRTextItem *original in coarse) {
         BOOL replaced = NO;
-        for (OCRTextItem *better in refined) {
+        for (OCRTextItem *better in selected) {
             if (FYOCRRefinementReplacesItem(original,better) ||
                 FYOCRRefinementDuplicatesSingleLine(original,better)) { replaced = YES; break; }
         }

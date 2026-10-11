@@ -72,6 +72,31 @@ static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
     return previous[rightLength].unsignedIntegerValue;
 }
 
+// A short observation beside a spoken line can be a horizontally split word.
+// Match its baseline, font height and sub-character gap; this does not change
+// inline field grouping or turn nearby vertical labels into dialogue.
+static BOOL FYDialogueSameBaseline(OCRTextItem *left, OCRTextItem *right) {
+    if (left == right || left.speakerLabel || right.speakerLabel || left.lineCount > 1 || right.lineCount > 1 ||
+        [left.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location != NSNotFound ||
+        [right.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location != NSNotFound) return NO;
+    CGRect x = left.boundingBox, y = right.boundingBox;
+    CGFloat smallHeight = MIN(x.size.height,y.size.height), largeHeight = MAX(x.size.height,y.size.height);
+    return x.size.width > 0 && y.size.width > 0 && smallHeight > 0 && smallHeight >= largeHeight * .70 &&
+        fabs(CGRectGetMidY(x)-CGRectGetMidY(y)) <= smallHeight * .25;
+}
+static BOOL FYDialogueAdjacentRowFragments(OCRTextItem *left, OCRTextItem *right) {
+    if (!FYDialogueSameBaseline(left,right)) return NO;
+    NSString *a = FYNormalizeOCRTextForComparison(left.text), *b = FYNormalizeOCRTextForComparison(right.text);
+    if (!a.length || !b.length || MIN(a.length,b.length) > 6 || MAX(a.length,b.length) < 4 ||
+        ![FYContentRouter containsJapaneseKana:a.length >= b.length ? a : b]) return NO;
+    CGRect x = left.boundingBox, y = right.boundingBox;
+    CGFloat gap = MAX(CGRectGetMinX(x),CGRectGetMinX(y)) - MIN(CGRectGetMaxX(x),CGRectGetMaxX(y));
+    // Small overlap tolerates OCR box edges; larger overlap is a competing
+    // observation, not another word in the same row.
+    CGFloat glyphWidth = MIN(x.size.width/a.length,y.size.width/b.length);
+    return gap >= -MIN(x.size.width,y.size.width)*.15 && gap <= MIN(.02,glyphWidth*.75);
+}
+
 @implementation FYContentRouter
 - (instancetype)init {
     if ((self = [super init])) { _modeStability = [FYContentModeStability new]; }
@@ -112,6 +137,7 @@ static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
                   speakerLabelOnly:(BOOL *)speakerLabelOnly
                     filterObserver:(FYContentTextFilterObserver)observer {
     NSMutableArray<NSString *> *lines = [NSMutableArray array];
+    OCRTextItem *previous = nil;
     for (OCRTextItem *item in items) {
         // A pixel-confirmed name plate is metadata, not a spoken short line.
         // Preserve recognized names; unrecognized plate OCR must not be sent
@@ -124,7 +150,10 @@ static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
             if (observer) { observer(item.text, item.boundingBox, reason); }
             continue;
         }
-        [lines addObject:item.text];
+        if (previous && FYDialogueAdjacentRowFragments(previous,item)) {
+            lines[lines.count-1] = [lines.lastObject stringByAppendingString:item.text];
+        } else { [lines addObject:item.text]; }
+        previous = item;
     }
     if (speakerLabelOnly) { *speakerLabelOnly = [self dialogueFrameIsSpeakerLabelOnly:lines]; }
     return [self dialogueTextWithoutTrailingButton:[lines componentsJoinedByString:@"\n"]];
@@ -768,7 +797,28 @@ static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
         }
     }
 
+    // The vertical band expansion requires horizontal overlap and a minimum
+    // width. Recover same-row fragments after that expansion, including narrow
+    // quoted words which satisfy neither condition.
+    BOOL addedFragment;
+    do {
+        addedFragment = NO;
+        for (OCRTextItem *block in blocks) {
+            if ([band containsObject:block]) { continue; }
+            for (OCRTextItem *member in [band copy]) {
+                if (FYDialogueAdjacentRowFragments(block,member)) {
+                    [band addObject:block];addedFragment=YES;break;
+                }
+            }
+        }
+    } while (addedFragment);
+
     [band sortUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) {
+        if (FYDialogueSameBaseline(left,right)) {
+            if (CGRectGetMinX(left.boundingBox) == CGRectGetMinX(right.boundingBox)) { return NSOrderedSame; }
+            return CGRectGetMinX(left.boundingBox) < CGRectGetMinX(right.boundingBox)
+                ? NSOrderedAscending : NSOrderedDescending;
+        }
         CGFloat leftMidY = CGRectGetMidY(left.boundingBox);
         CGFloat rightMidY = CGRectGetMidY(right.boundingBox);
         if (fabs(leftMidY - rightMidY) < 0.01) { return NSOrderedSame; }

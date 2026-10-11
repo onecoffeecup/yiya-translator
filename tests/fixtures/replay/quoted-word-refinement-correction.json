@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "name": "quoted-word-refinement-correction",
+  "mode": "dialogue",
+  "source": "window",
+  "auto_mode": true,
+  "auto_fit": true,
+  "responses": [
+    {
+      "translation": "别叫我“狗”。"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "「猫」って呼ばないで。",
+          "box": [
+            0.28,
+            0.15,
+            0.26,
+            0.056
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "「犬」って呼ばないで。",
+          "box": [
+            0.281,
+            0.15,
+            0.261,
+            0.053
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "「猫」って呼ばないで。",
+          "box": [
+            0.28,
+            0.15,
+            0.26,
+            0.056
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "「犬」って呼ばないで。",
+          "box": [
+            0.281,
+            0.15,
+            0.261,
+            0.053
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "「犬」って呼ばないで。"
+        ],
+        "captions": [
+          "别叫我“狗”。"
+        ],
+        "learning_source": "「犬」って呼ばないで。",
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "「猫」って呼ばないで。",
+          "box": [
+            0.28,
+            0.15,
+            0.26,
+            0.056
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "「犬」って呼ばないで。",
+          "box": [
+            0.281,
+            0.15,
+            0.261,
+            0.053
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "「犬」って呼ばないで。"
+        ],
+        "captions": [
+          "别叫我“狗”。"
+        ],
+        "learning_source": "「犬」って呼ばないで。",
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "「猫」って呼ばないで。",
+          "box": [
+            0.28,
+            0.15,
+            0.26,
+            0.056
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "「犬」って呼ばないで。",
+          "box": [
+            0.281,
+            0.15,
+            0.261,
+            0.053
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "「犬」って呼ばないで。"
+        ],
+        "captions": [
+          "别叫我“狗”。"
+        ],
+        "learning_source": "「犬」って呼ばないで。",
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "「猫」って呼ばないで。",
+          "box": [
+            0.28,
+            0.15,
+            0.26,
+            0.056
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "「犬」って呼ばないで。",
+          "box": [
+            0.281,
+            0.15,
+            0.261,
+            0.053
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "「犬」って呼ばないで。"
+        ],
+        "captions": [
+          "别叫我“狗”。"
+        ],
+        "learning_source": "「犬」って呼ばないで。",
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    }
+  ]
+}

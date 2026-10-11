@@ -100,6 +100,55 @@ int main(void) {
         Expect([Merge(nil, @[outer, top, bottom]) isEqual:@[top, bottom]], @"refined-only pass also resolves duplicates");
         Expect([Merge(@[outer, top, bottom], nil) isEqual:@[top, bottom]], @"coarse-only pass still resolves duplicates");
         Expect([Resolve(@[top]) isEqual:@[top]], @"single item retained");
+        OCRTextItem *quoted=Item(@"”友”って呼ばないで。",.28,.15,.26,.056);
+        quoted.sourceBlockID=@"complete-quotation";quoted.confidence=.89;
+        quoted.lineCount=1;quoted.lineTexts=@[quoted.text];
+        quoted.lineBoxes=@[[NSValue valueWithRect:quoted.boundingBox]];quoted.lastLineBox=quoted.boundingBox;
+        for (NSString *lost in @[@"って呼ばないで。",@"”ぶって呼ばないで。",@"””って呼ばないで。"] ) {
+            OCRTextItem *incomplete=Item(lost,.281,.15,.261,.053);
+            Expect([Merge(@[quoted],@[incomplete]) isEqual:@[quoted]],@"incomplete refinement cannot erase the quoted word while keeping the same surrounding sentence");
+            Expect([quoted.sourceBlockID isEqual:@"complete-quotation"] && quoted.confidence==.89 &&
+                quoted.lineTexts.count==1 && CGRectEqualToRect(quoted.lastLineBox,quoted.boundingBox) && [incomplete.text isEqual:lost],
+                @"quotation fallback preserves the original observation and never mutates either pass");
+        }
+        for (NSArray<NSString *> *pair in @[@[@"「",@"」"],@[@"『",@"』"],@[@"“",@"”"],@[@"”",@"”"],
+                @[@"‘",@"’"],@[@"’",@"’"],@[@"\"",@"\""],@[@"'",@"'"]]) {
+            NSString *token=[NSString stringWithFormat:@"%@友%@",pair[0],pair[1]];
+            for (NSArray<NSString *> *context in @[@[@"",@"って呼ばないで。"],@[@"もう",@"って呼ばないで。"],@[@"その言葉は",@""]]) {
+                OCRTextItem *full=Item([NSString stringWithFormat:@"%@%@%@",context[0],token,context[1]],.28,.15,.26,.056);
+                OCRTextItem *lost=Item([context componentsJoinedByString:@""],.281,.15,.261,.053);
+                Expect([Merge(@[full],@[lost]) isEqual:@[full]],@"quotation deletion is protected at the beginning, middle and end across supported quote glyphs");
+            }
+        }
+        OCRTextItem *completeCorrection=Item(@"「猫」って呼ばないで。",.281,.15,.261,.053);
+        Expect([Merge(@[quoted],@[completeCorrection]) isEqual:@[completeCorrection]],@"a complete corrected quotation remains eligible for refinement");
+        OCRTextItem *wordRetained=Item(@"友って呼ばないで。",.281,.15,.261,.053);
+        Expect([Merge(@[quoted],@[wordRetained]) isEqual:@[wordRetained]],@"loss of quote punctuation alone keeps the refined word");
+        OCRTextItem *otherSentence=Item(@"って呼んでください。",.281,.15,.261,.053);
+        Expect([Merge(@[quoted],@[otherSentence]) isEqual:@[otherSentence]],@"changed surrounding text is not a proven quotation deletion");
+        OCRTextItem *differentPosition=Item(@"って呼ばないで。",.7,.15,.261,.053);
+        Expect(Merge(@[quoted],@[differentPosition]).count==2,@"quotation text at another position cannot replace or suppress a row");
+        OCRTextItem *partialQuotation=Item(@"って呼ばないで。",.5,.15,.261,.053);
+        Expect([Merge(@[quoted],@[partialQuotation]) isEqual:@[partialQuotation]],@"partial horizontal coverage retains the existing merge policy");
+        OCRTextItem *splitQuote=Item(@"”友”",.28,.15,.06,.056), *splitBody=Item(@"って呼ばないで。",.34,.15,.2,.056);
+        Expect([Merge(@[quoted],@[splitQuote,splitBody]) isEqual:@[splitQuote,splitBody]],@"split refinement preserves both recovered observations");
+        OCRTextItem *twoQuotes=Item(@"「友」と「猫」って呼ばないで。",.28,.15,.26,.056);
+        OCRTextItem *ambiguousFine=Item(@"って呼ばないで。",.281,.15,.261,.053);
+        Expect([Merge(@[twoQuotes],@[ambiguousFine]) isEqual:@[ambiguousFine]],@"multiple quotations remain ambiguous and do not trigger fallback");
+        OCRTextItem *nestedQuote=Item(@"「『友』」って呼ばないで。",.28,.15,.26,.056);
+        Expect([Merge(@[nestedQuote],@[ambiguousFine]) isEqual:@[ambiguousFine]],@"nested quotations retain the existing merge policy");
+        OCRTextItem *multilineQuote=Item(@"”友”って\n呼ばないで。",.28,.15,.26,.056);
+        Expect([Merge(@[multilineQuote],@[wordRetained]) isEqual:@[wordRetained]],@"a multiline paragraph is outside the single-line quotation guard");
+        OCRTextItem *englishQuote=Item(@"Don't call me \"friend\".",.28,.15,.26,.056);
+        OCRTextItem *englishFine=Item(@"Don't call me .",.281,.15,.261,.053);
+        Expect([Merge(@[englishQuote],@[englishFine]) isEqual:@[englishFine]],@"English text does not enter the Japanese quotation guard");
+        FYOCRRefinementStabilizer *quoteSelection=[FYOCRRefinementStabilizer new];
+        OCRTextItem *persistentlyLost=Item(@"って呼ばないで。",.281,.15,.261,.053);
+        for (NSUInteger i=0;i<5;i++) Expect([[quoteSelection observeCoarseItems:@[quoted] refinedItems:@[persistentlyLost]] isEqual:@[quoted]],
+            @"a consistently wrong refined reading cannot become valid through repeated hits");
+        for (NSUInteger i=0;i<3;i++) [quoteSelection observeCoarseItems:@[quoted] refinedItems:@[completeCorrection]];
+        Expect([[quoteSelection observeCoarseItems:@[quoted] refinedItems:@[completeCorrection]] isEqual:@[completeCorrection]],
+            @"stable complete quotation correction can recover after omission fallback");
         FYOCRRefinementStabilizer *selection=[FYOCRRefinementStabilizer new];
         OCRTextItem *readA=Item(@"今日わ",.1,.5,.4,.05), *readB=Item(@"今日ば",.1,.5,.4,.05);
         Expect([[selection observeCoarseItems:@[top] refinedItems:@[readA]] isEqual:@[readA]],@"first frame preserves the existing refinement policy");

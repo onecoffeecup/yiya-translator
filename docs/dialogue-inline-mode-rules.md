@@ -1,6 +1,6 @@
 # 对白和贴译判定规则与审查清单
 
-整理日期：2026-10-11。依据 Mac 分支 dev0.2.1_261009 的内容路由模块、对白修复及已提交的 N2 长批次保留规则。本文随本轮对白修复提交；源码快照以第 12 节散列为准，后续独立改动可能另行改变工作区。
+整理日期：2026-10-11。依据 Mac 分支 dev0.2.1_261009 的内容路由模块、对白修复及已提交的 N2 长批次保留规则。本文随本轮对白修复提交；已同步引用词保护、同行短片段路由及 build 51 的本机用户确认；源码快照以第 12 节散列为准，后续独立改动可能另行改变工作区。
 
 本文记录实现现状，不代表所有规则合理，也不代表所有场景已经通过验收。示例和审查场景均为合成输入，不包含私有诊断中的真实对白。2026-10-11 模块提取后已更新本文：规则实现集中到 FYContentRouter，阈值、优先级和主链路闸门保持原行为。模块边界见 [内容路由模块](content-router-module.md)。随后另行修复独立姓名栏错读：新增像素角色标记及未知姓名栏的对白排除，详见第 6、8 节；这项行为变化不属于此前保持行为的模块提取。
 
@@ -53,6 +53,8 @@
 Vision 适配器先删除首尾空白后长度不足 2、宽小于 0.010 或高小于 0.006 的观察。这些宽高门针对该次实际 OCR 输入图像，精读裁剪时不能直接当成完整图像的阈值。
 
 正式实时路径使用 Accurate OCR；识别语言随设置选择日语或英语。minimumTextHeight 为 clamp(48 / 当前 OCR 图像高度, 0.005, 0.10)。Fast 路径使用 32 像素目标，但不是当前正式实时策略。
+
+双遍合并还保护首遍的完整引用：同位置明确一对一日文单行，首遍有唯一完整、非空引用词，其外围句子与精读一致；精读删除该词、留下空引号或短的不闭合引用时保留首遍观察。双方水平交集至少为较宽框的 65%，不处理多行、多个/嵌套引用或其它位置；完整引用纠错和只丢引号但保留词仍使用精读。条件及正常纠错回归见 [引用词修复](ocr-refinement-quotation.md)。该保护先于下方的字幕带与模式判定。
 
 窗口截图和采集卡视频是干净源图；源观察只按文字与位置去重，不按译文缓存删除同文原文。可选区域精读和跨帧精读结果选择在模式判定之前执行。日语链路在合并及坐标回映后，用完整源图做独立姓名栏角色标记；Vision 局部裁剪输入不自行标记。该过程复用已有图像，不新增 OCR 请求或保存画面。
 
@@ -240,9 +242,21 @@ isShortDialogueAnchor 的注释说纯数字或日期不当对白，但当前函�
 2. 候选与当前前沿的 y 中心差必须方向正确且绝对值 < 0.20。
 3. 候选与原始锚点水平重叠至少为较窄块宽的 50%，且重叠为正。
 4. 每次取最近的合格块，移动前沿，重复扩张。
-5. 输出按 midY 从大到小排序；中心差 < 0.01 视为相同排序位置，没有额外 x 排序。
+5. 垂直扩张完成后追加下面的同行短片段，再统一排序。
 
 扩张使用相邻前沿的 y 距离，但水平对齐始终参照原锚点；没有整条字幕带的总高度上限，也不检查所有候选是否位于下半屏。
+
+### 横向拆开的同行短片段
+
+原垂直带非空后，检查带外块与已收录块；符合以下条件的相邻片段加入带，重复检查直到不再增加，以免观察输入顺序影响收录：
+
+- 双方未标记 speakerLabel，lineCount <= 1，文字没有换行；宽、高均为正。
+- 较小 h 至少为较大 h 的 70%，midY 差不超过较小 h 的 25%。
+- 去空白后两边均非空，较短 L <= 6、较长 L >= 4，较长一边含日文假名；等长时检查函数第一个实参。
+- gap = max(两块 minX) - min(两块 maxX)。gap 至少为较小 w 的 -15%，防止竞争重叠观察被当成另一词。
+- gap 不超过 min(0.02, 两块中较小的 w/L × 75%)，只接收紧邻片段。
+
+同基线、字高相近且未标记姓名栏的单行按 minX 从小到大排序；其余继续按 midY 从大到小，中心差 < 0.01 时沿用原排序位置。这条追加不要求窄片段满足 w >= 0.04 或与原锚点水平重叠，不改变界面字段分组，也不猜测已被 Vision 删除的字。完整路由必须调用 `dialogueRouteForItems`，只测试 `dialogueTextFromItems` 会漏掉带选择时丢词的边界。
 
 ## 6 姓名与姓名注音
 
@@ -341,7 +355,7 @@ today, web, back, 戻る, 戻, 詳細, 閉じる, ルームへ,
 
 此处与整帧 UI 词检测不同：没有英文词边界，也不限日文前缀。普通正文中包含这些子串可能被过滤，是待审查边界。
 
-保留行以换行拼接后，还执行 dialogueTextWithoutTrailingButton：如果整串有函数列举的日文假名，末尾为 2 到 4 个连续汉字，且汉字前为“。．.!！?？、，,…」』）)”之一，就删末尾汉字。它不检查这些汉字是否真的属于按钮词。
+过滤后，若相邻两个保留观察满足第 5 节的同行片段条件，直接按当前字符串接为一行；其它观察继续以换行拼接。不会补写未识别的引号或修改原观察对象。随后执行 dialogueTextWithoutTrailingButton：如果整串有函数列举的日文假名，末尾为 2 到 4 个连续汉字，且汉字前为“。．.!！?？、，,…」』）)”之一，就删末尾汉字。它不检查这些汉字是否真的属于按钮词。
 
 ### 界面贴译过滤
 
@@ -464,6 +478,7 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 - 强对白锚点加入 w >= 0.15 的长句宽度条件，防止窄省略号句被先选强锚点再整体否决。根因及独立验证见 [窄对白模式误判记录](short-dialogue-mode.md)。
 - A 显示、B 在途、单帧 A 的 N1 已改为稳定确认后取消，相关回归见下面列表。
 - 精读抖动与同位置重行属于模式判定前的 OCR 输入问题，见 [精读结果选择](ocr-refinement-stability.md)；不能把它们与模式误判或网络延迟混为一项。
+- 完整引用被精读覆盖、引用词被横向拆开后落在字幕带外已有独立修补；本机 build 51 的该句获用户确认，范围见 [引用词修复与验收记录](ocr-refinement-quotation.md)。其它画面与设备不由这次确认推定。
 
 ### 可对照的测试
 
@@ -471,7 +486,7 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 | --- | --- |
 | [SpeakerPlateTests.m](../tests/SpeakerPlateTests.m) | 独立姓名栏正向像素证据、普通背景/无界色块反例、元数据不可变、普通短句与姓名栏下短句保留；33 条断言 |
 | [speaker-plate-ocr-noise.json](../tests/fixtures/replay/speaker-plate-ocr-noise.json) | 生产主循环：在途时未知姓名栏变化只请求一次且不取消，回包后正常交付，学习原文不污染，不同明确姓名同文仍请求并创建各自身份 |
-| [ContentRouterTests.m](../tests/ContentRouterTests.m) | 独立规则接口、混合输出、模式锁定、过滤原因、映射限制、同句与稳定策略 34 条断言 |
+| [ContentRouterTests.m](../tests/ContentRouterTests.m) | 独立规则接口、混合输出、模式锁定、过滤原因、映射限制、同句与稳定、同行短片段及反例；当前 181 条断言 |
 | [mixed-dialogue-options-auto-mode.json](../tests/fixtures/replay/mixed-dialogue-options-auto-mode.json) | 两个选项加对白、两路同时在途、对白先交付、选项后交付、静止去重 |
 | [OCRPostprocessingTests.m](../tests/OCRPostprocessingTests.m) | UI 词、注音、短对白豁免、纯选项、强短锚点、字幕带扩张、姓名、对白与远处选项拆分 |
 | [short-dialogue-ellipsis-auto-mode.json](../tests/fixtures/replay/short-dialogue-ellipsis-auto-mode.json) | 窄省略号对白、静止去重、纯四项菜单、返回对白的 10 步链路 |
@@ -488,6 +503,9 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 | [refinement-dialogue-oscillation.json](../tests/fixtures/replay/refinement-dialogue-oscillation.json) | 首遍稳定而精读抖动 |
 | [refinement-correction-and-missing-line.json](../tests/fixtures/replay/refinement-correction-and-missing-line.json) | 精读修正及缺行 |
 | [refinement-overlapping-same-line.json](../tests/fixtures/replay/refinement-overlapping-same-line.json) | 双遍同位置重行 |
+| [quoted-word-refinement-loss.json](../tests/fixtures/replay/quoted-word-refinement-loss.json) | 精读删除、空引号与短的不闭合引用不得覆盖首遍完整引用词 |
+| [quoted-word-refinement-correction.json](../tests/fixtures/replay/quoted-word-refinement-correction.json) | 精读中完整引用的正常纠错仍进入请求与字幕 |
+| [dialogue-horizontal-quoted-fragment.json](../tests/fixtures/replay/dialogue-horizontal-quoted-fragment.json) | 精读横向拆开的窄引用词进入完整路由、请求和学习原文；静止只请求一次 |
 | [inline-long-batch-unrelated-change.json](../tests/fixtures/replay/inline-long-batch-unrelated-change.json) | N2 已转普通回归：独立时钟多次变化不得取消或重发原长正文；按当前长短结果交付 |
 | inline-long-batch-retained-error-retry / retention-cancellation / retention-field-removal / retention-duplicate-fields / retention-restart | 在途长批失败重试、真正正文变化、过期短结果、字段移除后的输出位置与停止重启 |
 
@@ -499,33 +517,24 @@ FYInlineOCRFrameStabilizer 在分组与过滤之后工作：
 
 ## 12 源码入口和快照
 
-行号对应模块提取及姓名栏修复后的当前工作区，后续改动可能移动。原 FYOCRManager 及主文件 C 入口仍保留转发；审查规则实现优先读 FYContentRouter。
+以下用文件及函数名定位当前实现，避免后续改动使旧行号误导审查。原 FYOCRManager 及主文件 C 入口仍保留转发；审查规则实现优先读 FYContentRouter。
 
 | 位置 | 函数或主链路 |
 | --- | --- |
 | [FYContentRouter.h](../objc/FYContentRouter.h) | 公开输入输出、原因枚举和模式状态 |
-| [FYContentRouter.m](../objc/FYContentRouter.m) 5 | FYContentModeStability observeMode |
-| 同文件 80 | 候选模式确认与交互锁定 |
-| 同文件 88 | 对白与选项路由结果 |
-| 同文件 111 | 对白正文提取 |
-| 同文件 149、172 | 同句与对白稳定策略 |
-| 同文件 189 | 文字过滤和原因 |
-| 同文件 310 | 整帧分类 |
-| 同文件 345 至 410 | 姓名与姓名注音规则 |
-| 同文件 426 | 对白簇与选项分流 |
-| 同文件 543 至 617 | 成形行、强短锚点、字幕带 |
-| 同文件 785、828、850 | UI 词、几何注音、整帧 UI |
-| 同文件 941 | 尾随按钮删除 |
-| [FYOCRManager.m](../objc/FYOCRManager.m) 49、311 | 通用文本计数、界面字段稳定 |
-| 同文件 773 | 完整源图独立姓名栏角色标记 |
-| 同文件 1302 | Vision 适配器；原内容策略入口仅转发 |
-| [LiveCaptionTranslator.m](../objc/LiveCaptionTranslator.m) 3403、3409、3418 | 在途匹配与新内容请求 |
-| 同文件 4051 至 4218 | 模式、界面稳定、去重、节流、对白稳定闸门 |
-| 同文件 4349 | 消费路由结果并发送两条路径的请求 |
-| 同文件 5825、5885 | 整帧界面分组与过滤编排 |
-| [LiveCaptionTranslator.m](../objc/LiveCaptionTranslator.m) 3438、6042 | 实时界面保留在途长批、更换当前计划与源键/出现次数映射 |
-| [FYLearningModels.m](../objc/learning/FYLearningModels.m) 3 | FYDialogueComparisonKey，共享身份归一化 |
-| [FYTranslationManager.m](../objc/FYTranslationManager.m) 34 | 同文重试节流状态 |
+| [FYContentRouter.m](../objc/FYContentRouter.m) | FYContentModeStability observeMode、observeModeForItems:locked: |
+| 同文件 | dialogueRouteForItems:optionsCanPasteInline:filterObserver:、dialogueTextFromItems:speakerLabelOnly:filterObserver: |
+| 同文件 | FYDialogueSameBaseline、FYDialogueAdjacentRowFragments、subtitleBandItems: |
+| 同文件 | isSameSubtitleText、isStableText、filterReasonForText |
+| 同文件 | modeDecisionForItems:fallback:、looksLikeUIFrame:、textHitsUIToken: |
+| 同文件 | 姓名/姓名注音、splitDialogueAndOptions、dialogueTextWithoutTrailingButton: |
+| [FYOCRManager.m](../objc/FYOCRManager.m) | 通用文本计数、界面字段稳定、完整源图姓名栏标记、Vision 适配器 |
+| 同文件 | FYOCRRefinementLosesQuotation、mergeCoarseItems:refinedItems:、FYOCRRefinementStabilizer |
+| [LiveCaptionTranslator.m](../objc/LiveCaptionTranslator.m) | timerFired: 的模式、界面稳定、去重、节流、对白稳定、完整路由及两路请求 |
+| 同文件 | 在途匹配、beginContentTranslation、beginInlineContentTranslation、在途长批映射 |
+| 同文件 | 整帧界面分组、过滤、采集会话和实际窗口显示 |
+| [FYLearningModels.m](../objc/learning/FYLearningModels.m) | FYDialogueComparisonKey，共享身份归一化 |
+| [FYTranslationManager.m](../objc/FYTranslationManager.m) | 同文重试节流状态 |
 
 整理时 SHA-256：
 
@@ -534,25 +543,25 @@ objc/FYContentRouter.h
 7970dd3669e76f195d49d6f92a07335cf61c3706f2a179128cea257ebcbf10c5
 
 objc/FYContentRouter.m
-d5159181d6899375afaf0ab3b2e94afddf53bf7aac555262efb041c1c8248311
+af81bafdbd86f204532d623fbd6a146d72f36ff3b8f5457996943d84884caa0d
 
 objc/FYOCRManager.m
-5a3e2a462c7e6076e790ce5f26763763ae0225cbd570d1861d0e5d84bc7f9676
+782b5883698011909549e0b47f2de4d7da84de1e0789f4ce7348ce4596d1a368
 
 objc/LiveCaptionTranslator.m
-527fbf3837b8dfc8497e833deab4fd58999c125b8b4382e2d6d2d4ae5ebc03cf
+bd2b06303ed1bc1f8c244f3aab09eeb593f1cd2eb5e5cd3ef4ae50a178633758
 
 objc/learning/FYLearningModels.m
-376ab05d22b0d381ec7702b3b148996126977231ecc6e81ea21b714253dddec8
+a1d6b480e0e20eb7b0f40e3f2b78753044b7afd405799b74ee808ecf18630edf
 
 objc/FYTranslationManager.m
 dfc61544f46a1f0a513a550831cf70521f9698f3e5e70dbf877b9f09bafd6775
 
 tests/ContentRouterTests.m
-000900c18eac34b2a5c3ed7778e5182d6418659b7571325e1933f7552929f598
+d7ece902d6147d4de46bcffe3626c3ed486de05e951187dfa1263c2ffdaac35c
 
 tests/OCRPostprocessingTests.m
-c48fa5de6d1092c13b67b2434d6acd5fa9da829ee5a5e14b125a21ac9d541c45
+045fc1182b91213d1602e7c4e448989434fb895efb528b288a536efe0e2ffa5d
 ~~~
 
 推荐交给 Claude 的材料为本文、FYContentRouter.h/m、FYOCRManager.h/m、LiveCaptionTranslator.m、FYLearningModels.m 和相关测试。验证请求与交付应在完整唯一维护仓库执行，避免从归档旧副本得出结论。

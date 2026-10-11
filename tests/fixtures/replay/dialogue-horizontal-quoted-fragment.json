@@ -1,0 +1,288 @@
+{
+  "schema_version": 1,
+  "name": "dialogue-horizontal-quoted-fragment",
+  "mode": "dialogue",
+  "source": "capture_card",
+  "auto_mode": true,
+  "auto_fit": true,
+  "responses": [
+    {
+      "translation": "别叫我“朋友”。"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "”友”って呼ばないで。",
+          "box": [
+            0.2875,
+            0.11834,
+            0.25,
+            0.052
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "友”",
+          "box": [
+            0.314,
+            0.123,
+            0.034,
+            0.048
+          ]
+        },
+        {
+          "text": "って呼ばないで。",
+          "box": [
+            0.354,
+            0.117,
+            0.183,
+            0.05
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "”友”って呼ばないで。",
+          "box": [
+            0.2875,
+            0.11834,
+            0.25,
+            0.052
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "友”",
+          "box": [
+            0.314,
+            0.123,
+            0.034,
+            0.048
+          ]
+        },
+        {
+          "text": "って呼ばないで。",
+          "box": [
+            0.354,
+            0.117,
+            0.183,
+            0.05
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "友”って呼ばないで。"
+        ],
+        "learning_source": "友”って呼ばないで。",
+        "captions": [
+          "别叫我“朋友”。"
+        ],
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "”友”って呼ばないで。",
+          "box": [
+            0.2875,
+            0.11834,
+            0.25,
+            0.052
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "友”",
+          "box": [
+            0.314,
+            0.123,
+            0.034,
+            0.048
+          ]
+        },
+        {
+          "text": "って呼ばないで。",
+          "box": [
+            0.354,
+            0.117,
+            0.183,
+            0.05
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "友”って呼ばないで。"
+        ],
+        "learning_source": "友”って呼ばないで。",
+        "captions": [
+          "别叫我“朋友”。"
+        ],
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "”友”って呼ばないで。",
+          "box": [
+            0.2875,
+            0.11834,
+            0.25,
+            0.052
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "友”",
+          "box": [
+            0.314,
+            0.123,
+            0.034,
+            0.048
+          ]
+        },
+        {
+          "text": "って呼ばないで。",
+          "box": [
+            0.354,
+            0.117,
+            0.183,
+            0.05
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "友”って呼ばないで。"
+        ],
+        "learning_source": "友”って呼ばないで。",
+        "captions": [
+          "别叫我“朋友”。"
+        ],
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "”友”って呼ばないで。",
+          "box": [
+            0.2875,
+            0.11834,
+            0.25,
+            0.052
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "友”",
+          "box": [
+            0.314,
+            0.123,
+            0.034,
+            0.048
+          ]
+        },
+        {
+          "text": "って呼ばないで。",
+          "box": [
+            0.354,
+            0.117,
+            0.183,
+            0.05
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "友”って呼ばないで。"
+        ],
+        "learning_source": "友”って呼ばないで。",
+        "captions": [
+          "别叫我“朋友”。"
+        ],
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "”友”って呼ばないで。",
+          "box": [
+            0.2875,
+            0.11834,
+            0.25,
+            0.052
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "友”",
+          "box": [
+            0.314,
+            0.123,
+            0.034,
+            0.048
+          ]
+        },
+        {
+          "text": "って呼ばないで。",
+          "box": [
+            0.354,
+            0.117,
+            0.183,
+            0.05
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "sources": [
+          "友”って呼ばないで。"
+        ],
+        "learning_source": "友”って呼ばないで。",
+        "captions": [
+          "别叫我“朋友”。"
+        ],
+        "dialogue_identity_count": 1,
+        "cancel_calls": 0
+      }
+    }
+  ]
+}
