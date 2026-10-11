@@ -137,7 +137,7 @@ static NSImage *FYServiceModeIcon(BOOL custom) {
 - (NSTextField *)field:(NSString *)label secure:(BOOL)secure {
     NSTextField *field=secure ? [NSSecureTextField new] : [NSTextField new]; field.font=FYUIFont(13,NSFontWeightRegular);
     field.textColor=FYAdventureColor(@"ink"); field.backgroundColor=FYAdventureColor(@"paper"); field.delegate=self;
-    field.accessibilityLabel=label; field.target=self; field.action=@selector(editingCommitted:);
+    field.accessibilityLabel=label;
     [field setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
     [field setContentCompressionResistancePriority:249 forOrientation:NSLayoutConstraintOrientationHorizontal];
     [field.heightAnchor constraintGreaterThanOrEqualToConstant:30].active=YES; return field;
@@ -244,7 +244,6 @@ static NSImage *FYServiceModeIcon(BOOL custom) {
 - (void)applyPreset:(NSString *)identifier model:(NSString *)model { [self synchronizeFields]; [self.settings selectProvider:identifier]; if(model) self.settings.model=model; [self changed]; }
 - (void)controlTextDidChange:(NSNotification *)notification { [self synchronizeFields]; if(self.onTextChanged) self.onTextChanged(notification); }
 - (void)controlTextDidEndEditing:(NSNotification *)notification { [self synchronizeFields]; if(self.onEditingEnded) self.onEditingEnded(notification); }
-- (void)editingCommitted:(id)sender { [self controlTextDidEndEditing:[NSNotification notificationWithName:NSControlTextDidEndEditingNotification object:sender]]; }
 - (void)testTranslation:(id)sender { if(self.onTest) self.onTest(); }
 - (void)pasteAPIKeyFromClipboard:(id)sender { if(self.onPasteKey) self.onPasteKey(); }
 - (void)clearAPIKey:(id)sender { if(self.onClearKey) self.onClearKey(); }

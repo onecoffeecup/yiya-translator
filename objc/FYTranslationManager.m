@@ -296,6 +296,16 @@ static NSString *FYTrimString(id value) {
     id decoded = [NSJSONSerialization JSONObjectWithData:data ?: [NSData data] options:0 error:&decodeError];
     if (!decoded) { if (error) { *error = decodeError; } return nil; }
     if ([decoded isKindOfClass:NSDictionary.class] && [decoded[@"content"] isKindOfClass:NSArray.class]) {
+        if ([decoded[@"stop_reason"] isEqual:@"refusal"]) {
+            if (error) *error=[NSError errorWithDomain:@"LiveCaptionTranslator" code:204
+                userInfo:@{NSLocalizedDescriptionKey:@"翻译模型拒绝翻译这段内容。"}];
+            return nil;
+        }
+        if ([decoded[@"stop_reason"] isEqual:@"max_tokens"]) {
+            if (error) *error=[NSError errorWithDomain:@"LiveCaptionTranslator" code:204
+                userInfo:@{NSLocalizedDescriptionKey:@"翻译接口输出被截断，没有返回完整译文。"}];
+            return nil;
+        }
         NSMutableArray *texts=[NSMutableArray new];
         for(id block in decoded[@"content"]) {
             if(![block isKindOfClass:NSDictionary.class] || ![block[@"type"] isEqual:@"text"]) continue;

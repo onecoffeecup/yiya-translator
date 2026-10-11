@@ -634,7 +634,7 @@ int main(void) {
               @"an empty model fails before transport without silently selecting a different service model");
 
         // Claude learning uses the same adapter while keeping its JSON/truncation contract.
-        for (NSString *stopReason in @[@"end_turn",@"max_tokens"]) {
+        for (NSString *stopReason in @[@"end_turn",@"max_tokens",@"refusal"]) {
             FYLearningAnalyzer *claude=[FYLearningAnalyzer new]; claude.baseURL=@"https://api.anthropic.com/v1";
             claude.apiKey=@"synthetic-claude-key"; claude.model=@"fixture-claude";
             __block NSUInteger calls=0;
@@ -645,6 +645,7 @@ int main(void) {
                     @"Claude learning receives Messages routing, separate system prompt and the original learning timeout");
                 Check(!payload[@"temperature"] && !payload[@"response_format"],@"Claude learning omits incompatible OpenAI parameters");
                 NSData *data=[NSJSONSerialization dataWithJSONObject:@{@"type":@"message",@"stop_reason":stopReason,
+                    @"stop_details":@{@"reason":@"synthetic-private-stop-detail"},
                     @"content":@[@{@"type":@"text",@"text":@"{\"schema_version\":1,\"grammar\":[],\"vocabulary\":[]}"}]} options:0 error:NULL];
                 done(data,[[NSHTTPURLResponse alloc] initWithURL:request.URL statusCode:200 HTTPVersion:@"HTTP/1.1" headerFields:@{}],nil);
             };
@@ -652,7 +653,12 @@ int main(void) {
             [claude analyzeSentence:@"今日は晴れです。" translation:nil completion:^(FYAnalysisResult *r,NSError *e){result=r;error=e;}];
             PumpUntil(^BOOL { return result!=nil || error!=nil; });
             Check(calls==1 && ([stopReason isEqual:@"end_turn"] ? result!=nil && error==nil : result==nil && error!=nil),
-                @"Claude complete JSON is accepted and truncated JSON is rejected through production learning logic");
+                @"Claude complete JSON is accepted; truncated or refused JSON fails through production learning logic");
+            if ([stopReason isEqual:@"refusal"]) {
+                Check([error.domain isEqual:@"FYLearningAnalyzer"] && error.code==204 &&
+                    [error.localizedDescription isEqual:@"学习模型拒绝分析这段内容。"],
+                    @"Claude refusal uses a fixed learning error without response text or stop details");
+            }
         }
 
         // 截断（content 为空 + finish_reason=length）

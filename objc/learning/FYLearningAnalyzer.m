@@ -155,6 +155,11 @@ static NSError *FYCanceledError(void) {
                 return;
             }
             if (FYUsesAnthropicMessagesAPI(request.URL)) {
+                if ([decoded[@"stop_reason"] isEqual:@"refusal"]) {
+                    completion(nil,[NSError errorWithDomain:@"FYLearningAnalyzer" code:204
+                        userInfo:@{NSLocalizedDescriptionKey:@"学习模型拒绝分析这段内容。"}]);
+                    return;
+                }
                 if ([decoded[@"stop_reason"] isEqual:@"max_tokens"]) {
                     completion(nil,[NSError errorWithDomain:@"FYLearningAnalyzer" code:204
                         userInfo:@{NSLocalizedDescriptionKey:@"接口输出被截断，没有返回完整结果。"}]);

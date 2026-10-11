@@ -1,4 +1,10 @@
 #import "LearningAppTestSupport.h"
+@interface FYServiceSaveCountingApp : AppDelegate
+@property(nonatomic) NSUInteger settingsSaveCalls;
+@end
+@implementation FYServiceSaveCountingApp
+- (void)saveSettings:(id)sender { self.settingsSaveCalls++; [super saveSettings:sender]; }
+@end
 static NSView *FindServiceView(NSView *root, NSString *identifier) {
     if([root.identifier isEqual:identifier]) return root;
     for(NSView *child in root.subviews) { NSView *match=FindServiceView(child,identifier); if(match) return match; }
@@ -30,7 +36,7 @@ static void ServiceResize(AppDelegate *app,CGFloat width) {
 int main(int argc,const char *argv[]) { @autoreleasepool {
     [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     NSString *output=argc>1 ? @(argv[1]) : @".build/test-results/TranslationServiceViewTests";
-    AppDelegate *app=[AppDelegate new]; [app createMainWindow]; [app loadSettings];
+    FYServiceSaveCountingApp *app=[FYServiceSaveCountingApp new]; [app createMainWindow]; [app loadSettings];
     [app selectPageAtIndex:5]; [app.mainWindow makeKeyAndOrderFront:nil]; Tick();
     [app toggleMainStudyChat:nil]; Tick();
     FYTranslationServiceView *compactComponent=[[FYTranslationServiceView alloc] initWithLicenseView:[NSView new]];
@@ -45,6 +51,18 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
         Require(button.image && button.imagePosition==NSImageLeft,@"both mode buttons retain the list/link icons shown in the approved preview");
     }
     Require([app.modelField isMemberOfClass:NSTextField.class] && app.modelField.editable && app.modelField.selectable,@"preset model is an ordinary editable native text field");
+    Require([app.mainWindow makeFirstResponder:app.modelField],@"model field can begin native editing");
+    NSTextView *editor=(NSTextView *)app.modelField.currentEditor;
+    Require([editor isKindOfClass:NSTextView.class],@"model field has a real AppKit field editor");
+    editor.string=@"synthetic-enter-model";
+    [app.saveTimer invalidate]; app.saveTimer=nil;
+    app.settingsSaveCalls=0;
+    [editor insertNewline:nil];
+    NSLog(@"SERVICE_ENTER saveSettings calls=%lu",(unsigned long)app.settingsSaveCalls);
+    Require(app.settingsSaveCalls==1,@"Enter in the model field saves settings exactly once through AppKit");
+    Require([app.modelField.stringValue isEqual:@"synthetic-enter-model"] &&
+        [[NSUserDefaults.standardUserDefaults objectForKey:SettingsKey][@"model"] isEqual:@"synthetic-enter-model"],
+        @"Enter commits the edited model through the real settings path");
     for(NSTextField *field in @[app.baseURLField,app.modelField,app.apiKeyField])
         Require(ServiceBrightness(field.backgroundColor)>.8,@"cream form uses readable light input backgrounds instead of an unknown theme token");
     for(NSDictionary *preset in FYTranslationServicePresets()) Require(FindServiceView(service,preset[@"id"])!=nil,@"all ten provider cards exist");

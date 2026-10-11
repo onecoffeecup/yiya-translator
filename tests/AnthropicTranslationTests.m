@@ -1,7 +1,7 @@
 #import <Foundation/Foundation.h>
 #import "FYTranslationManager.h"
-static NSUInteger checks;
-static void Check(BOOL pass, NSString *message) { checks++; if(!pass) { fprintf(stderr,"FAIL: %s\n",message.UTF8String); exit(1); } }
+static NSUInteger checks, failures;
+static void Check(BOOL pass, NSString *message) { checks++; if(!pass) { failures++; fprintf(stderr,"FAIL: %s\n",message.UTF8String); } }
 int main(void) { @autoreleasepool {
     NSError *error=nil;
     NSURLRequest *request=[FYTranslationManager requestWithURL:[NSURL URLWithString:@"https://api.anthropic.com/v1/messages"]
@@ -23,5 +23,22 @@ int main(void) { @autoreleasepool {
     Check(![FYTranslationManager translationFromData:data statusCode:200 error:&error] && error.code==204,@"thinking-only Claude response remains a failure");
     error=nil; data=[NSJSONSerialization dataWithJSONObject:@{@"content":@[@"malformed",@{@"type":@"text",@"text":@42}]} options:0 error:NULL];
     Check(![FYTranslationManager translationFromData:data statusCode:200 error:&error],@"malformed content blocks do not crash or succeed");
-    printf("PASS: %lu Claude translation checks (synthetic, no requests)\n",(unsigned long)checks);
-} return 0; }
+    for (NSString *stopReason in @[@"refusal", @"max_tokens", @"end_turn", @"stop_sequence"]) {
+        error=nil;
+        data=[NSJSONSerialization dataWithJSONObject:@{@"type":@"message", @"stop_reason":stopReason,
+            @"stop_details":@{@"reason":@"synthetic-private-stop-detail"},
+            @"content":@[@{@"type":@"text", @"text":@"合成响应正文"}]} options:0 error:NULL];
+        NSString *translation=[FYTranslationManager translationFromData:data statusCode:200 error:&error];
+        if ([stopReason isEqual:@"refusal"] || [stopReason isEqual:@"max_tokens"]) {
+            Check(translation==nil && error!=nil,
+                [NSString stringWithFormat:@"Claude %@ with a text block must fail",stopReason]);
+            NSString *description=[stopReason isEqual:@"refusal"] ? @"翻译模型拒绝翻译这段内容。" : @"翻译接口输出被截断，没有返回完整译文。";
+            Check([error.domain isEqual:@"LiveCaptionTranslator"] && [error.localizedDescription isEqual:description],
+                @"failed stop reasons use a fixed Chinese error without response text or stop details");
+        } else {
+            Check([translation isEqual:@"合成响应正文"] && error==nil,
+                [NSString stringWithFormat:@"Claude %@ retains successful text decoding",stopReason]);
+        }
+    }
+    if (!failures) printf("PASS: %lu Claude translation checks (synthetic, no requests)\n",(unsigned long)checks);
+} return failures ? 1 : 0; }
