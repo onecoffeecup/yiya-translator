@@ -1252,7 +1252,10 @@ static BOOL FYInlineHasSentencePunctuation(NSString *text) {
     CGFloat readableMinimum = MIN(minimumHeight,
                                   MAX(chrome + [self longCardLineHeight:placement], contentHeight));
     CGFloat height = fits ? contentHeight : cap;
-    height = FYInlineClamp(height, MIN(readableMinimum, windowInner), MIN(cap, windowInner));
+    // 用户上限优先于三行的首选高度；大字号下允许少显示几行并滚动，
+    // 不能让下限高于上限，否则 clamp 会返回下限、使高度滑条失效。
+    CGFloat maximumHeight = MIN(cap, windowInner);
+    height = FYInlineClamp(height, MIN(readableMinimum, maximumHeight), maximumHeight);
     CGFloat viewportHeight = MAX(0, height - chrome);
     placement.translationFrame = NSMakeRect(0, 0, chosenWidth, height);
     placement.measuredContentHeight = chosenContent;

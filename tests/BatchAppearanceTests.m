@@ -178,6 +178,43 @@ int main(void) { @autoreleasepool {
     Require(dimensions.inlineLongCardPanels.firstObject == ordinary && [ordinary.identifier isEqualToString:blockID], @"dimension changes retain the ordinary panel and block identity");
     NSLog(@"ordinary dimensions: %@, configured maximum 240 x 160", NSStringFromRect(ordinary.frame));
     Require(NSWidth(ordinary.frame) <= 241 && NSHeight(ordinary.frame) <= 161, @"ordinary long card respects both configured limits");
+    for (NSNumber *fontSize in @[@13, @14.51022581335616, @16, @24, @30]) {
+        dimensions.batchFontSizeSlider.doubleValue = fontSize.doubleValue;
+        [dimensions controlValueChanged:dimensions.batchFontSizeSlider];
+        TrackFor(.1);
+        FYInlinePlacement *placement = [dimensions.lastInlineLayoutResult placementForBlockID:blockID];
+        NSLog(@"ordinary limits at font %@: panel %@, body font %.1f, content %.1f", fontSize,
+              NSStringFromRect(ordinary.frame), placement.font.pointSize, placement.measuredContentHeight);
+        Require(dimensions.inlineLongCardPanels.firstObject == ordinary && placement.scrollable,
+                @"size limits retain the ordinary scrollable card at every supported font");
+        Require(NSWidth(ordinary.frame) <= 241 && NSHeight(ordinary.frame) <= 161,
+                @"ordinary card size limits override the three-line preferred minimum at larger fonts");
+        NSScrollView *ordinaryScroll = BodyScroll(ordinary.contentView);
+        Require([((NSTextField *)ordinaryScroll.documentView).stringValue isEqualToString:FYInlineNormalizeTranslationParagraphs(body)],
+                @"ordinary size limits keep the complete translation in the native document");
+    }
+    dimensions.batchFontSizeSlider.doubleValue = 16;
+    [dimensions controlValueChanged:dimensions.batchFontSizeSlider];
+    TrackFor(.1);
+    dimensions.batchWidthSlider.doubleValue = 720;
+    [dimensions controlValueChanged:dimensions.batchWidthSlider];
+    TrackFor(.1);
+    NSLog(@"ordinary after widening limit to 720: %@", NSStringFromRect(ordinary.frame));
+    Require(NSWidth(ordinary.frame) > 241 && NSWidth(ordinary.frame) <= 721 && NSHeight(ordinary.frame) <= 161,
+            @"ordinary width expands when the original field needs it, retaining the height limit");
+    dimensions.batchHeightSlider.doubleValue = 500;
+    [dimensions controlValueChanged:dimensions.batchHeightSlider];
+    TrackFor(.1);
+    NSLog(@"ordinary after raising height limit to 500: %@", NSStringFromRect(ordinary.frame));
+    Require(NSHeight(ordinary.frame) > 161 && NSHeight(ordinary.frame) <= 501,
+            @"ordinary height expands for long content within the available game viewport");
+    dimensions.batchWidthSlider.doubleValue = 240;
+    dimensions.batchHeightSlider.doubleValue = 160;
+    [dimensions controlValueChanged:dimensions.batchWidthSlider];
+    [dimensions controlValueChanged:dimensions.batchHeightSlider];
+    TrackFor(.1);
+    Require(NSWidth(ordinary.frame) <= 241 && NSHeight(ordinary.frame) <= 161 && ordinary == dimensions.inlineLongCardPanels.firstObject,
+            @"ordinary cards shrink again during slider tracking without replacing their window");
     [dimensions openFullInlineReadingCardForItem:scene.lastObject translation:body stableBlockID:blockID];
     NSPanel *expanded = dimensions.inlineExpandedReadingPanel;
     NSLog(@"expanded dimensions: %@, configured maximum 240 x 160", NSStringFromRect(expanded.frame));

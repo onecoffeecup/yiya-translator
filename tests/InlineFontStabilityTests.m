@@ -36,6 +36,38 @@ static CGFloat GapForFont(FYInlineLayoutEngine *engine, CGRect viewport, CGFloat
     }
     return 0;
 }
+
+static void TestConfiguredCardLimits(void) {
+    CGRect viewport = CGRectMake(0, 0, 1200, 800);
+    NSString *body = [@"合成通知：请阅读活动安排。" stringByPaddingToLength:400
+        withString:@"完整译文保留，可以在卡片内滚动阅读。" startingAtIndex:0];
+    NSArray *scene = @[Request(@"合成通知正文。\n活动安排说明。", body, CGRectMake(600, 272, 384, 208), YES)];
+    FYInlineLayoutEngine *engine = [FYInlineLayoutEngine defaultEngine];
+    engine.cardMaxWidth = 240;
+    engine.cardMaxHeight = 160;
+    FYInlineLayoutResult *result = nil;
+    for (NSNumber *size in @[@16, @17.51022581335616, @19, @27, @33]) {
+        engine.longBodyFontSize = size.doubleValue;
+        engine.minimumLongBodyFontSize = size.doubleValue - 4;
+        result = [engine layoutRequests:scene viewport:viewport previous:result];
+        FYInlinePlacement *card = result.placements.firstObject;
+        Check(card.mode == FYInlineDisplayModeScrollingCard && card.scrollable,
+              @"configured small dimensions retain a scrollable ordinary card for every body font");
+        Check(NSWidth(card.translationFrame) <= 240.5 && NSHeight(card.translationFrame) <= 160.5,
+              @"explicit card limits remain hard caps even when three preferred lines need more height");
+        Check(card.font.pointSize == size.doubleValue && [card.translation isEqualToString:body],
+              @"respecting a size cap retains the selected font and full translation");
+    }
+    NSString *identity = ((FYInlinePlacement *)result.placements.firstObject).blockID;
+    for (NSNumber *height in @[@500, @160]) {
+        engine.cardMaxHeight = height.doubleValue;
+        result = [engine layoutRequests:scene viewport:viewport previous:result];
+        FYInlinePlacement *card = result.placements.firstObject;
+        Check(NSHeight(card.translationFrame) <= height.doubleValue + .5 && card.font.pointSize == 33 &&
+              [card.blockID isEqualToString:identity],
+              @"height changes preserve paragraph identity and reading font while applying the current cap");
+    }
+}
 int main(void) { @autoreleasepool {
     fprintf(stderr,"FONT_PROBE before default engine\n");
     CGRect viewport = CGRectMake(0, 0, 400, 400);
@@ -78,6 +110,7 @@ int main(void) { @autoreleasepool {
     FYInlineLayoutResult *fresh = [[FYInlineLayoutEngine defaultEngine] layoutRequests:Scene(roomyGap) viewport:viewport previous:nil];
     Check(((FYInlinePlacement *)fresh.placements.firstObject).font.pointSize == 19,
           @"a fresh scene does not inherit the previous paragraph's smaller font");
+    TestConfiguredCardLimits();
     NSLog(@"InlineFontStabilityTests: %lu failures", (unsigned long)failures);
     return failures ? 1 : 0;
 } }
