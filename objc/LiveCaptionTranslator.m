@@ -162,6 +162,8 @@ static NSString *Trim(NSString *value) {
     return [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
 
+static NSString * const FYTranslationServiceRetestHint = @"请前往「翻译服务」，点击「测试翻译」重新检查当前模型服务。";
+
 static NSString *FYTranslationModelForSettings(NSDictionary *settings) {
     // Keep the formerly tested model. Only recover the old realtime field when
     // no ordinary model was configured; never carry two active model choices.
@@ -3597,7 +3599,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         }
         if (translationError) {
             FYTrace(trace, @"inline_drop", @{@"reason": @"translation_error", @"error_code": @(translationError.code)});
-            [self showError:translationError.localizedDescription];
+            [self showError:[NSString stringWithFormat:@"%@\n%@", FYTranslationServiceRetestHint,
+                translationError.localizedDescription ?: @"未知错误"]];
             [self setStatus:failureStatus];
             return;
         }
@@ -4436,10 +4439,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                             NSTimeInterval totalDuration = [[NSDate date] timeIntervalSinceDate:cycleStart];
                             if (translationError) {
                                 NSString *errorText = translationError.localizedDescription ?: @"未知错误";
-                                [self showError:errorText];
+                                [self showError:[NSString stringWithFormat:@"%@\n%@", FYTranslationServiceRetestHint, errorText]];
                                 NSString *status = [NSString stringWithFormat:@"翻译出错 · OCR %.1fs 翻译 %.1fs", ocrDuration, translationDuration];
                                 [self setStatus:status];
-                                [self updateCaptionWindowWithText:[NSString stringWithFormat:@"翻译失败：%@", Shorten(errorText, 110)] status:status];
+                                [self updateCaptionWindowWithText:[NSString stringWithFormat:@"翻译失败：%@\n%@", FYTranslationServiceRetestHint, Shorten(errorText, 110)] status:status];
                                 FYTrace(dialogueTrace, @"caption_apply", @{@"reason": @"translation_error", @"error_code": @(translationError.code), @"success": @NO});
                             } else {
                                 [self.learningCoordinator setTranslation:translated forIdentity:dialogueIdentity];

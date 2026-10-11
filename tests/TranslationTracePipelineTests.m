@@ -19,6 +19,7 @@ static NSDictionary *LastRequestPolicy;
 static TraceTask *LastTask;
 static BOOL HoldResponse;
 static NSInteger MockResponseStatus = 200;
+static NSData *MockResponseData;
 static void (^PendingResponse)(void);
 
 @interface FYTranslationTrace (PipelineTest)
@@ -54,7 +55,8 @@ static void (^PendingResponse)(void);
     NSString *translated = [source hasPrefix:@"1. "] ? @"1. 测试界面" : [NSString stringWithFormat:@"测试译文%lu", (unsigned long)MockRequests];
     TraceTask *task = [TraceTask new]; LastTask = task;
     NSInteger status = MockResponseStatus;
-    task.response = ^{ completion(Envelope(translated), [[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"https://example.invalid/v1"]
+    NSData *data = MockResponseData ?: Envelope(translated);
+    task.response = ^{ completion(data, [[NSHTTPURLResponse alloc] initWithURL:[NSURL URLWithString:@"https://example.invalid/v1"]
         statusCode:status HTTPVersion:@"HTTP/1.1" headerFields:@{}], nil); };
     return task;
 }
@@ -101,6 +103,7 @@ static void (^PendingResponse)(void);
 @property BOOL captureReadOnMain;
 @property NSUInteger ocrCalls;
 @property(copy) NSString *lastStatus;
+@property BOOL allowsErrors;
 @property dispatch_semaphore_t captureEntered;
 @property dispatch_semaphore_t captureRelease;
 @end
@@ -144,7 +147,10 @@ static void (^PendingResponse)(void);
 - (void)refreshLearningStatus {}
 - (void)clearInlineTranslationPanels {}
 - (void)setCaptionPanelVisibleForUIMode:(BOOL)m {}
-- (void)showError:(NSString *)s { Require(s.length == 0, @"unexpected pipeline error"); }
+- (void)showError:(NSString *)s {
+    Require(s.length == 0 || self.allowsErrors, @"unexpected pipeline error");
+    [super showError:s];
+}
 - (void)updateTranslationCount {}
 - (void)updateCaptionWindowWithText:(NSString *)text status:(NSString *)status { [self.captions addObject:text]; }
 - (void)showInlineTranslations:(NSArray *)translations forItems:(NSArray *)items { self.inlineApplies++; self.lastInlineItems=items; }
@@ -696,6 +702,46 @@ static void CheckServiceConfigurationCancellation(void) {
         HoldResponse=NO;
     }
 }
+static void CheckTranslationFailureServiceGuidance(void) {
+    NSString *hint = @"请前往「翻译服务」，点击「测试翻译」重新检查当前模型服务。";
+    NSString *body = [@"synthetic model unavailable " stringByPaddingToLength:300 withString:@"x" startingAtIndex:0];
+    for (NSUInteger route=0; route<3; route++) {
+        TracePipelineApp *a=TraceApp(); a.allowsErrors=YES;
+        a.liveErrorLabel=(id)TextControl(@"");
+        a.fixtureMode=route==0 ? ContentModeDialogue : ContentModeUI;
+        ((TraceControl *)(id)a.stableTextCheckbox).state=NSControlStateValueOff;
+        a.serviceTestResultLabel.stringValue=@"existing service result";
+        MockRequests=0; SubmittedSources=[NSMutableArray new]; HoldResponse=NO;
+        MockResponseStatus=404; MockResponseData=[body dataUsingEncoding:NSUTF8StringEncoding];
+        a.fixture=Fixture(route==0 ? @"明日はみんなで図書館に行きましょう。" : @"設定メニュー", .65);
+        if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
+        else { TraceCycle(a,a.fixture); TraceCycle(a,a.fixture); }
+        Pump(^BOOL { return a.liveErrorLabel.stringValue.length>0; });
+        Require([a.liveErrorLabel.stringValue containsString:@"404"] &&
+            [a.liveErrorLabel.stringValue containsString:body] && [a.liveErrorLabel.stringValue hasPrefix:hint] &&
+            !a.liveErrorLabel.hidden, @"translation failure retains full details and visibly directs the player to retest the model service");
+        if (route==0) {
+            NSString *caption=a.captions.lastObject;
+            Require([caption hasPrefix:[@"翻译失败：" stringByAppendingString:hint]] && ![caption containsString:body],
+                @"dialogue caption keeps the service guidance outside the shortened error details");
+        } else { Require(a.inlineApplies==0 && a.captions.count==0, @"failed inline translation does not create a game caption or apply a panel"); }
+        Require(MockRequests==1 && [a.apiKeyField.stringValue isEqual:@"TRACE_CREDENTIAL_SENTINEL"] &&
+            [a.modelField.stringValue isEqual:@"test-model"] &&
+            [a.serviceTestResultLabel.stringValue isEqual:@"existing service result"],
+            @"guidance does not automatically test, change the model/key or overwrite service test results");
+        MockResponseStatus=200; MockResponseData=nil;
+        a.fixture=Fixture(route==0 ? @"今日は公園で犬と一緒に遊びます。" : @"保存メニュー", .65);
+        if (route==2) { [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; }); }
+        else { for (NSUInteger frame=0; frame<4; frame++) { TraceCycle(a,a.fixture); } }
+        Pump(^BOOL { return a.liveErrorLabel.hidden; });
+        Require(a.liveErrorLabel.stringValue.length==0 && MockRequests==2,
+            @"successful translation clears the prior failure guidance through the production callback");
+        [a showError:@"合成 OCR 错误"];
+        Require([a.liveErrorLabel.stringValue isEqual:@"合成 OCR 错误"], @"non-translation errors do not receive model-service guidance");
+        [a stop];
+    }
+    puts("PASS translation failure guidance: dialogue, realtime inline and manual snapshot; full details, visible hint, recovery and unchanged configuration");
+}
 static void CheckInlineRequestTimeouts(void) {
     TracePipelineApp *a=TraceApp(); HoldResponse=NO; SubmittedSources=[NSMutableArray new];
     NSMutableArray *items=[NSMutableArray array],*indexes=[NSMutableArray array],*keys=[NSMutableArray array];
@@ -893,6 +939,7 @@ int main(void) { @autoreleasepool {
     CheckUnifiedTranslationModel();
     CheckTranslationModelSettingsMigration();
     CheckServiceTestPageResults();
+    CheckTranslationFailureServiceGuidance();
     CheckInlineRequestTimeouts();
     CheckAtomicCaptureIdentity();
     CheckLateCaptureCancellation();
