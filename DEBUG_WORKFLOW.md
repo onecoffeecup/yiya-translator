@@ -193,6 +193,10 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 
 原 `known-gaps/latest-frame-while-busy.json` 已升级为普通回归 `latest-frame-while-translating.json`；保留“C 已确认后不得交付 A”的目标，并加强 OCR 连续、相同帧长期去重、取消及迟到错误检查。另有采集卡版本、带稳定门的 `fast-switch-busy.json`、`inline-page-while-translating.json` 与 `cancelled-dialogue-recurrence.json`。后者验证 A→在途 B→A 建立新身份，再次出现 B 不受已取消请求的 4 秒节流影响，迟到 B 不覆盖字幕。只证明这些合成生产链路场景通过，不证明所有真实游戏场景均已验收。原两个已登记缺口均转为普通回归，历史失败证据保留；这不等于所有设备与产品场景完成验收。
 
+此前已知缺口 `known-gaps/inline-long-batch-unrelated-change.json`：长正文批次在途时，独立时钟块的分钟变化经连续三帧确认，整页请求匹配失败，旧长批次被取消并重发；第 4 步仍断言不应取消（预期 0、实际 1）。2026-10-11 本轮重新执行原失败夹具，仍在同一检查点失败（`.build/debug/20261011T051317Z-700345`），确认取消发生在整页内容作废边界。
+
+现已为实时界面追加局部保留规则：长正文键及重复次数不变时，保留原长 HTTP 批次、更换当前界面计划，仅取消过期短批；长译文按源键和出现次数接入最新字段位置，旧短结果不能进入当前计划。正文变化及原运行/输入/模式/服务作废边界仍取消旧请求。原夹具转为普通 `inline-long-batch-unrelated-change.json`，保留原取消断言并加强多次时钟变化、长短返回顺序及最终交付。另有 `inline-long-batch-retained-error-retry.json`、`inline-long-batch-retention-cancellation.json`、`inline-long-batch-retention-field-removal.json`、`inline-long-batch-retention-duplicate-fields.json` 和 `inline-long-batch-retention-restart.json`。完整命令与结果见 [N2 追加记录](docs/review-dev0.2.1-261009.md)。历史失败报告保留；合成 HTTP/Replay 不证明实际服务等待、Token 计费或桌面显示已验收。
+
 ## 标准 Bug 修复协议
 
 1. **复现**：记录触发条件、实际 / 预期、应用二进制 UUID、输入源和发生时间。先看已有日志、测试和最小 Replay；尽量减少再次开游戏。新增最小失败夹具，不把历史测试的通过记录当成本轮复现。

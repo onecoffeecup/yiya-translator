@@ -308,6 +308,17 @@ typedef struct {
 @implementation FYInlineBlockSnapshot
 @end
 
+// One physical long-text batch may serve successive confirmed UI snapshots.
+// The current snapshot owns delivery; the batch owns only its source keys.
+typedef void (^FYInlineLongBatchCompletion)(NSArray<NSString *> *, NSError *);
+@interface FYInlinePendingLongBatch : NSObject
+@property(nonatomic, copy) NSArray<NSString *> *keys;
+@property(nonatomic, strong) NSURLSessionDataTask *task;
+@property(nonatomic, strong) NSMutableArray<FYInlineLongBatchCompletion> *completions;
+@end
+@implementation FYInlinePendingLongBatch
+@end
+
 // Vision boxes are normalized, with a bottom-left origin. These are text-only
 // diagnostics of existing OCR results; this helper never obtains an image.
 static NSArray *FYTraceOCRLines(NSArray<OCRTextItem *> *items) {
@@ -849,6 +860,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, copy) NSArray<OCRTextItem *> *contentTranslationUIItems;
 @property(nonatomic) NSInteger contentTranslationGeometryGeneration;
 @property(nonatomic) uint32_t contentTranslationDisplayTarget;
+@property(nonatomic) NSUInteger inlineTranslationSerial;
+@property(nonatomic, strong) FYInlinePendingLongBatch *pendingInlineLongBatch;
 @property(nonatomic) BOOL screenAccessRequestedDuringSession;
 @property(nonatomic) BOOL mainWindowVisibleBeforeRegionSelection;
 @property(nonatomic) BOOL captionPanelVisibleBeforeRegionSelection;
@@ -3403,6 +3416,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         self.lastTranslationAttemptDate = nil;
     }
     self.contentTranslationRevision += 1;
+    self.inlineTranslationSerial += 1;
+    [self.pendingInlineLongBatch.completions removeAllObjects];
+    self.pendingInlineLongBatch.task = nil;
+    self.pendingInlineLongBatch = nil;
     self.contentTranslationOperations = 0;
     self.contentTranslationText = nil;
     self.contentTranslationUIItems = nil;
@@ -3433,6 +3450,35 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.lastTranslationAttemptDate = [self translationProcessingDate];
     self.contentTranslationGeometryGeneration = self.ocrGeometryGeneration;
     self.contentTranslationDisplayTarget = self.ocrDisplayTargetWindowID;
+    return self.contentTranslationRevision;
+}
+
+- (NSArray<NSString *> *)longInlineKeysForItems:(NSArray<OCRTextItem *> *)items {
+    NSMutableArray<NSString *> *keys = [NSMutableArray new];
+    for (OCRTextItem *item in items) {
+        if (item.blockKind == InlineBlockKindLong) { [keys addObject:[self inlineTranslationCacheKeyForItem:item]]; }
+    }
+    return [keys sortedArrayUsingSelector:@selector(compare:)];
+}
+
+- (NSUInteger)beginInlineContentTranslation:(NSString *)text items:(NSArray<OCRTextItem *> *)items trace:(NSDictionary *)trace {
+    FYInlinePendingLongBatch *batch = self.pendingInlineLongBatch;
+    if (!batch.task || !self.contentTranslationOperations || self.contentTranslationMode != ContentModeUI ||
+        ![[self longInlineKeysForItems:items] isEqual:[self longInlineKeysForItems:self.contentTranslationUIItems]]) {
+        return [self beginContentTranslation:text mode:ContentModeUI];
+    }
+    // Only short fields changed. Keep the long HTTP task and its transport
+    // revision, but replace the UI plan so old short results cannot be applied.
+    self.inlineTranslationSerial += 1;
+    [batch.completions removeAllObjects];
+    [self.translationTaskOwner cancelTasksExceptTask:batch.task];
+    self.contentTranslationOperations = 1;
+    self.contentTranslationText = text;
+    self.lastSubmittedNormalizedText = text;
+    self.lastTranslationAttemptDate = [self translationProcessingDate];
+    self.contentTranslationGeometryGeneration = self.ocrGeometryGeneration;
+    self.contentTranslationDisplayTarget = self.ocrDisplayTargetWindowID;
+    FYTrace(trace, @"task", @{@"reason": @"inline_long_batch_retained"});
     return self.contentTranslationRevision;
 }
 
@@ -4197,7 +4243,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     }
 
                     NSInteger frameMode = [self effectiveModeSegment];
-                    NSUInteger contentRevision = [self beginContentTranslation:normalized mode:frameMode];
+                    NSUInteger contentRevision = frameMode == ContentModeUI
+                        ? [self beginInlineContentTranslation:normalized items:currentUIItems trace:trace]
+                        : [self beginContentTranslation:normalized mode:frameMode];
+                    NSUInteger inlineSerial = self.inlineTranslationSerial;
 
                     if (frameMode == ContentModeUI) {
                         [[FYInlineLayoutDebug shared] recordItems:currentUIItems stage:@"inline_stable" context:layoutDebug];
@@ -4233,7 +4282,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         NSDictionary *uiTrace = [[FYTranslationTrace shared] requestContextForCycle:trace];
                         FYInlineDebugTracePerform(uiTrace, layoutDebug, ^{
                         [self translateInlineTextItems:uiItemsForRender completion:^(NSArray<NSString *> *translations, NSError *translationError) {
-                            if (contentRevision != self.contentTranslationRevision) {
+                            if (contentRevision != self.contentTranslationRevision || inlineSerial != self.inlineTranslationSerial) {
                                 FYTrace(uiTrace, @"inline_drop", @{@"reason": @"content_changed"});
                                 return;
                             }
@@ -6113,11 +6162,57 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 
     FYRunInlineBatches(shortItems.count > 0, longItems.count > 0, translations,
         ^(BOOL isLong, void (^done)(NSError *)) {
-            [self translateInlineBatch:isLong ? longItems : shortItems
-                              indexes:isLong ? longIndexes : shortIndexes
-                                 keys:isLong ? longKeys : shortKeys
-                         translations:translations long:isLong completion:done];
+            if (isLong && self.contentTranslationOperations && self.contentTranslationMode == ContentModeUI && self.contentTranslationUIItems) {
+                [self translateInlineLongItems:longItems indexes:longIndexes keys:longKeys
+                    translations:translations completion:done];
+            } else {
+                [self translateInlineBatch:isLong ? longItems : shortItems indexes:isLong ? longIndexes : shortIndexes
+                    keys:isLong ? longKeys : shortKeys translations:translations long:isLong completion:done];
+            }
         }, completion);
+}
+
+- (void)translateInlineLongItems:(NSArray<OCRTextItem *> *)items indexes:(NSArray<NSNumber *> *)indexes
+    keys:(NSArray<NSString *> *)keys translations:(NSMutableArray<NSString *> *)translations
+    completion:(void (^)(NSError *))completion {
+    FYInlinePendingLongBatch *batch = self.pendingInlineLongBatch;
+    BOOL reuse = batch && [[batch.keys sortedArrayUsingSelector:@selector(compare:)]
+        isEqual:[keys sortedArrayUsingSelector:@selector(compare:)]];
+    if (!reuse) {
+        batch = [FYInlinePendingLongBatch new];
+        batch.keys = keys;
+        batch.completions = [NSMutableArray new];
+        self.pendingInlineLongBatch = batch;
+    }
+    NSArray<NSString *> *batchKeys = batch.keys;
+    [batch.completions addObject:^(NSArray<NSString *> *values, NSError *error) {
+        if (!error) {
+            NSMutableIndexSet *usedIndexes = [NSMutableIndexSet new];
+            for (NSUInteger i = 0; i < keys.count; i++) {
+                // Align by source key and occurrence, never by the old page's
+                // block index; separate repeated fields keep separate slots.
+                NSUInteger oldIndex = [batchKeys indexOfObjectPassingTest:^BOOL(NSString *key, NSUInteger index, BOOL *stop) {
+                    return ![usedIndexes containsIndex:index] && [key isEqualToString:keys[i]];
+                }];
+                [usedIndexes addIndex:oldIndex];
+                translations[indexes[i].unsignedIntegerValue] = values[oldIndex];
+            }
+        }
+        completion(error);
+    }];
+    if (reuse) { return; }
+    NSMutableArray<NSString *> *values = [NSMutableArray new];
+    NSMutableArray<NSNumber *> *batchIndexes = [NSMutableArray new];
+    for (NSUInteger i = 0; i < keys.count; i++) { [values addObject:@""]; [batchIndexes addObject:@(i)]; }
+    [self translateInlineBatch:items indexes:batchIndexes keys:keys translations:values long:YES completion:^(NSError *error) {
+        if (self.pendingInlineLongBatch != batch) { return; }
+        self.pendingInlineLongBatch = nil;
+        batch.task = nil;
+        NSArray<FYInlineLongBatchCompletion> *callbacks = [batch.completions copy];
+        [batch.completions removeAllObjects];
+        for (FYInlineLongBatchCompletion callback in callbacks) { callback(values, error); }
+    }];
+    if (self.pendingInlineLongBatch == batch) { batch.task = self.translationTaskOwner.activeTask; }
 }
 
 // 翻译一批同类型的界面文字块，结果按 indexes 写回共享 translations 数组。
@@ -6132,10 +6227,15 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     NSString *source = SourceLanguageLabel(self.languageControl.selectedSegment);
     NSString *prompt = FYInlineBatchPrompt(source, isLong);
     NSInteger maxTokens = FYInlineBatchMaxTokens(items.count, isLong);
+    NSUInteger inlineSerial = self.inlineTranslationSerial;
 
     [self translateText:numberedText systemPrompt:prompt maxTokens:maxTokens
         modelOverride:nil
         longText:isLong serviceTest:NO completion:^(NSString *translated, NSError *error) {
+        if (!isLong && inlineSerial != self.inlineTranslationSerial) {
+            completion([NSError errorWithDomain:NSURLErrorDomain code:NSURLErrorCancelled userInfo:nil]);
+            return;
+        }
         if (error) { completion(error); return; }
 
         NSArray<NSString *> *parsed = [self parseNumberedTranslations:translated expectedCount:items.count];

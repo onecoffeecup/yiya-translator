@@ -65,6 +65,8 @@ FOUNDATION_EXPORT void FYDeliverTranslationOnMain(NSInteger requestGeneration, N
 @property(nonatomic, strong) NSURLSessionDataTask *activeTask;
 - (void)finishTask:(NSURLSessionDataTask *)task;
 - (void)cancelActiveTask;
+// Keep one unchanged inline long batch while replacing obsolete short work.
+- (void)cancelTasksExceptTask:(NSURLSessionDataTask *)retainedTask;
 @end
 
 @interface FYTranslationCache : NSObject

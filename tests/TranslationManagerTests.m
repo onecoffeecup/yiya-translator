@@ -1,6 +1,27 @@
 #import "FYTranslationManager.h"
+@interface SyntheticOwnedTask : NSObject
+@property NSUInteger cancelCalls;
+- (void)cancel;
+@end
+@implementation SyntheticOwnedTask
+- (void)cancel { self.cancelCalls++; }
+@end
 static void Check(BOOL ok, NSString *name) { if (!ok) { NSLog(@"FAIL %@",name); exit(1); } }
 int main(void) { @autoreleasepool {
+    FYTranslationTaskOwner *taskOwner = [FYTranslationTaskOwner new];
+    SyntheticOwnedTask *shortTask = [SyntheticOwnedTask new], *longTask = [SyntheticOwnedTask new];
+    taskOwner.activeTask = (NSURLSessionDataTask *)shortTask;
+    taskOwner.activeTask = (NSURLSessionDataTask *)longTask;
+    [taskOwner cancelTasksExceptTask:(NSURLSessionDataTask *)longTask];
+    Check(shortTask.cancelCalls == 1 && longTask.cancelCalls == 0 && taskOwner.activeTask == (id)longTask,
+          @"replace short work without cancelling the retained long task");
+    [taskOwner finishTask:(NSURLSessionDataTask *)shortTask];
+    Check(taskOwner.activeTask == (id)longTask, @"late obsolete completion cannot release retained task ownership");
+    SyntheticOwnedTask *replacement = [SyntheticOwnedTask new];
+    taskOwner.activeTask = (NSURLSessionDataTask *)replacement;
+    [taskOwner cancelActiveTask];
+    Check(longTask.cancelCalls == 1 && replacement.cancelCalls == 1 && shortTask.cancelCalls == 1 && !taskOwner.activeTask,
+          @"run invalidation cancels retained and replacement tasks exactly once");
     NSError *urlError=nil;
     Check(!FYChatCompletionsURLWithError(@" ",&urlError) && urlError.code==FYTranslationURLMissing,@"empty endpoint produces missing address error");
     Check(!FYChatCompletionsURLWithError(@"ftp://example.invalid",&urlError) && urlError.code==FYTranslationURLInvalidScheme,@"unsupported scheme produces actionable error");

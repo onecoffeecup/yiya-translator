@@ -110,3 +110,34 @@
 并行的其它 OCR 工作先后新增 `tests/OCRStrategyBenchmark.m` 与 `scripts/run-ocr-strategy-benchmark.py`，源码目录的前两次统一检查因此按源不变规则中止，退出 1，结果 `incomplete`（`.build/debug/20261010T022424Z-58fc7f`、`20261010T022530Z-af4df6`），不算通过。保留这些工作文件，使用 `git checkout-index --all --prefix=.build/english-punctuation-snapshot/` 导出只含本次待提交修改的索引快照后，完整检查通过；基准文件未混入本次提交。
 
 远端 CI 在提交后单列核对，并在交付中提供结果链接。本次没有安装、重启应用、调用真实服务或运行真实游戏/UI/设备。最短后续验收：用本次构建选英文，对含句号或省略号的完整对白核对译文；同时确认纯省略号不产生翻译请求、日文 `え……` 不漏句，再检查界面含句号文字的贴译。现场验收与自动回归分别记录。
+
+## 2026-10-11：N2 无关短字段变化保留在途长正文
+
+触发条件为实时界面长正文 HTTP 仍在等待，旁边独立时钟的小改动通过原三帧稳定门。重新执行原失败夹具 `python3 scripts/debug.py replay tests/fixtures/replay/known-gaps/inline-long-batch-unrelated-change.json --repeat 1 --timeout 300`，退出 1，第 4 步取消次数仍为预期 0、实际 1；报告 `.build/debug/20261011T051317Z-700345/summary.json`。根因是整页文本/逐项键序列失配后调用 `beginContentTranslation`，由 `invalidateContentTranslation` 取消所有实时任务，未区分仍未改变的长批。
+
+局部修正在 `LiveCaptionTranslator.m` 的 `beginInlineContentTranslation:items:trace:`、`translateInlineLongItems:...` 与 `FYTranslationTaskOwner cancelTasksExceptTask:`。实时界面的全部长正文键及重复次数不变时，保持原长 HTTP 任务和传输内容修订，更换界面计划序号，只取消过期短批。新计划复用同一长批结果，按源键及出现次数写入当前输出位置；旧短回复不得写缓存或交付。长正文增删/改字/类别变化、停止、重启、切窗/源/模式或服务变化仍走原作废边界。失败不缓存、可重试，长短全部完成后仍一次性交付，不改变混合对白/选项和单次手动快照。
+
+原 N2 夹具已转为普通 `inline-long-batch-unrelated-change.json`，原取消断言保留，并追加连续两次时钟变化、原长批仅一次请求、长批先返回等待最新短批及最终当前内容交付。另新增 5 条普通 Replay，覆盖长批失败重试、真正正文变化/过期短成功及长错误、前置短字段移除后的索引变化、不同位置同文长字段的独立结果槽、停止重启。`TranslationManagerTests` 补齐保留/替换任务及迟到旧完成不释放新 owner 的检查。本轮复核抓到初版键映射把重复源的第二结果写成第一结果；保留 `duplicate-before.json` 的失败，再按出现次数匹配后通过，未放宽产品断言。
+
+工作区还有其它聊天的姓名牌改动，验证使用 `.build/inline-batch-retention-20261011/snapshot/` 的固定完整源码快照，包含原有修改和本轮补丁；本轮没有修改姓名牌算法。最终检查及正式构建使用同一快照，末次核对全部 298 个源码/脚本/夹具/规则/媒体散列与现役工作区一致。资料包为既有公开 reference.sqlite，仅补入测试快照，未读取玩家学习库或 Key。
+
+| 实际命令 / 检查 | 结果 |
+| --- | --- |
+| `FY_CAPTURE_CARD_BUNDLE_ID=com.nanami.yiya.n2-retention-20261011-ocr python3 scripts/debug.py check --timeout 300` | 退出 0，99 条记录全部 passed；11 项核心套件、Replay 构建/失败报告检查及 43 场景各两遍（86 条）通过，0 项登记缺口，source_unchanged=true。报告 `snapshot/.build/debug/20261011T052646Z-0f0435/summary.json`。 |
+| `bash scripts/run-module-tests.sh` | 退出 0；请求 owner 新回归包含在 TranslationManagerTests 的 74 条断言中；日志 `module-tests-final.log`。 |
+| `bash scripts/run-translation-trace-tests.sh` | 退出 0；在途对白、UI 最新几何、重启 OCR 所有权、独立服务测试和凭据排除均通过；日志 `translation-trace-final.log`。 |
+| 六个 N2 相关场景单独经最终 Replay 可执行文件运行两遍 | 全部通过且检查点一致；命令和逐场景结果保存于 `targeted-final.json` 及对应 JSON / log，完整核心检查再次运行这六个场景。 |
+| `ARCHS='arm64 x86_64' bash scripts/build-app.sh` | 退出 0，双架构编译链接及 dSYM UUID 核对通过；每架构仅原有 7 条 unused-function 警告，无新增警告。日志 `release-build-complete.log`。 |
+| `git diff --check` | 退出 0；文档与普通 Replay 路径已同步。 |
+
+以上相对证据路径均在 `.build/inline-batch-retention-20261011/`。统一证据索引为 `verification.json`，记录源散列、实际 UUID、失败历史和未执行范围。首次完整快照检查在 Accurate 离线 OCR 子进程的 120 秒期限超时（`snapshot/.build/debug/20261011T052316Z-8f5feb`），其余五项离线测试通过；使用独立测试 bundle ID 重跑后六项及全部核心检查通过，没有修改离线 OCR 代码，也不据重跑通过推断最初超时的完整根因。最早的工作区模块检查还遇到同时新增的姓名牌用例失败；后续固定快照中的当前用例已通过，该处修正不属于本轮 N2。
+
+准备失败亦保留：首次正式构建因快照未含忽略的公开资料库而停止，补入既有资料包后成功；早期字段顺序夹具的两段被正常分组为一段，随后改为不同列，并以真实字段移除检查旧/新结果索引；初版重启夹具误以为 Replay 会清空已确认字段，按现有重启边界修正输入期望。详见 verification.json 的失败记录，不把这些准备失败算作通过。
+
+修复验证阶段未安装、启动真实采集、调用真实翻译服务、读取真实凭据、提交、推送或发布。合成检查验证未重发原长请求、当前结果映射及旧交付保护，不证明真实服务的计费、等待时长或实际面板显示。最短现场验收：安装包含此补丁的构建后，在长正文等待期间让独立时钟变化，确认正文能正常返回并显示当前时钟；再改正文或翻页，核对旧正文不覆盖新页。其它设备、Intel 实机与长期运行仍单列。
+
+### 本次独立提交核对
+
+本次暂存基于 `ec63a75`，只包含 N2 处理、请求 owner、6 个 Replay 和相关文档。用 `git checkout-index --all --prefix=.build/inline-batch-retention-20261011/commit/snapshot/` 导出实际待提交版本，执行 `FY_CAPTURE_CARD_BUNDLE_ID=com.nanami.yiya.n2-commit-20261011-ocr python3 scripts/debug.py check --timeout 300`，退出 0，85 条记录全部 passed，36 场景各两遍（72 条），0 项登记缺口，source_unchanged=true；11 项核心套件包含模块和翻译交付检查。报告 `commit/snapshot/.build/debug/20261011T053716Z-3f5f4b/summary.json`。该提交的测试数量与上方完整工作区快照不同，因暂存未包含其它聊天新增的场景。
+
+同一索引另导出 `commit/build-snapshot/`，补入既有公开 reference.sqlite 后执行 `ARCHS='arm64 x86_64' bash scripts/build-app.sh`，退出 0，双架构编译链接及 dSYM UUID 核对通过；每架构仍为原有 7 条 unused-function 警告。日志 `commit/build.log`，统一索引 `commit/verification.json`。最终只补充这段文档记录，生产代码和夹具与已验证索引一致。未安装或推送；实机验收范围仍按上方最短步骤单列。

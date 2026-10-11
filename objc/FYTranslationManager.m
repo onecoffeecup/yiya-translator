@@ -147,9 +147,15 @@ BOOL FYIsDeepSeekService(NSString *baseURL, NSString *model) {
     if (_activeTask == task) { _activeTask = _tasks.lastObject; }
 }
 - (void)cancelActiveTask {
+    [self cancelTasksExceptTask:nil];
+}
+- (void)cancelTasksExceptTask:(NSURLSessionDataTask *)retainedTask {
     NSArray *tasks = [_tasks copy];
     [_tasks removeAllObjects]; _activeTask = nil;
-    for (NSURLSessionDataTask *task in tasks) { [task cancel]; }
+    for (NSURLSessionDataTask *task in tasks) {
+        if (task == retainedTask) { self.activeTask = task; }
+        else { [task cancel]; }
+    }
 }
 @end
 
