@@ -1,0 +1,480 @@
+{
+  "schema_version": 1,
+  "name": "refinement-dialogue-oscillation",
+  "mode": "dialogue",
+  "source": "capture_card",
+  "auto_fit": true,
+  "responses": [
+    {
+      "source": "今日は公園で散歩しましょう。",
+      "translation": "旧对白译文"
+    },
+    {
+      "source": "明日は図書館で本を借りますよ。",
+      "translation": "新对白译文"
+    },
+    {
+      "source": "週末は美術館で作品を見ましょう。",
+      "translation": "换窗译文"
+    },
+    {
+      "source": "来月は海辺の町へ旅行に行きます。",
+      "translation": "重启译文"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "今日は公園で散歩しましょう。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "今日は公園で散歩しましょう。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "今日は公園で散歩しましょう。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "今日は公園で散歩しましょう。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "captions": [
+          "旧对白译文"
+        ]
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますね。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますねえ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますね。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "旧对白译文",
+          "新对白译文"
+        ],
+        "cancel_calls": 0,
+        "has_reason": "stable_pass1"
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますねえ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "旧对白译文",
+          "新对白译文"
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますね。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "旧对白译文",
+          "新对白译文"
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 3500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますねえ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "旧对白译文",
+          "新对白译文"
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 4000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますね。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "旧对白译文",
+          "新对白译文"
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 4500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "明日は図書館で本を借りますねえ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "captions": [
+          "旧对白译文",
+          "新对白译文"
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 5000,
+      "action": "window",
+      "window_id": 84,
+      "expect": {}
+    },
+    {
+      "at_ms": 5500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "週末は美術館で作品を見ましょう。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2
+      }
+    },
+    {
+      "at_ms": 6000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "週末は美術館で作品を見ましょう。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 3,
+        "caption_contains": "换窗译文"
+      }
+    },
+    {
+      "at_ms": 6500,
+      "action": "restart",
+      "expect": {}
+    },
+    {
+      "at_ms": 7000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "来月は海辺の町へ旅行に行きます。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 3
+      }
+    },
+    {
+      "at_ms": 7500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "明日は図書館で本を借りますよ。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "refined_blocks": [
+        {
+          "text": "来月は海辺の町へ旅行に行きます。",
+          "box": [
+            0.2,
+            0.2,
+            0.55,
+            0.055
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 4,
+        "caption_contains": "重启译文"
+      }
+    }
+  ]
+}

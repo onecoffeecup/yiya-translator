@@ -68,6 +68,30 @@ int main(void) {
         Expect(Merge(@[top], @[elsewhere]).count == 2, @"refinement with identical text elsewhere does not replace coarse");
         OCRTextItem *tiny = Item(@"小さい文字", .1, .52, .4, .02);
         Expect(Merge(@[top], @[tiny]).count == 2, @"refinement too short cannot replace coarse");
+        OCRTextItem *tallRead=Item(@"明日は川沿いを歩いて帰ろう。",.287,.106,.335,.08);
+        OCRTextItem *tightRead=Item(tallRead.text,.29,.122,.328,.045);
+        tightRead.sourceBlockID=@"tight-refinement"; tightRead.confidence=.93;
+        tightRead.lineCount=1; tightRead.lineTexts=@[tightRead.text];
+        tightRead.lineBoxes=@[[NSValue valueWithRect:tightRead.boundingBox]];
+        tightRead.lastLineBox=tightRead.boundingBox;
+        Expect([Merge(@[tallRead],@[tightRead]) isEqual:@[tightRead]],@"same centered line survives once when refinement height is below the replacement gate");
+        Expect(tightRead.confidence==.93 && [tightRead.sourceBlockID isEqual:@"tight-refinement"] &&
+            tightRead.lineCount==1 && tightRead.lineTexts.count==1 && tightRead.lineBoxes.count==1 &&
+            CGRectEqualToRect(tightRead.lastLineBox,tightRead.boundingBox) && tallRead.boundingBox.size.height==.08,
+            @"duplicate removal preserves current refinement metadata without mutating the coarse observation");
+        OCRTextItem *spacedRead=Item(@"明日は 川沿いを歩いて帰ろう。",.29,.122,.328,.045);
+        Expect([Merge(@[tallRead],@[spacedRead]) isEqual:@[spacedRead]],@"whitespace-equivalent duplicate keeps the current refined text intact");
+        OCRTextItem *differentRead=Item(@"明日は川沿いを歩いて行こう。",.29,.122,.328,.045);
+        Expect(Merge(@[tallRead],@[differentRead]).count==2,@"height relaxation never deletes a different-text observation");
+        OCRTextItem *partialRead=Item(tallRead.text,.54,.122,.328,.045);
+        Expect(Merge(@[tallRead],@[partialRead]).count==2,@"same text with partial horizontal coverage remains separate");
+        OCRTextItem *neighborRead=Item(tallRead.text,.29,.165,.328,.02);
+        Expect(Merge(@[tallRead],@[neighborRead]).count==2,@"adjacent same-text row is not deleted by containment alone");
+        OCRTextItem *otherRow=Item(tallRead.text,.287,.3,.335,.08);
+        Expect([Merge(@[tallRead,otherRow],@[tightRead]) isEqual:@[otherRow,tightRead]],@"real repeated text at a second position survives cross-pass deduplication");
+        OCRTextItem *multilineRead=Item(@"明日は川沿いを\n歩いて帰ろう。",.287,.106,.335,.08);
+        multilineRead.lineCount=2;
+        Expect(Merge(@[multilineRead],@[tightRead]).count==2,@"same normalized multiline content does not justify a single-line duplicate rule");
         OCRTextItem *lowOverlap = Item(@"別行", .1, .54, .4, .05);
         Expect(Merge(@[top], @[lowOverlap]).count == 2, @"insufficient vertical overlap cannot replace coarse");
         OCRTextItem *left = Item(@"左", .1, .7, .1, .04);
@@ -76,6 +100,38 @@ int main(void) {
         Expect([Merge(nil, @[outer, top, bottom]) isEqual:@[top, bottom]], @"refined-only pass also resolves duplicates");
         Expect([Merge(@[outer, top, bottom], nil) isEqual:@[top, bottom]], @"coarse-only pass still resolves duplicates");
         Expect([Resolve(@[top]) isEqual:@[top]], @"single item retained");
+        FYOCRRefinementStabilizer *selection=[FYOCRRefinementStabilizer new];
+        OCRTextItem *readA=Item(@"今日わ",.1,.5,.4,.05), *readB=Item(@"今日ば",.1,.5,.4,.05);
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readA]] isEqual:@[readA]],@"first frame preserves the existing refinement policy");
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readB]] isEqual:@[top]] && selection.fallbackCount==1,@"stable first pass survives alternating refinement");
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readB]] isEqual:@[top]],@"two refined hits do not reopen a jittering line");
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readA]] isEqual:@[top]],@"two-frame bursts cannot accumulate a refined correction");
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readB]] isEqual:@[top]],@"fallback stays on current coarse observation");
+        [selection observeCoarseItems:@[top] refinedItems:@[readB]];
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readB]] isEqual:@[readB]] && !selection.fallbackCount,@"sustained refinement restores a genuine correction after three consecutive hits");
+        [selection reset];
+        for (NSUInteger i=0;i<3;i++) Expect([[selection observeCoarseItems:@[readA] refinedItems:@[top]] isEqual:@[top]],@"consistent refinement corrects stable coarse errors immediately");
+        [selection reset];
+        [selection observeCoarseItems:@[top] refinedItems:@[readA,bottom]];
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readB,bottom]] isEqual:@[top,bottom]],@"fallback of one line retains an unknown line recovered by refinement");
+        Expect([top.text isEqual:@"今日は"] && [readB.text isEqual:@"今日ば"] && top.confidence==.91 && top.sourceBlockID.length,@"selection never mutates source text or metadata");
+        OCRTextItem *newLine=Item(@"明日は",.1,.5,.4,.05);
+        Expect([[selection observeCoarseItems:@[newLine] refinedItems:@[readA]] isEqual:@[readA]],@"real coarse edit at the same location clears old fallback");
+        [selection reset];
+        Expect(!selection.fallbackCount && [[selection observeCoarseItems:@[top] refinedItems:@[readB]] isEqual:@[readB]],@"explicit reset cannot reuse the prior context's fallback");
+        [selection observeCoarseItems:@[top] refinedItems:@[readA]];
+        [selection observeCoarseItems:@[] refinedItems:@[]];
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readB]] isEqual:@[readB]],@"missing frame breaks consecutive evidence");
+        OCRTextItem *moved=Item(top.text,.6,.5,.3,.05), *movedFine=Item(readA.text,.6,.5,.3,.05);
+        Expect([[selection observeCoarseItems:@[moved] refinedItems:@[movedFine]] isEqual:@[movedFine]],@"same text at a different location does not inherit fallback");
+        [selection reset];
+        [selection observeCoarseItems:@[top,bottom] refinedItems:@[outer]];
+        Expect([[selection observeCoarseItems:@[top,bottom] refinedItems:@[extra]] isEqual:Merge(@[top,bottom],@[extra])],@"multiline refinement is not vetoed by line selection");
+        [selection reset];
+        [selection observeCoarseItems:@[outer] refinedItems:@[readA,bottom]];
+        Expect([[selection observeCoarseItems:@[outer] refinedItems:@[readB,bottom]] isEqual:Merge(@[outer],@[readB,bottom])],@"split refinement preserves both recovered lines");
+        [selection reset];
+        for (NSUInteger i=0;i<4;i++) Expect([[selection observeCoarseItems:@[i%2 ? readA : top] refinedItems:@[i%2 ? top : readB]] firstObject]!=(i%2 ? readA : top),@"unstable coarse observations cannot justify fallback");
         Expect(![FYOCRManager isOwnOverlayText:nil] && ![FYOCRManager isOwnOverlayText:@"　 "], @"empty overlay text is not classified as noise");
         Expect([FYOCRManager isOwnOverlayText:@"翻译失败：服务异常"] && [FYOCRManager isOwnOverlayText:@"翻译失败:网络错误"], @"both error prefix variants excluded");
         Expect([FYOCRManager isOwnOverlayText:@"iee"] && [FYOCRManager isOwnOverlayText:@"？？？"], @"legacy short Latin/punctuation noise policy preserved");
@@ -143,6 +199,13 @@ int main(void) {
         Expect(FYApplyOCRRefinement(smallCoarse,YES,^NSString *(CGRect r,NSArray **b,NSError **e){*b=@[Item(@"精",.1,.2,.2,.1)];return @"精";},^{observedAccepted=YES;},&mergedText,&mergedBlocks) && observedAccepted && [mergedText containsString:@"精"] && mergedBlocks.count>0,@"accepted refinement observes before merged output and returns merged text/blocks");
         observedAccepted=NO; mergedText=@"keep"; mergedBlocks=smallCoarse;
         Expect(!FYApplyOCRRefinement(smallCoarse,NO,^NSString *(CGRect r,NSArray **b,NSError **e){return @"ignored";},^{observedAccepted=YES;},&mergedText,&mergedBlocks) && !observedAccepted && [mergedText isEqual:@"keep"] && mergedBlocks==smallCoarse,@"rejected refinement does not observe or overwrite merged outputs");
+        [selection reset];
+        [selection observeCoarseItems:@[top] refinedItems:@[readA]];
+        [selection observeCoarseItems:@[top] refinedItems:@[readB]];
+        Expect(!FYApplyOCRRefinementWithStabilizer(@[top],YES,^NSString *(CGRect r,NSArray **b,NSError **e){
+            *e=[NSError errorWithDomain:@"fixture" code:2 userInfo:nil];return @"error";
+        },nil,selection,&mergedText,&mergedBlocks) && !selection.fallbackCount,@"failed second pass clears consecutive selection evidence without overwriting output");
+        Expect([[selection observeCoarseItems:@[top] refinedItems:@[readA]] isEqual:@[readA]],@"first valid observation after an error starts a fresh selection");
         FYContentModeStability *mode=[FYContentModeStability new];mode.detectedMode=0;mode.candidateMode=-1;
         Expect([mode observeMode:1]==0 && mode.candidateHits==1,@"first different mode remains candidate");
         Expect([mode observeMode:1]==1 && mode.candidateHits==0,@"second consecutive mode commits and clears hits");
@@ -250,6 +313,20 @@ int main(void) {
             Item(@"青木悠",.30,.14,.11,.032), Item(@"ですけど……",.30,.08,.14,.032)];
         Expect(![FYOCRManager looksLikeUIFrame:shortDialogue] && [FYOCRManager contentModeForItems:shortDialogue fallback:1]==0,
                @"speaker plus short spoken lines is dialogue, not four menu boxes");
+        for (NSString *ending in @[@"ですけど……", @"ですけど・・・", @"ですけど・・・・・・", @"ですけど…………"]) {
+            OCRTextItem *tail=Item(ending,.291,.059,.1407,.0399);
+            NSArray *introduction=@[Item(@"青木",.267,.257,.0476,.0399), Item(@"あの、",.280,.178,.0713,.0587),
+                Item(@"青木悠斗",.285,.123,.0987,.0427), tail];
+            Expect([[FYOCRManager subtitleBandItems:introduction] isEqual:[introduction subarrayWithRange:NSMakeRange(1,3)]],
+                   @"ellipsis glyph count cannot veto any of the three narrow dialogue body lines");
+            Expect([FYOCRManager contentModeForItems:introduction fallback:1]==0,
+                   @"short introduction returns to dialogue from UI for each ellipsis spelling");
+            Expect([[FYOCRManager subtitleBandItems:@[tail]] isEqual:@[tail]] && [tail.text isEqual:ending],
+                   @"narrow punctuated single line survives with source punctuation unchanged");
+        }
+        OCRTextItem *narrowSign=Item(@"中央市立自然科学研究所",.29,.20,.14,.04);
+        Expect([FYOCRManager subtitleBandItems:@[narrowSign]].count==0,
+               @"a narrow unpunctuated kanji sign cannot acquire a dialogue band by glyph count");
         NSArray *lowerChoices=@[Item(@"彼と話す。",.30,.27,.14,.032), Item(@"彼女と話す。",.30,.207,.14,.032),
             Item(@"何もしない。",.30,.144,.14,.032), Item(@"立ち去る。",.30,.081,.14,.032)];
         Expect([FYOCRManager looksLikeUIFrame:lowerChoices] && [FYOCRManager contentModeForItems:lowerChoices fallback:0]==1,

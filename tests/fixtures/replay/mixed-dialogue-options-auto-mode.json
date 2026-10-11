@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "name": "mixed-dialogue-options-auto-mode",
+  "mode": "dialogue",
+  "source": "window",
+  "auto_mode": true,
+  "notes": "Behavior-preserving router extraction: two aligned options and dialogue coexist, with independent responses under the same revision.",
+  "responses": [
+    {
+      "source": "1. 先に行く\n2. ここで待つ",
+      "translation": "1. 先走。\n2. 在这里等。",
+      "hold": true
+    },
+    {
+      "source": "青木\n今日は図書館で待っています。",
+      "translation": "青木：今天在图书馆等着。",
+      "hold": true
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "先に行く",
+          "box": [
+            0.2,
+            0.65,
+            0.18,
+            0.04
+          ]
+        },
+        {
+          "text": "ここで待つ",
+          "box": [
+            0.2,
+            0.52,
+            0.18,
+            0.04
+          ]
+        },
+        {
+          "text": "青木",
+          "box": [
+            0.2,
+            0.21,
+            0.06,
+            0.04
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0,
+        "requests": 0,
+        "captions": [],
+        "inline": [],
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "先に行く",
+          "box": [
+            0.2,
+            0.65,
+            0.18,
+            0.04
+          ]
+        },
+        {
+          "text": "ここで待つ",
+          "box": [
+            0.2,
+            0.52,
+            0.18,
+            0.04
+          ]
+        },
+        {
+          "text": "青木",
+          "box": [
+            0.2,
+            0.21,
+            0.06,
+            0.04
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0,
+        "requests": 2,
+        "pending": [
+          0,
+          1
+        ],
+        "sources": [
+          "1. 先に行く\n2. ここで待つ",
+          "青木\n今日は図書館で待っています。"
+        ],
+        "captions": [],
+        "inline": [],
+        "cancel_calls": 0,
+        "in_flight": false
+      }
+    },
+    {
+      "at_ms": 600,
+      "action": "release",
+      "request": 1,
+      "expect": {
+        "requests": 2,
+        "pending": [
+          0
+        ],
+        "captions": [
+          "青木：今天在图书馆等着。"
+        ],
+        "inline": [],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 700,
+      "action": "release",
+      "request": 0,
+      "expect": {
+        "requests": 2,
+        "pending": [],
+        "captions": [
+          "青木：今天在图书馆等着。"
+        ],
+        "inline": [
+          {
+            "sources": [
+              "先に行く",
+              "ここで待つ"
+            ],
+            "translations": [
+              "先走。",
+              "在这里等。"
+            ]
+          }
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "blocks": [
+        {
+          "text": "先に行く",
+          "box": [
+            0.2,
+            0.65,
+            0.18,
+            0.04
+          ]
+        },
+        {
+          "text": "ここで待つ",
+          "box": [
+            0.2,
+            0.52,
+            0.18,
+            0.04
+          ]
+        },
+        {
+          "text": "青木",
+          "box": [
+            0.2,
+            0.21,
+            0.06,
+            0.04
+          ]
+        },
+        {
+          "text": "今日は図書館で待っています。",
+          "box": [
+            0.2,
+            0.15,
+            0.38,
+            0.045
+          ]
+        }
+      ],
+      "expect": {
+        "mode": 0,
+        "requests": 2,
+        "pending": [],
+        "captions": [
+          "青木：今天在图书馆等着。"
+        ],
+        "inline": [
+          {
+            "sources": [
+              "先に行く",
+              "ここで待つ"
+            ],
+            "translations": [
+              "先走。",
+              "在这里等。"
+            ]
+          }
+        ],
+        "cancel_calls": 0,
+        "in_flight": false
+      }
+    }
+  ]
+}

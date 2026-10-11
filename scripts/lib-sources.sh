@@ -5,11 +5,13 @@ FY_LAYOUT_SOURCES=(
   "$ROOT_DIR/objc/FYInlineLayout.m"
   "$ROOT_DIR/objc/FYInlineLayoutDebug.m"
 )
-FY_OCR_SOURCES=("$ROOT_DIR/objc/FYOCRManager.m" "${FY_LAYOUT_SOURCES[@]}")
+FY_CONTENT_ROUTER_SOURCES=("$ROOT_DIR/objc/FYContentRouter.m")
+FY_OCR_SOURCES=("$ROOT_DIR/objc/FYOCRManager.m" "${FY_CONTENT_ROUTER_SOURCES[@]}" "${FY_LAYOUT_SOURCES[@]}")
 FY_RUNTIME_BASE_SOURCES=(
   "$ROOT_DIR/objc/FYTranslationTrace.m" "$ROOT_DIR/objc/FYRuntimeDiagnostics.m"
   "${FY_LAYOUT_SOURCES[@]}"
   "$ROOT_DIR/objc/FYWindowManager.m" "$ROOT_DIR/objc/FYOCRManager.m"
+  "${FY_CONTENT_ROUTER_SOURCES[@]}"
   "$ROOT_DIR/objc/FYGeometryManager.m" "$ROOT_DIR/objc/FYTranslationManager.m"
 )
 FY_RUNTIME_SOURCES=("${FY_RUNTIME_BASE_SOURCES[@]}" "$ROOT_DIR/objc/FYCaptureCardInput.m")

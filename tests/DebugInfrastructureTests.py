@@ -67,6 +67,16 @@ class DebugInfrastructureTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.validate(data)
 
+    def test_refinement_observations_obey_the_same_geometry_contract(self):
+        data = copy.deepcopy(self.base)
+        data["steps"][0]["refined_blocks"] = [{"text": "fictional refinement", "box": [.2, .2, .5, .05]}]
+        self.validate(data)
+        for invalid in ("not a list", [{"text": "fictional", "box": [0, 0, 2, 1]}],
+                        [{"text": "fictional", "box": [.2, .2, .5, .05], "override": True}]):
+            data["steps"][0]["refined_blocks"] = invalid
+            with self.assertRaises(ValueError):
+                self.validate(data)
+
     def test_analyzer_distinguishes_physical_batch_tasks_and_hides_text(self):
         events = [dict(event="request_submit", request_id="batch", http_task_id=t, source="SYNTHETIC_PRIVATE_DIALOGUE", cycle="cycle") for t in ("short", "long")]
         events += [dict(event="request_complete", request_id="batch", http_task_id="short"),

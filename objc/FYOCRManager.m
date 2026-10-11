@@ -2,23 +2,22 @@
 #import "FYInlineLayoutDebug.h"
 #import <Vision/Vision.h>
 
-@implementation FYContentModeStability
-- (NSInteger)observeMode:(NSInteger)detected {
-    if (detected==self.detectedMode) { self.candidateMode=detected;self.candidateHits=0;return self.detectedMode; }
-    if (self.candidateMode==detected) self.candidateHits+=1;
-    else { self.candidateMode=detected;self.candidateHits=1; }
-    if (self.candidateHits>=2) { self.detectedMode=detected;self.candidateHits=0; }
-    return self.detectedMode;
-}
-@end
-
 BOOL FYApplyOCRRefinement(NSArray<OCRTextItem *> *coarse, BOOL autoFit,
     NSString *(^recognizer)(CGRect, NSArray<OCRTextItem *> **, NSError **), void (^acceptedObserver)(void),
     NSString **outText, NSArray<OCRTextItem *> **outBlocks) {
+    return FYApplyOCRRefinementWithStabilizer(coarse,autoFit,recognizer,acceptedObserver,nil,outText,outBlocks);
+}
+
+BOOL FYApplyOCRRefinementWithStabilizer(NSArray<OCRTextItem *> *coarse, BOOL autoFit,
+    NSString *(^recognizer)(CGRect, NSArray<OCRTextItem *> **, NSError **), void (^acceptedObserver)(void),
+    FYOCRRefinementStabilizer *stabilizer, NSString **outText, NSArray<OCRTextItem *> **outBlocks) {
     NSString *fineText=nil;NSArray<OCRTextItem *> *fineBlocks=nil;
-    if (!FYRecognizeOCRRefinement(coarse,autoFit,recognizer,&fineText,&fineBlocks)) return NO;
+    if (!FYRecognizeOCRRefinement(coarse,autoFit,recognizer,&fineText,&fineBlocks)) {
+        [stabilizer reset]; return NO;
+    }
     if (acceptedObserver) acceptedObserver();
-    NSArray *merged=[FYOCRManager mergeCoarseItems:coarse refinedItems:fineBlocks];
+    NSArray *merged=stabilizer ? [stabilizer observeCoarseItems:coarse refinedItems:fineBlocks]
+        : [FYOCRManager mergeCoarseItems:coarse refinedItems:fineBlocks];
     if (outBlocks) *outBlocks=merged;
     if (outText) *outText=[[merged valueForKey:@"text"] componentsJoinedByString:@"\n"];
     return YES;
@@ -55,6 +54,96 @@ CGFloat FYOCRFittedTextArea(NSArray<OCRTextItem *> *blocks) {
 - (void)reset { self.candidate=@""; self.count=0; }
 @end
 
+static BOOL FYOCRRefinementReplacesItem(OCRTextItem *coarse, OCRTextItem *fine) {
+    CGRect a=coarse.boundingBox,b=fine.boundingBox;
+    CGFloat y=MIN(CGRectGetMaxY(a),CGRectGetMaxY(b))-MAX(CGRectGetMinY(a),CGRectGetMinY(b));
+    CGFloat x=MIN(CGRectGetMaxX(a),CGRectGetMaxX(b))-MAX(CGRectGetMinX(a),CGRectGetMinX(b));
+    return b.size.height>=a.size.height*.6 && y>MIN(a.size.height,b.size.height)*.45 && x>0;
+}
+
+static BOOL FYOCRRefinementDuplicatesSingleLine(OCRTextItem *coarse, OCRTextItem *fine) {
+    // A tighter glyph box can fall below the height replacement gate even
+    // though both passes read the same physical line. Require matching content,
+    // aligned centers and near-full coverage; text alone cannot remove a row.
+    if (coarse.lineCount>1 || fine.lineCount>1 || coarse.lineTexts.count>1 || fine.lineTexts.count>1 ||
+        [coarse.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound ||
+        [fine.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound) return NO;
+    NSString *text=FYNormalizeOCRTextForComparison(coarse.text);
+    if (text.length<2 || ![text isEqualToString:FYNormalizeOCRTextForComparison(fine.text)]) return NO;
+    CGRect a=coarse.boundingBox,b=fine.boundingBox,hit=CGRectIntersection(a,b);
+    CGFloat area=MIN(a.size.width*a.size.height,b.size.width*b.size.height);
+    if (area<=0 || CGRectIsNull(hit) || CGRectIsEmpty(hit)) return NO;
+    return hit.size.width>=MAX(a.size.width,b.size.width)*.85 &&
+        hit.size.width*hit.size.height>=area*.85 &&
+        fabs(CGRectGetMidY(a)-CGRectGetMidY(b))<=MAX(a.size.height,b.size.height)*.25;
+}
+
+@interface FYOCRRefinementTrack : NSObject
+@property(nonatomic, copy) NSString *coarseText, *refinedText;
+@property(nonatomic) CGRect box;
+@property(nonatomic) NSUInteger coarseHits, refinedHits;
+@property(nonatomic) BOOL preferCoarse;
+@end
+@implementation FYOCRRefinementTrack
+@end
+
+@interface FYOCRRefinementStabilizer ()
+@property(nonatomic, readwrite) NSUInteger fallbackCount;
+@property(nonatomic, copy) NSArray<FYOCRRefinementTrack *> *tracks;
+@end
+@implementation FYOCRRefinementStabilizer
+- (void)reset { self.tracks=@[]; self.fallbackCount=0; }
+- (NSArray<OCRTextItem *> *)observeCoarseItems:(NSArray<OCRTextItem *> *)coarse
+                                refinedItems:(NSArray<OCRTextItem *> *)refined {
+    NSMutableArray *selected=[NSMutableArray arrayWithArray:refined ?: @[]];
+    NSMutableArray *next=[NSMutableArray new];
+    NSMutableSet *used=[NSMutableSet new];
+    self.fallbackCount=0;
+    for (OCRTextItem *original in coarse) {
+        NSIndexSet *matches=[refined indexesOfObjectsPassingTest:^BOOL(OCRTextItem *fine, NSUInteger i, BOOL *stop) {
+            return FYOCRRefinementReplacesItem(original,fine);
+        }];
+        if (matches.count!=1) continue;
+        NSUInteger index=matches.firstIndex;
+        OCRTextItem *fine=refined[index];
+        NSUInteger covered=0;
+        for (OCRTextItem *item in coarse) if (FYOCRRefinementReplacesItem(item,fine)) covered++;
+        CGRect a=original.boundingBox,b=fine.boundingBox;
+        CGFloat overlap=MIN(CGRectGetMaxX(a),CGRectGetMaxX(b))-MAX(CGRectGetMinX(a),CGRectGetMinX(b));
+        // Do not veto a split/merged paragraph or a partial crop. Such candidates
+        // may recover previously unknown lines and keep the existing merge policy.
+        if (covered!=1 || overlap<MAX(a.size.width,b.size.width)*.65) continue;
+        NSString *coarseText=FYNormalizeOCRTextForComparison(original.text);
+        NSString *fineText=FYNormalizeOCRTextForComparison(fine.text);
+        if (!coarseText.length || !fineText.length) continue;
+        FYOCRRefinementTrack *previous=nil;
+        CGFloat best=0;
+        for (FYOCRRefinementTrack *track in self.tracks) {
+            if ([used containsObject:track] || ![coarseText isEqual:track.coarseText]) continue;
+            CGRect hit=CGRectIntersection(a,track.box);
+            CGFloat area=a.size.width*a.size.height+track.box.size.width*track.box.size.height;
+            CGFloat intersection=CGRectIsEmpty(hit) ? 0 : hit.size.width*hit.size.height;
+            CGFloat score=intersection/MAX((CGFloat).000001,area-intersection);
+            if (score>.6 && score>best) { previous=track; best=score; }
+        }
+        if (previous) [used addObject:previous];
+        FYOCRRefinementTrack *track=[FYOCRRefinementTrack new];
+        track.coarseText=coarseText; track.refinedText=fineText; track.box=a;
+        track.coarseHits=previous ? MIN(previous.coarseHits+1,3) : 1;
+        track.refinedHits=[fineText isEqual:previous.refinedText] ? MIN(previous.refinedHits+1,3) : 1;
+        track.preferCoarse=previous.preferCoarse;
+        if (track.coarseHits>=2 && previous && ![fineText isEqual:previous.refinedText]) track.preferCoarse=YES;
+        // Once refinement has jittered, require three uninterrupted hits to
+        // restore it. Two-frame bursts must not repeatedly reopen instability.
+        if (track.refinedHits>=3) track.preferCoarse=NO;
+        if (track.preferCoarse) { selected[index]=original; self.fallbackCount++; }
+        [next addObject:track];
+    }
+    self.tracks=next; // Missing/ambiguous lines break consecutive evidence.
+    return [FYOCRManager mergeCoarseItems:coarse refinedItems:selected];
+}
+@end
+
 @interface FYInlineOCRTrack : NSObject
 @property(nonatomic, strong) OCRTextItem *item;
 @property(nonatomic, copy) NSString *pendingText;
@@ -89,6 +178,7 @@ static OCRTextItem *FYCopyInlineOCRItem(OCRTextItem *source) {
     copy.confidence = source.confidence;
     copy.groupingConfidence = source.groupingConfidence;
     copy.sourceBlockID = source.sourceBlockID;
+    copy.speakerLabel = source.speakerLabel;
     return copy;
 }
 
@@ -650,6 +740,88 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
 }
 
 @implementation FYOCRManager
+// A structural label needs both a separate filled backdrop and a following
+// dialogue body. Text length/script alone must never suppress spoken lines.
+// This operates on the existing downsampled source pixels; no extra OCR,
+// screenshots, stored images or game-specific colors are used.
+static BOOL FYPlateColorNear(const unsigned char *a, const unsigned char *b) {
+    return abs(a[0]-b[0])<=22 && abs(a[1]-b[1])<=22 && abs(a[2]-b[2])<=22;
+}
+static const unsigned char *FYPlatePixel(FYOCRPixelBuffer *buffer, CGFloat x, CGFloat y) {
+    if (!isfinite(x) || !isfinite(y) || x<0 || x>=1 || y<0 || y>=1) { return NULL; }
+    // CGBitmapContext row zero is the image's top; OCR has a bottom origin.
+    size_t col=MIN(buffer->width-1,(size_t)(x*buffer->width));
+    size_t row=MIN(buffer->height-1,(size_t)((1-y)*buffer->height));
+    return buffer->pixels+row*buffer->bytesPerRow+col*4;
+}
+static BOOL FYPlateDominantColor(FYOCRPixelBuffer *buffer, CGRect box, unsigned char *color) {
+    unsigned char samples[63][3]; NSUInteger count=0,best=0,bestIndex=0;
+    for (NSUInteger row=0;row<7;row++) for (NSUInteger col=0;col<9;col++) {
+        const unsigned char *p=FYPlatePixel(buffer,box.origin.x+box.size.width*(col+.5)/9,
+            box.origin.y+box.size.height*(row+.5)/7);
+        if (!p) { return NO; }
+        memcpy(samples[count++],p,3);
+    }
+    for (NSUInteger i=0;i<count;i++) {
+        NSUInteger hits=0;
+        for (NSUInteger j=0;j<count;j++) if (FYPlateColorNear(samples[i],samples[j])) { hits++; }
+        if (hits>best) { best=hits;bestIndex=i; }
+    }
+    if (best*100<count*55) { return NO; }
+    memcpy(color,samples[bestIndex],3);return YES;
+}
++ (NSArray<OCRTextItem *> *)itemsByMarkingSpeakerLabels:(NSArray<OCRTextItem *> *)items inImage:(CGImageRef)image {
+    if (!image) { return items; }
+    NSArray<OCRTextItem *> *band=[FYContentRouter subtitleBandItems:items];
+    // With just a plate and a very short reply, neither row may satisfy the
+    // existing text anchor. Test their pixels without changing mode rules.
+    if (band.count<2 && items.count==2) {
+        band=[items sortedArrayUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) {
+            return FYOCRReadingOrder(left,right);
+        }];
+    }
+    if (band.count<2) { return items; }
+    OCRTextItem *label=band[0],*body=band[1];
+    CGRect a=label.boundingBox,b=body.boundingBox;
+    CGFloat widestBody=0;
+    for (NSUInteger i=1;i<band.count;i++) widestBody=MAX(widestBody,band[i].boundingBox.size.width);
+    CGFloat height=MAX(a.size.height,b.size.height),gap=CGRectGetMinY(a)-CGRectGetMaxY(b);
+    if (label.lineCount>1 || label.lineTexts.count>1 ||
+        [label.text rangeOfCharacterFromSet:NSCharacterSet.newlineCharacterSet].location!=NSNotFound ||
+        CGRectGetMidY(a)>.45 || CGRectGetMidY(b)>.38 || a.size.width<=0 || a.size.height<=0 ||
+        a.size.width>MAX(widestBody*.6,height*2.5) || a.size.height<b.size.height*.35 || a.size.height>b.size.height*1.8 ||
+        gap< -height*.25 || gap>height*1.2 ||
+        CGRectGetMinX(a)>CGRectGetMinX(b)+height*.5) { return items; }
+    FYOCRPixelBuffer buffer=FYCreateOCRPixelBuffer(image);
+    if (!buffer.pixels) { return items; }
+    unsigned char labelColor[3],bodyColor[3];
+    CGRect bodySample=CGRectInset(b,-b.size.height*.15,-b.size.height*.1);
+    BOOL confirmed=FYPlateDominantColor(&buffer,a,labelColor) &&
+        FYPlateDominantColor(&buffer,bodySample,bodyColor) &&
+        (abs(labelColor[0]-bodyColor[0])>=45 || abs(labelColor[1]-bodyColor[1])>=45 || abs(labelColor[2]-bodyColor[2])>=45);
+    // Require visible bounds above and to the right of the plate. A broad
+    // colored scene/background or a highlight spanning the whole body fails.
+    NSUInteger outside=0,total=0;
+    if (confirmed) {
+        for (NSUInteger i=0;i<5;i++) {
+            const unsigned char *above=FYPlatePixel(&buffer,CGRectGetMinX(a)+a.size.width*(i+.5)/5,
+                CGRectGetMaxY(a)+a.size.height);
+            const unsigned char *right=FYPlatePixel(&buffer,CGRectGetMaxX(a)+height*3,
+                CGRectGetMinY(a)+a.size.height*(i+.5)/5);
+            if (above) { total++;if (!FYPlateColorNear(above,labelColor)) outside++; }
+            if (right) { total++;if (!FYPlateColorNear(right,labelColor)) outside++; }
+        }
+        confirmed=total==10 && outside>=8;
+    }
+    FYReleaseOCRPixelBuffer(&buffer);
+    if (!confirmed) { return items; }
+    NSMutableArray *result=[items mutableCopy];
+    NSUInteger index=[items indexOfObjectIdenticalTo:label];
+    if (index!=NSNotFound) {
+        OCRTextItem *copy=FYCopyInlineOCRItem(label);copy.speakerLabel=YES;result[index]=copy;
+    }
+    return result;
+}
 + (void)splitSpeakerAndBody:(NSString *)text speaker:(NSString **)outSpeaker body:(NSString **)outBody {
     NSString *speaker=nil,*body=text ?: @"";
     NSArray<NSString *> *lines=[body componentsSeparatedByString:@"\n"];
@@ -769,659 +941,88 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     return kept;
 }
 
+// Compatibility content-policy API delegates to FYContentRouter.
 + (NSInteger)contentModeForItems:(NSArray<OCRTextItem *> *)blocks fallback:(NSInteger)fallbackSegment {
-    if (blocks.count == 0) { return fallbackSegment; }
-
-    // UI 特征优先否决：画面里有「戻る / 詳細 / メニュー」这类按钮，或者是文本密集的列表/菜单页，
-    // 就走贴译整屏，而不是把某条宽行当对白。
-    // 现实依据：列表页里也有很宽的行（实测 0.26），光凭“有没有宽行”分不出对白和列表。
-    if ([self looksLikeUIFrame:blocks]) { return 1; }
-
-    // 再看有没有成形的对白框：有就按对白处理，别被街景招牌/公告牌带偏
-    if ([self subtitleBandItems:blocks].count > 0) { return 0; }
-
-    // 一帧只读到角落操作提示，或短台词被 OCR 截成 1~2 字时，不据此切换已确认的模式。
-    if (blocks.count <= 2 && [self UITokenHitCount:blocks] == 0) {
-        BOOL hasCentralDialogueFragment = NO;
-        BOOL onlyCornerHints = YES;
-        for (OCRTextItem *block in blocks) {
-            CGRect box = block.boundingBox;
-            if ([self containsJapaneseKana:block.text] && CGRectGetMidY(box) >= 0.10 &&
-                CGRectGetMidY(box) <= 0.38 && CGRectGetMinX(box) >= 0.18 &&
-                CGRectGetMaxX(box) <= 0.78 && box.size.height >= 0.035) {
-                hasCentralDialogueFragment = YES;
-            }
-            if (!(CGRectGetMinX(box) >= 0.80 && CGRectGetMidY(box) <= 0.12)) {
-                onlyCornerHints = NO;
-            }
-        }
-        if (hasCentralDialogueFragment || onlyCornerHints) { return fallbackSegment; }
-    }
-
-    return 1;
+    return [FYContentRouter contentModeForItems:blocks fallback:fallbackSegment];
 }
 
-// 说话人名字框：短、没有句末标点、不含平假名（实测 `萩尾九段` / `片霧秋兵` / `ルード`）。
-// 这类框会被 OCR 单独读成一行，或单独成一簇被当成「选项」，
-// 于是在学习库里各占一条「最近台词」，把 5 条额度从真台词那里挤掉。
 + (BOOL)looksLikeSpeakerName:(NSString *)raw {
-    NSString *text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (text.length == 0 || text.length > 10) { return NO; }
-    NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。．.！!？?"];
-    if ([enders characterIsMember:[text characterAtIndex:text.length - 1]]) { return NO; }
-    BOOL hasNameGlyph = NO;
-    for (NSUInteger index = 0; index < text.length; index++) {
-        unichar character = [text characterAtIndex:index];
-        // 带平假名的一律不是名字行（`うん、空いてるよ` / `我の手落ちだ` 都要留作正文）。
-        if (character >= 0x3040 && character <= 0x309F) { return NO; }
-        if ((character >= 0x4E00 && character <= 0x9FFF) ||
-            (character >= 0x30A0 && character <= 0x30FF)) { hasNameGlyph = YES; }
-    }
-    return hasNameGlyph;
+    return [FYContentRouter looksLikeSpeakerName:raw];
 }
 
-// 名字框上方的假名注音被 OCR 单独读成一行（实测 `かたぎりし、ゆうの` / `＜だん`）。
 + (BOOL)looksLikeSpeakerFurigana:(NSString *)raw {
-    NSString *text = [raw stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (text.length < 2 || text.length > 12) { return NO; }
-    NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。．.！!？?"];
-    if ([enders characterIsMember:[text characterAtIndex:text.length - 1]]) { return NO; }
-    NSUInteger kana = 0, glyphs = 0;
-    for (NSUInteger index = 0; index < text.length; index++) {
-        unichar character = [text characterAtIndex:index];
-        if (character == ' ' || character == '\t') { continue; }
-        glyphs += 1;
-        if ((character >= 0x3040 && character <= 0x30FF) ||
-            (character >= 0x31F0 && character <= 0x31FF)) { kana += 1; }
-    }
-    return glyphs > 0 && kana * 10 >= glyphs * 6;
+    return [FYContentRouter looksLikeSpeakerFurigana:raw];
 }
 
-// 一簇全是名字/注音（且至少有一行是名字），才当成名字框 —— 宽度上限防止把整行正文吞进来。
 + (BOOL)looksLikeSpeakerLabelCluster:(NSArray<OCRTextItem *> *)cluster {
-    if (cluster.count == 0 || cluster.count > 3) { return NO; }
-    BOOL hasName = NO;
-    CGFloat widest = 0;
-    for (OCRTextItem *item in cluster) {
-        widest = MAX(widest, item.boundingBox.size.width);
-        if ([self looksLikeSpeakerName:item.text]) { hasName = YES; continue; }
-        if (![self looksLikeSpeakerFurigana:item.text]) { return NO; }
-    }
-    return hasName && widest <= 0.35;
+    return [FYContentRouter looksLikeSpeakerLabelCluster:cluster];
 }
 
-// 单独一行是不是名字框的一部分：名字本身，或紧贴其上方的假名注音。
 + (BOOL)isSpeakerLabelItem:(OCRTextItem *)item inPool:(NSArray<OCRTextItem *> *)pool {
-    if ([self looksLikeSpeakerName:item.text]) { return item.boundingBox.size.width <= 0.35; }
-    if (![self looksLikeSpeakerFurigana:item.text]) { return NO; }
-    for (OCRTextItem *other in pool) {
-        if (other == item || ![self looksLikeSpeakerName:other.text]) { continue; }
-        // 底左原点：注音的 midY 更大（更靠上），名字紧贴在它下面。
-        if (CGRectGetMidY(other.boundingBox) >= CGRectGetMidY(item.boundingBox)) { continue; }
-        if (CGRectGetMidY(item.boundingBox) - CGRectGetMaxY(other.boundingBox) > 0.05) { continue; }
-        CGFloat overlap = MIN(CGRectGetMaxX(item.boundingBox), CGRectGetMaxX(other.boundingBox)) -
-                          MAX(CGRectGetMinX(item.boundingBox), CGRectGetMinX(other.boundingBox));
-        if (overlap >= item.boundingBox.size.width * 0.5) { return YES; }
-    }
-    return NO;
+    return [FYContentRouter isSpeakerLabelItem:item inPool:pool];
 }
 
-// 整帧只有说话人名字（可以带注音）—— 正文没读到。这种帧写进学习库只会白占一条额度。
-// 必须真的有一行是名字：短句 `はい` 也满足“假名行”的判定，不能被当成名字框丢掉。
 + (BOOL)dialogueFrameIsSpeakerLabelOnly:(NSArray<NSString *> *)lines {
-    if (lines.count == 0) { return NO; }
-    BOOL hasName = NO;
-    for (NSString *line in lines) {
-        if ([self looksLikeSpeakerName:line]) { hasName = YES; continue; }
-        if ([self looksLikeSpeakerFurigana:line]) { continue; }
-        return NO;
-    }
-    return hasName;
+    return [FYContentRouter dialogueFrameIsSpeakerLabelOnly:lines];
 }
 
-// 把 band 拆成「对白」和「选项」两组。
-// 做法：先按垂直间距把 band 分成一簇一簇（连续的行 ≤0.12，隔开的就是不同簇），
-// 再把位于画面下半部的簇判为对白框，其余在上方的簇判为选项。
-// 依据：视觉小说的对白框固定在画面下方，选项浮在上方；
-// 这样就算选项自身的行距比较大，也不会把两个选项拆到两组里去。
 + (void)splitDialogueAndOptions:(NSArray<OCRTextItem *> *)band
                      allBlocks:(NSArray<OCRTextItem *> *)allBlocks
                       dialogue:(NSMutableArray<OCRTextItem *> *)outDialogue
                        options:(NSMutableArray<OCRTextItem *> *)outOptions {
-    if (band.count == 0) { return; }
-
-    // band 已按从上到下排序；这里切成簇
-    NSMutableArray<NSMutableArray<OCRTextItem *> *> *clusters = [NSMutableArray array];
-    NSMutableArray<OCRTextItem *> *current = nil;
-    for (OCRTextItem *item in band) {
-        if (!current) {
-            current = [NSMutableArray arrayWithObject:item];
-            [clusters addObject:current];
-            continue;
-        }
-        CGFloat gap = fabs(CGRectGetMidY(current.lastObject.boundingBox) - CGRectGetMidY(item.boundingBox));
-        if (gap <= 0.12) {
-            [current addObject:item];
-        } else {
-            current = [NSMutableArray arrayWithObject:item];
-            [clusters addObject:current];
-        }
-    }
-
-    // 簇里最宽的一条所在位置，就是这一簇贴在画面的哪一带
-    NSMutableArray<NSNumber *> *clusterWidths = [NSMutableArray array];
-    for (NSMutableArray<OCRTextItem *> *cluster in clusters) {
-        CGFloat widest = 0;
-        for (OCRTextItem *item in cluster) { widest = MAX(widest, item.boundingBox.size.width); }
-        [clusterWidths addObject:@(widest)];
-    }
-
-    // 选“对白簇”：最宽的成型行在画面下半部的那个簇；没有就退回整屏最宽的一条所在的簇
-    NSInteger dialogueCluster = -1;
-    CGFloat bestWidth = -1;
-    for (NSUInteger index = 0; index < clusters.count; index++) {
-        NSMutableArray<OCRTextItem *> *cluster = clusters[index];
-        for (OCRTextItem *item in cluster) {
-            if (![self isFormedTextLine:item]) { continue; }
-            if (CGRectGetMidY(item.boundingBox) > 0.42) { continue; }
-            if (item.boundingBox.size.width > bestWidth) {
-                bestWidth = item.boundingBox.size.width;
-                dialogueCluster = (NSInteger)index;
-            }
-        }
-    }
-    if (dialogueCluster < 0) {
-        for (NSUInteger index = 0; index < clusters.count; index++) {
-            CGFloat widest = clusterWidths[index].doubleValue;
-            if (widest > bestWidth) {
-                bestWidth = widest;
-                dialogueCluster = (NSInteger)index;
-            }
-        }
-    }
-
-    // 名字/注音框紧贴在对白框上方，却会被拆成独立一簇丢进「选项」。
-    // 实测 `萩尾九段`（名字框）就被标成「选项」单独记了一条学习记录。
-    // 这里把它连同紧邻上方的注音一起并回对白框。
-    NSInteger labelRunStart = dialogueCluster;
-    while (labelRunStart > 0 && [self looksLikeSpeakerLabelCluster:clusters[labelRunStart - 1]]) { labelRunStart -= 1; }
-
-    for (NSUInteger index = 0; index < clusters.count; index++) {
-        if ((NSInteger)index >= labelRunStart && (NSInteger)index <= dialogueCluster) {
-            if (outDialogue) { [outDialogue addObjectsFromArray:clusters[index]]; }
-        } else {
-            if (outOptions) { [outOptions addObjectsFromArray:clusters[index]]; }
-        }
-    }
-
-    // 选项区离对白框往往比较远，band 的“紧收拢”会把它整个漏掉。
-    // 这里补一遍：把 band 之外、但和对白框**水平对齐**的行也当作选项收进来。
-    // 对齐标准取得比较严（重叠 ≥ 较窄那条的 55%），因为街景招牌通常只和对白框擦边。
-    if (outOptions && dialogueCluster >= 0) {
-        OCRTextItem *dialogueAnchor = nil;
-        CGFloat anchorWidth = 0;
-        for (OCRTextItem *item in clusters[dialogueCluster]) {
-            if (item.boundingBox.size.width > anchorWidth) {
-                anchorWidth = item.boundingBox.size.width;
-                dialogueAnchor = item;
-            }
-        }
-        if (dialogueAnchor) {
-            NSArray<OCRTextItem *> *pool = allBlocks ?: band;
-            for (OCRTextItem *item in pool) {
-                if ([outOptions containsObject:item]) { continue; }
-                if ([clusters[dialogueCluster] containsObject:item]) { continue; }
-                if (FYNormalizeOCRTextForComparison(item.text).length < 2) { continue; }
-                if (item.boundingBox.size.width < 0.10) { continue; }
-                // 名字框/注音不是选项：实测 `萩尾九段` 会被这条补漏收进选项，单独占一条记录。
-                if ([self isSpeakerLabelItem:item inPool:pool]) { continue; }
-                // 只补对白框上方的
-                if (CGRectGetMidY(item.boundingBox) <= CGRectGetMidY(dialogueAnchor.boundingBox)) { continue; }
-                CGFloat overlapLeft = MAX(CGRectGetMinX(item.boundingBox), CGRectGetMinX(dialogueAnchor.boundingBox));
-                CGFloat overlapRight = MIN(CGRectGetMaxX(item.boundingBox), CGRectGetMaxX(dialogueAnchor.boundingBox));
-                CGFloat overlap = overlapRight - overlapLeft;
-                CGFloat narrower = MIN(item.boundingBox.size.width, dialogueAnchor.boundingBox.size.width);
-                if (overlap <= 0 || overlap < narrower * 0.55) { continue; }
-                [outOptions addObject:item];
-            }
-        }
-    }
+    [FYContentRouter splitDialogueAndOptions:band allBlocks:allBlocks dialogue:outDialogue options:outOptions];
 }
 
 + (BOOL)containsJapaneseKana:(NSString *)value {
-    for (NSUInteger index = 0; index < value.length; index++) {
-        unichar character = [value characterAtIndex:index];
-        if ((character >= 0x3040 && character <= 0x30ff) || (character >= 0x31f0 && character <= 0x31ff)) {
-            return YES;
-        }
-    }
-    return NO;
+    return [FYContentRouter containsJapaneseKana:value];
 }
 
-// 从整窗 OCR 里挑出“对白框”那几行：取最低的一条长行当锚点，再收拢它附近的行。
-// 目的：街景招牌、公告牌这类环境文本不该混进对白翻译。
-// 对白/选项的文字块：幅面够大、字数够多。街景招牌、图标标签这类零碎短文本天然被排除。
 + (BOOL)isFormedTextLine:(OCRTextItem *)block {
-    NSString *normalized = FYNormalizeOCRTextForComparison(block.text);
-    if (normalized.length >= 8 && block.boundingBox.size.width >= 0.20) { return YES; }
-    // 0.15 太贴近现实边缘：对白框被 UI 遮住一半时宽度会掉到 0.13 左右，
-    // 只差一点点就被判成“不成型”，整条对白就丢了。放宽到 0.12。
-    if (normalized.length >= 6 && block.boundingBox.size.width >= 0.12) { return YES; }
-    return NO;
+    return [FYContentRouter isFormedTextLine:block];
 }
 
-// 挑出“对白 + 选项”这些需要翻译的文字块。
-// 做法：以画面**下半部**里最宽的一条成型行作锚点（视觉小说的对白框在下半部，而且通常最宽），
-// 再把与它水平大幅重叠、纵向邻接的块一起收进来。
-// 注意 Vision 的 boundingBox 是底左原点：y 越大越靠近画面顶端。
-// 能不能当“对白框”的锚点。
-// 对白框的现实特征：① 贴在画面很靠下的位置 ② 框里有一条像台词的宽行。
-// 判得严一点很重要 —— 文本密集的功能 UI 里也有不少宽行，放松了就会把 UI 误判成对白、
-// 于是整屏文字被塞进字幕窗，而该贴译的内容反而没人管。
-// “短句对白”锚点：只在对白框通篇短句时兜底使用。
-// 门槛刻意比 IsDialogueAnchorCandidate 低（实测「思い出した。」是 6 字 / 0.13 宽）。
 + (BOOL)isShortDialogueAnchor:(OCRTextItem *)block {
-    NSString *normalized = FYNormalizeOCRTextForComparison(block.text);
-    if (normalized.length < 4) { return NO; }
-    if (block.boundingBox.size.height < 0.026) { return NO; }
-    if (CGRectGetMidY(block.boundingBox) > 0.45) { return NO; }
-    if (block.boundingBox.size.width < 0.06) { return NO; }
-    // 纯数字/日期样式的一小串不当对白
-    return YES;
+    return [FYContentRouter isShortDialogueAnchor:block];
 }
 
 + (BOOL)isUnpunctuatedSingleLineDialogue:(NSString *)text box:(CGRect)box {
-    NSString *normalized = FYNormalizeOCRTextForComparison(text);
-    return normalized.length >= 4 && normalized.length <= 14 && [self containsJapaneseKana:normalized] &&
-        box.size.height >= 0.043 && box.size.width >= 0.08 && box.size.width <= 0.30 &&
-        CGRectGetMinX(box) >= 0.18 && CGRectGetMaxX(box) <= 0.78 &&
-        CGRectGetMidY(box) >= 0.10 && CGRectGetMidY(box) <= 0.38;
+    return [FYContentRouter isUnpunctuatedSingleLineDialogue:text box:box];
 }
 
 + (BOOL)isCornerHelpButton:(OCRTextItem *)block {
-    CGRect box = block.boundingBox;
-    return CGRectGetMinX(box) >= 0.80 && CGRectGetMidY(box) <= 0.12 &&
-        [FYNormalizeOCRTextForComparison(block.text) containsString:@"操作説明"];
+    return [FYContentRouter isCornerHelpButton:block];
 }
 
-// 单行对白：整屏只有一句台词（没有名字框、没有第二行）。
-// 之前“短句兜底”要求它和相邻行堆叠，于是单行对白被误杀（band=0 → 被判成界面贴译）。
-// 台词几乎都以句末标点结尾，而街景招牌通常没有 —— 用这个区分。
 + (BOOL)isSingleLineDialogue:(OCRTextItem *)block {
-    NSString *normalized = FYNormalizeOCRTextForComparison(block.text);
-    if (normalized.length < 4) { return NO; }
-    // 门槛放到 0.05：台词本来就短（实测「行くぞ。」只有 0.08 宽）。
-    // 真正的防误判靠“必须以句末标点结尾”，不靠宽度。
-    if (block.boundingBox.size.width < 0.05) { return NO; }
-    if (block.boundingBox.size.height < 0.026) { return NO; }
-    if (CGRectGetMidY(block.boundingBox) > 0.45) { return NO; }
-    NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…・、"];
-    if ([enders characterIsMember:[normalized characterAtIndex:normalized.length - 1]]) { return YES; }
-    // 视觉小说的单行台词不一定有标点；名字框也可能被 OCR 完全漏掉。
-    return [self isUnpunctuatedSingleLineDialogue:normalized box:block.boundingBox];
+    return [FYContentRouter isSingleLineDialogue:block];
 }
 
 + (BOOL)isDialogueAnchor:(OCRTextItem *)block {
-    if (![self isFormedTextLine:block]) { return NO; }
-    if (block.boundingBox.size.height < 0.026) { return NO; }
-    CGFloat midY = CGRectGetMidY(block.boundingBox);
-    if (midY > 0.32) { return NO; }
-    CGFloat width = block.boundingBox.size.width;
-    NSUInteger length = FYNormalizeOCRTextForComparison(block.text).length;
-    return width >= 0.22 || length >= 10;
+    return [FYContentRouter isDialogueAnchor:block];
 }
 
 + (NSArray<OCRTextItem *> *)subtitleBandItems:(NSArray<OCRTextItem *> *)blocks {
-    // 锚点不要只看“整屏最宽”：选项里出现「・・・・」这类省略号时可能比对白还宽，
-    // 那样会把选项当锚点、真正的对白反而被排除。
-    // 也**不再**退回“画面里最低的成型行” —— 那正是把密集文本 UI 误判成对白的元凶。
-    // 找不到真正的对白锚点就返回空，让判别走 UI/贴译路线。
-    OCRTextItem *anchor = nil;
-    BOOL usedShortAnchorFallback = NO;
-    for (OCRTextItem *block in blocks) {
-        if (![self isDialogueAnchor:block]) { continue; }
-        if (!anchor || block.boundingBox.size.width > anchor.boundingBox.size.width) { anchor = block; }
-    }
-
-    // 兜底：对白框里**通篇都是短句**时，上面一条都当不了锚点。
-    // 真实例子：「思い出した。」6 字/0.13 宽 + 名字「？？？」——整框没有长行，
-    // 结果字幕带为空、一个字都不翻。
-    // 但不能见到短行就当对白（散落的街景招牌也是短行），
-    // 所以要求它**和另一行紧挨着堆叠**：对白框的行距很紧，招牌之间不会这么近。
-    // 注意：anchor 可能已经被设成一个“勉强合格”的错读（实测名字框的 `？？？`
-    // 被 OCR 读成平假名 `ことと`，长度够格但其实是噪声）。
-    // 这时也要走兜底 —— 否则真正的那句「思い出した。」永远进不来。
-    // 判定标准是：当前 anchor **是否真的和相邻行堆叠**（孤零零一条不算对白）。
-    // 只对**弱锚点**（短而窄）要求堆叠：孤零零一条短行不像对白框。
-    // 长行锚点不受影响 —— 单行对白框本来就靠一条长行成立（有测试守着这一点）。
-    if (anchor) {
-        BOOL weakAnchor = anchor.boundingBox.size.width < 0.16
-            && FYNormalizeOCRTextForComparison(anchor.text).length < 10;
-        if (weakAnchor) {
-            BOOL anchorStacked = NO;
-            for (OCRTextItem *other in blocks) {
-                if (other == anchor) { continue; }
-                if (FYNormalizeOCRTextForComparison(other.text).length < 2) { continue; }
-                if (fabs(CGRectGetMidY(other.boundingBox) - CGRectGetMidY(anchor.boundingBox)) >= 0.10) { continue; }
-                CGFloat otherLeft = MAX(CGRectGetMinX(other.boundingBox), CGRectGetMinX(anchor.boundingBox));
-                CGFloat otherRight = MIN(CGRectGetMaxX(other.boundingBox), CGRectGetMaxX(anchor.boundingBox));
-                if (otherRight - otherLeft <= 0) { continue; }
-                anchorStacked = YES;
-                break;
-            }
-            // 没堆叠也要留意：它可能只是名字框，而真正的对白在下面更宽的那条
-            if (!anchorStacked) {
-                OCRTextItem *better = nil;
-                for (OCRTextItem *other in blocks) {
-                    if (other == anchor || ![self isShortDialogueAnchor:other]) { continue; }
-                    if (other.boundingBox.size.width <= anchor.boundingBox.size.width) { continue; }
-                    if (!better || other.boundingBox.size.width > better.boundingBox.size.width) { better = other; }
-                }
-                if (better) {
-                    anchor = better;
-                    usedShortAnchorFallback = YES;
-                } else {
-                    anchor = nil;
-                }
-            }
-        }
-    }
-
-    if (!anchor) {
-        // 单行对白：允许单独一条以句末标点结尾的短句当锚点
-        for (OCRTextItem *block in blocks) {
-            if (![self isSingleLineDialogue:block]) { continue; }
-            anchor = block;
-            usedShortAnchorFallback = YES;
-            break;
-        }
-    }
-
-    if (!anchor) {
-        for (OCRTextItem *block in blocks) {
-            if (![self isShortDialogueAnchor:block]) { continue; }
-            CGFloat midY = CGRectGetMidY(block.boundingBox);
-            BOOL stacked = NO;
-            for (OCRTextItem *other in blocks) {
-                if (other == block) { continue; }
-                if (FYNormalizeOCRTextForComparison(other.text).length < 2) { continue; }
-                if (fabs(CGRectGetMidY(other.boundingBox) - midY) >= 0.10) { continue; }
-                // 同一组文字框水平上要对得上
-                CGFloat overlapLeft = MAX(CGRectGetMinX(other.boundingBox), CGRectGetMinX(block.boundingBox));
-                CGFloat overlapRight = MIN(CGRectGetMaxX(other.boundingBox), CGRectGetMaxX(block.boundingBox));
-                if (overlapRight - overlapLeft <= 0) { continue; }
-                stacked = YES;
-                break;
-            }
-            if (!stacked) { continue; }
-            if (!anchor || block.boundingBox.size.width > anchor.boundingBox.size.width) {
-                anchor = block;
-                usedShortAnchorFallback = YES;
-            }
-        }
-    }
-    if (!anchor) { return @[]; }
-
-    // 兜底否决：这一组里如果没有任何“像对白”的实质长行（够宽或够长），
-    // 那它就不是对白框，而是招牌/按钮之类，宁可不翻。
-    BOOL hasSubstantialLine = NO;
-    for (OCRTextItem *block in blocks) {
-        if (block.boundingBox.size.width >= 0.20) { hasSubstantialLine = YES; break; }
-        if (FYNormalizeOCRTextForComparison(block.text).length >= 8 && block.boundingBox.size.width >= 0.15) {
-            hasSubstantialLine = YES;
-            break;
-        }
-    }
-    // 短句兜底路径不能再用“必须有长行”否决 —— 整框都是短句正是它要处理的情况，
-    // 它已经用“和相邻行紧挨堆叠”把散落的招牌挡在外面了。
-    if (!hasSubstantialLine && !usedShortAnchorFallback) { return @[]; }
-
-    NSMutableArray<OCRTextItem *> *candidates = [NSMutableArray array];
-    for (OCRTextItem *block in blocks) {
-        if (block == anchor) { continue; }
-        if (FYNormalizeOCRTextForComparison(block.text).length < 2) { continue; }
-        // 宽度门槛故意放宽到 0.04：对白框里的短句本来就很窄
-        // （实测「平気。」只有 0.06 宽、「それより、」0.10），
-        // 旧门槛 0.10 会把它们直接剔除 —— 用户看到的就是“第一句没翻译”。
-        // 真正防止把菜单/招牌收进来的是下面扩张循环里的“水平重叠 + 紧邻”双条件。
-        if (block.boundingBox.size.width < 0.04) { continue; }
-        [candidates addObject:block];
-    }
-
-    NSMutableArray<OCRTextItem *> *band = [NSMutableArray arrayWithObject:anchor];
-    for (NSInteger direction = 0; direction < 2; direction++) {
-        CGFloat frontierMidY = CGRectGetMidY(anchor.boundingBox);
-        while (YES) {
-            OCRTextItem *next = nil;
-            CGFloat bestGap = CGFLOAT_MAX;
-            for (OCRTextItem *candidate in candidates) {
-                CGFloat gap = CGRectGetMidY(candidate.boundingBox) - frontierMidY;
-                if (direction == 0 && gap >= 0) { continue; }
-                if (direction == 1 && gap <= 0) { continue; }
-                // 收拢窗口要“紧”：只把真正连续的相邻行算作一段。
-                // 放太宽（曾经是 0.35）会把选项区和对白框连成一片，拆不分家。
-                // 但仍需要一点余量：对白框里第一行常和后面几行隔得较开
-                // （实测「平気。」与下一行差 0.062），窗口太紧会把首行切掉。
-                if (fabs(gap) >= 0.20) { continue; }
-                // 水平重叠要占较窄那一条的一半以上：同一组文字框通常对齐，
-                // 而街景招牌/背景文字与对白框只是擦边重叠，会被这一条挡住。
-                CGFloat overlapLeft = MAX(CGRectGetMinX(candidate.boundingBox), CGRectGetMinX(anchor.boundingBox));
-                CGFloat overlapRight = MIN(CGRectGetMaxX(candidate.boundingBox), CGRectGetMaxX(anchor.boundingBox));
-                CGFloat overlap = overlapRight - overlapLeft;
-                CGFloat narrower = MIN(candidate.boundingBox.size.width, anchor.boundingBox.size.width);
-                if (overlap <= 0 || overlap < narrower * 0.5) { continue; }
-                if (fabs(gap) < bestGap) {
-                    next = candidate;
-                    bestGap = fabs(gap);
-                }
-            }
-            if (!next) { break; }
-            [band addObject:next];
-            [candidates removeObject:next];
-            frontierMidY = CGRectGetMidY(next.boundingBox);
-        }
-    }
-
-    [band sortUsingComparator:^NSComparisonResult(OCRTextItem *left, OCRTextItem *right) {
-        CGFloat leftMidY = CGRectGetMidY(left.boundingBox);
-        CGFloat rightMidY = CGRectGetMidY(right.boundingBox);
-        if (fabs(leftMidY - rightMidY) < 0.01) { return NSOrderedSame; }
-        // 底左原点：midY 大的在画面上方，按从上到下输出
-        return leftMidY > rightMidY ? NSOrderedAscending : NSOrderedDescending;
-    }];
-    return band;
+    return [FYContentRouter subtitleBandItems:blocks];
 }
 
-// 判定“这一帧看起来像功能界面”：小按钮、菜单词、密集短文本、贴边文字
-// 画面里出现几个游戏 UI 特有的按钮/菜单词？
-// 这是区分“功能 UI”和“剧情对白”最可靠的单一信号 ——
-// 新闻、列表、菜单页一定带「戻る / 詳細 / メニュー」这类词，对白框不会。
-//
-// 匹配必须精确：早期用 containsString 会误判 ——
-// 日文那边的 "River Books" 会命中 "ok"，对白 "これでプレゼントはOK。" 也会命中 "ok"。
 + (BOOL)textHitsUIToken:(NSString *)text {
-    NSString *normalized = FYNormalizeOCRTextForComparison(text);
-    if (normalized.length == 0) { return NO; }
-    NSString *lower = normalized.lowercaseString;
-
-    // 日文按钮词：整条相等，或者出现在开头（「詳細を見る」「戻る」这类）
-    NSArray<NSString *> *japaneseTokens = @[@"戻る", @"戻", @"閉じる", @"詳細", @"次へ",
-                                            @"決定", @"設定", @"メニュー", @"スキップ"];
-    for (NSString *token in japaneseTokens) {
-        if ([normalized isEqualToString:token] || [normalized hasPrefix:token]) { return YES; }
-    }
-
-    // 拉丁词：必须是独立词，不能在别的单词里（避免 "Books" → "ok"）
-    NSArray<NSString *> *latinTokens = @[@"back", @"close", @"menu", @"next", @"ok",
-                                         @"cancel", @"skip", @"setting", @"settings", @"web"];
-    NSCharacterSet *letters = [NSCharacterSet letterCharacterSet];
-    for (NSString *token in latinTokens) {
-        NSRange searchRange = NSMakeRange(0, lower.length);
-        while (searchRange.length > 0) {
-            NSRange found = [lower rangeOfString:token options:0 range:searchRange];
-            if (found.location == NSNotFound) { break; }
-            BOOL leftFree = (found.location == 0) ||
-                            ![letters characterIsMember:[lower characterAtIndex:found.location - 1]];
-            NSUInteger after = found.location + found.length;
-            BOOL rightFree = (after >= lower.length) ||
-                             ![letters characterIsMember:[lower characterAtIndex:after]];
-            if (leftFree && rightFree) { return YES; }
-            NSUInteger next = found.location + found.length;
-            if (next >= lower.length) { break; }
-            searchRange = NSMakeRange(next, lower.length - next);
-        }
-    }
-    return NO;
+    return [FYContentRouter textHitsUIToken:text];
 }
 
 + (NSUInteger)UITokenHitCount:(NSArray<OCRTextItem *> *)blocks {
-    NSUInteger tokenHitCount = 0;
-    for (OCRTextItem *block in blocks) {
-        if ([self textHitsUIToken:block.text]) { tokenHitCount += 1; }
-    }
-    return tokenHitCount;
+    return [FYContentRouter UITokenHitCount:blocks];
 }
 
 + (BOOL)isFurigana:(OCRTextItem *)small nearLargerLineInItems:(NSArray<OCRTextItem *> *)blocks {
-    CGRect box = small.boundingBox;
-    NSString *text = FYNormalizeOCRTextForComparison(small.text);
-    if (text.length < 2 || box.size.width > 0.14 || box.size.height > 0.035) { return NO; }
-    NSUInteger kanaCount = 0;
-    for (NSUInteger index = 0; index < text.length; index++) {
-        unichar character = [text characterAtIndex:index];
-        if ((character >= 0x3040 && character <= 0x30ff) ||
-            (character >= 0x31f0 && character <= 0x31ff)) { kanaCount += 1; }
-    }
-    if (kanaCount * 4 < text.length * 3) { return NO; }
-    for (OCRTextItem *larger in blocks) {
-        if (larger == small) { continue; }
-        CGRect parent = larger.boundingBox;
-        if (parent.size.width < box.size.width * 1.6 || parent.size.height < box.size.height * 1.5) { continue; }
-        if (CGRectGetMidY(box) <= CGRectGetMidY(parent) || CGRectGetMidY(box) - CGRectGetMaxY(parent) > 0.05) { continue; }
-        CGFloat overlap = MIN(CGRectGetMaxX(box), CGRectGetMaxX(parent)) - MAX(CGRectGetMinX(box), CGRectGetMinX(parent));
-        if (overlap >= box.size.width * 0.65) { return YES; }
-    }
-    return NO;
+    return [FYContentRouter isFurigana:small nearLargerLineInItems:blocks];
 }
 
 + (BOOL)looksLikeUIFrame:(NSArray<OCRTextItem *> *)blocks {
-    NSUInteger smallBoxCount = 0;
-    NSUInteger edgeCount = 0;
-    NSUInteger wideLineCount = 0;
-    NSUInteger textBlockCount = 0;
-    CGFloat totalWidth = 0;
-    NSUInteger tokenHitCount = [self UITokenHitCount:blocks];
-
-    for (OCRTextItem *block in blocks) {
-        NSString *normalized = FYNormalizeOCRTextForComparison(block.text);
-        if (normalized.length == 0) { continue; }
-        textBlockCount += 1;
-        totalWidth += block.boundingBox.size.width;
-
-        BOOL smallBox = normalized.length <= 8 && block.boundingBox.size.height < 0.036 &&
-            block.boundingBox.size.width < 0.20 && ![self isFurigana:block nearLargerLineInItems:blocks];
-        if (smallBox) { smallBoxCount += 1; }
-        if (block.boundingBox.size.width >= 0.32) { wideLineCount += 1; }
-
-        BOOL nearEdge = block.boundingBox.origin.y < 0.10 || CGRectGetMaxY(block.boundingBox) > 0.90;
-        if (nearEdge && normalized.length <= 12) { edgeCount += 1; }
-    }
-
-    if (tokenHitCount >= 2) { return YES; }
-    if (tokenHitCount >= 1 && (smallBoxCount >= 2 || edgeCount >= 3)) { return YES; }
-    if (smallBoxCount >= 4 || (blocks.count >= 5 && smallBoxCount >= 3)) {
-        // A speaker label and several short dialogue lines are also small boxes.
-        // Exempt wrapped speech with a leading speaker label. Aligned choices
-        // can also contain kana and punctuation, including below a name heading.
-        // A continuation fragment distinguishes the supported short-dialogue
-        // case from a list of independently completed sentences.
-        NSArray<OCRTextItem *> *band = [self subtitleBandItems:blocks];
-        NSUInteger kanaLines = 0, bandSmallBoxes = 0;
-        BOOL compact = band.count >= 3, punctuated = NO, hasContinuation = NO;
-        BOOL hasSpeakerLabel = band.count > 0 && [self isSpeakerLabelItem:band.firstObject inPool:band];
-        NSCharacterSet *enders = [NSCharacterSet characterSetWithCharactersInString:@"。！!？?…・、"];
-        NSCharacterSet *sentenceEnders = [NSCharacterSet characterSetWithCharactersInString:@"。．.！!？?…‥"];
-        OCRTextItem *previous = nil;
-        for (OCRTextItem *item in band) {
-            CGRect box = item.boundingBox;
-            NSString *text = FYNormalizeOCRTextForComparison(item.text);
-            if (CGRectGetMidY(box) > 0.45 || box.size.height < 0.026 || box.size.width > 0.30) { compact = NO; }
-            if (previous) {
-                CGRect before = previous.boundingBox;
-                CGFloat lineHeight = MAX(before.size.height, box.size.height);
-                if (fabs(CGRectGetMinX(before) - CGRectGetMinX(box)) > MAX(0.025, lineHeight) ||
-                    fabs(CGRectGetMidY(before) - CGRectGetMidY(box)) > lineHeight * 2.5) { compact = NO; }
-            }
-            if (text.length >= 3 && [self containsJapaneseKana:text]) {
-                kanaLines++;
-                if ([enders characterIsMember:[text characterAtIndex:text.length - 1]]) { punctuated = YES; }
-                if (![self looksLikeSpeakerName:text] &&
-                    ![sentenceEnders characterIsMember:[text characterAtIndex:text.length - 1]]) { hasContinuation = YES; }
-            }
-            if (text.length <= 8 && box.size.height < 0.036 && box.size.width < 0.20 &&
-                ![self isFurigana:item nearLargerLineInItems:blocks]) { bandSmallBoxes++; }
-            previous = item;
-        }
-        BOOL wrappedSpeech = compact && hasSpeakerLabel && hasContinuation && kanaLines >= 2 && punctuated;
-        NSUInteger menuBoxes = wrappedSpeech ? smallBoxCount - bandSmallBoxes : smallBoxCount;
-        if (menuBoxes >= 4 || (blocks.count >= 5 && menuBoxes >= 3)) { return YES; }
-    }
-    // 贴边文字很多、且完全没有宽行 —— 但这必须**同时**带上 UI 按钮词才算数。
-    // 单独用贴边信号太弱：对白游戏的字幕框本身就贴着画面底部，
-    // 实测城镇对白帧 edge=4（其中还包含我们自己浮窗的文字），会把对白误判成 UI。
-    if (edgeCount >= 4 && wideLineCount == 0 && tokenHitCount >= 1) { return YES; }
-
-    // 文本密集 = 列表 / 菜单 / 新闻页。
-    // 判据用“实质行数”（够宽、够长的行），实测能干净分开：
-    //   新闻列表页 8 行，对白帧 3 行。纯招牌画面只有 1~2 行。
-    // 不用“平均宽度”，因为街景招牌会把平均值拉低，反而误伤对白帧。
-    NSUInteger substantialLineCount = 0;
-    for (OCRTextItem *block in blocks) {
-        NSString *normalized = FYNormalizeOCRTextForComparison(block.text);
-        if (normalized.length == 0) { continue; }
-        CGFloat width = block.boundingBox.size.width;
-        if (width >= 0.15) { substantialLineCount += 1; continue; }
-        if (normalized.length >= 8 && width >= 0.13 && block.boundingBox.size.height >= 0.030) {
-            substantialLineCount += 1;
-        }
-    }
-    if (substantialLineCount >= 6) { return YES; }
-
-    (void)textBlockCount;
-    (void)totalWidth;
-    return NO;
+    return [FYContentRouter looksLikeUIFrame:blocks];
 }
 
-// OCR 常把紧邻对白的小按钮粘进同一行：实测 `思い出した。` 被读成 `思い出した。使用`。
-// 直接发去翻译，模型会照着输出「想起来了。使用」—— 按钮文字混进了字幕。
-// 规则：句末标点之后只剩一小段**纯汉字**（2~4 字），且整串里有假名，就把它当按钮切掉。
 + (NSString *)dialogueTextWithoutTrailingButton:(NSString *)text {
-    NSString *trimmed = (text ? [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet] : @"");
-    if (trimmed.length == 0) { return trimmed; }
-
-    NSCharacterSet *kanaSet = [NSCharacterSet characterSetWithCharactersInString:
-        @"ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめもゃやゅゆょよらりるれろゎわゐゑをんァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾタダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモャヤュユョヨラリルレロヮワヰヱヲンヴー"];
-    BOOL hasKana = NO;
-    for (NSUInteger index = 0; index < trimmed.length; index++) {
-        if ([kanaSet characterIsMember:[trimmed characterAtIndex:index]]) { hasKana = YES; break; }
-    }
-    if (!hasKana) { return trimmed; }
-
-    // 从末尾往前吃掉 2~4 个纯汉字，并要求它前面是句末标点
-    NSUInteger end = trimmed.length;
-    NSUInteger runStart = end;
-    while (runStart > 0) {
-        unichar character = [trimmed characterAtIndex:runStart - 1];
-        if (character >= 0x4E00 && character <= 0x9FFF) { runStart -= 1; continue; }
-        break;
-    }
-    NSUInteger hanRun = end - runStart;
-    if (hanRun < 2 || hanRun > 4 || runStart == 0) { return trimmed; }
-
-    NSCharacterSet *sentenceEnd = [NSCharacterSet characterSetWithCharactersInString:@"。．.!！?？、，,…」』）)"];
-    if (![sentenceEnd characterIsMember:[trimmed characterAtIndex:runStart - 1]]) { return trimmed; }
-
-    return [[trimmed substringToIndex:runStart] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    return [FYContentRouter dialogueTextWithoutTrailingButton:text];
 }
 
 + (CGImageRef)copyEnlargedImage:(CGImageRef)image visionRegion:(CGRect)region pixelCrop:(CGRect *)outCrop {
@@ -1635,10 +1236,8 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
     for (OCRTextItem *original in coarse) {
         BOOL replaced = NO;
         for (OCRTextItem *better in refined) {
-            CGRect a = original.boundingBox, b = better.boundingBox;
-            CGFloat overlapY = MIN(CGRectGetMaxY(a), CGRectGetMaxY(b)) - MAX(CGRectGetMinY(a), CGRectGetMinY(b));
-            CGFloat overlapX = MIN(CGRectGetMaxX(a), CGRectGetMaxX(b)) - MAX(CGRectGetMinX(a), CGRectGetMinX(b));
-            if (b.size.height >= a.size.height * 0.6 && overlapY > MIN(a.size.height,b.size.height) * 0.45 && overlapX > 0) { replaced = YES; break; }
+            if (FYOCRRefinementReplacesItem(original,better) ||
+                FYOCRRefinementDuplicatesSingleLine(original,better)) { replaced = YES; break; }
         }
         if (!replaced) [merged addObject:original];
     }
@@ -1685,6 +1284,7 @@ static NSComparisonResult FYOCRReadingOrder(OCRTextItem *left, OCRTextItem *righ
             lineItem.blockKind = item.blockKind;
             lineItem.confidence = item.confidence;
             lineItem.groupingConfidence = item.groupingConfidence;
+            lineItem.speakerLabel = item.speakerLabel;
             [result addObject:lineItem];
         }
     }

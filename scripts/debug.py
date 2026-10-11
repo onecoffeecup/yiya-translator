@@ -20,13 +20,14 @@ spec = importlib.util.spec_from_file_location("acceptance", ROOT / "scripts/run-
 acceptance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(acceptance)
 ACTION_FIELDS = {
-    "frame": {"text", "blocks", "image", "video", "video_ms", "capture_failed", "ocr_error"},
+    "frame": {"text", "blocks", "refined_blocks", "image", "video", "video_ms", "capture_failed", "ocr_error"},
     "tick": set(), "advance": set(), "release": {"request"}, "window": {"window_id"},
     "mode": {"mode"}, "disconnect": set(), "connect": set(), "restart": set(),
     "cache_probe": set(), "translate": {"text"},
 }
 EXPECT_KEYS = {"requests", "sources", "captions", "inline", "errors", "in_flight", "pending",
                "cancel_calls", "ocr_calls", "mode", "reasons", "drops", "events", "direct_results",
+               "dialogue_identity_count", "learning_source",
                "has_reason", "caption_contains"}
 
 
@@ -123,10 +124,12 @@ def validate(path):
                 raise ValueError("frame: choose image or video")
             if "video" in step:
                 number(step.get("video_ms"), "video_ms", 0, 86400000)
-            if "blocks" in step:
-                if not isinstance(step["blocks"], list):
-                    raise ValueError("blocks: expected list")
-                for block in step["blocks"]:
+            for field in ("blocks", "refined_blocks"):
+                if field not in step:
+                    continue
+                if not isinstance(step[field], list):
+                    raise ValueError(f"{field}: expected list")
+                for block in step[field]:
                     if not isinstance(block, dict) or set(block) != {"text", "box"} or not isinstance(block["text"], str):
                         raise ValueError("block needs text and normalized box")
                     box(block["box"])

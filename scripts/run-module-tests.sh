@@ -24,6 +24,16 @@ clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacos
 "$OUT/OCRPostprocessingTests"
 clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
   -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/ContentRouterTests.m" "${FY_OCR_SOURCES[@]}" "$ROOT_DIR/objc/learning/FYLearningModels.m" \
+  -framework Cocoa -framework Vision -o "$OUT/ContentRouterTests"
+"$OUT/ContentRouterTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
+  "$ROOT_DIR/tests/SpeakerPlateTests.m" "${FY_OCR_SOURCES[@]}" "$ROOT_DIR/objc/learning/FYLearningModels.m" \
+  -framework Cocoa -framework Vision -framework ImageIO -o "$OUT/SpeakerPlateTests"
+"$OUT/SpeakerPlateTests"
+clang ${SANITIZER_FLAGS[@]+"${SANITIZER_FLAGS[@]}"} -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall \
+  -fmodules-cache-path="$OUT/modulecache" -I "$ROOT_DIR/objc" \
   "$ROOT_DIR/tests/OCRVisionConfigurationTests.m" "${FY_OCR_SOURCES[@]}" \
   -framework Cocoa -framework Vision -o "$OUT/OCRVisionConfigurationTests"
 "$OUT/OCRVisionConfigurationTests"

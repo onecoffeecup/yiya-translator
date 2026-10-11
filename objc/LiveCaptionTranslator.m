@@ -30,6 +30,7 @@
 #import "FYInlineLayoutDebug.h"
 #import "FYWindowManager.h"
 #import "FYOCRManager.h"
+#import "FYContentRouter.h"
 #import "FYGeometryManager.h"
 #import "FYTranslationManager.h"
 #import "learning/FYStudyChatSession.h"
@@ -171,6 +172,14 @@ static NSString *FYTranslationModelForSettings(NSDictionary *settings) {
     return @"gpt-4.1-mini";
 }
 
+static FYContentTextFilterObserver FYContentFilterDiagnosticObserver(void) {
+    return ^(NSString *text, CGRect box, FYContentTextFilterReason reason) {
+        if (reason == FYContentTextPunctuationOnly) {
+            FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f", FYDiagTextLength(text), box.size.width);
+        }
+    };
+}
+
 static NSString *NormalizeForComparison(NSString *value) {
     return FYNormalizeOCRTextForComparison(value);
 }
@@ -181,47 +190,12 @@ static NSString *Shorten(NSString *value, NSUInteger limit) {
     return [[trimmed substringToIndex:limit] stringByAppendingString:@"..."];
 }
 
-static NSUInteger LevenshteinDistance(NSString *left, NSString *right) {
-    NSUInteger leftLength = left.length;
-    NSUInteger rightLength = right.length;
-    if (leftLength == 0) { return rightLength; }
-    if (rightLength == 0) { return leftLength; }
-
-    NSMutableArray<NSNumber *> *previous = [NSMutableArray arrayWithCapacity:rightLength + 1];
-    NSMutableArray<NSNumber *> *current = [NSMutableArray arrayWithCapacity:rightLength + 1];
-    for (NSUInteger column = 0; column <= rightLength; column++) {
-        [previous addObject:@(column)];
-        [current addObject:@0];
-    }
-
-    for (NSUInteger row = 1; row <= leftLength; row++) {
-        current[0] = @(row);
-        unichar leftCharacter = [left characterAtIndex:row - 1];
-        for (NSUInteger column = 1; column <= rightLength; column++) {
-            unichar rightCharacter = [right characterAtIndex:column - 1];
-            NSUInteger cost = leftCharacter == rightCharacter ? 0 : 1;
-            NSUInteger deletion = previous[column].unsignedIntegerValue + 1;
-            NSUInteger insertion = current[column - 1].unsignedIntegerValue + 1;
-            NSUInteger substitution = previous[column - 1].unsignedIntegerValue + cost;
-            current[column] = @(MIN(MIN(deletion, insertion), substitution));
-        }
-        NSMutableArray<NSNumber *> *swap = previous;
-        previous = current;
-        current = swap;
-    }
-
-    return previous[rightLength].unsignedIntegerValue;
-}
-
 static double SimilarityRatio(NSString *left, NSString *right) {
-    NSUInteger maxLength = MAX(left.length, right.length);
-    if (maxLength == 0) { return 1.0; }
-    NSUInteger distance = LevenshteinDistance(left, right);
-    return 1.0 - ((double)distance / (double)maxLength);
+    return [FYContentRouter similarityRatio:left comparedTo:right];
 }
 
 static BOOL ContainsJapaneseText(NSString *value) {
-    return [FYOCRManager containsJapaneseKana:value];
+    return [FYContentRouter containsJapaneseKana:value];
 }
 
 static NSString *SourceLanguageLabel(NSInteger segment) {
@@ -342,22 +316,22 @@ static NSArray<OCRTextItem *> *MergeRefinedOCRItems(NSArray<OCRTextItem *> *coar
     return [FYOCRManager mergeCoarseItems:coarse refinedItems:refined];
 }
 
-static NSInteger const ContentModeDialogue = 0;
-static NSInteger const ContentModeUI = 1;
+static NSInteger const ContentModeDialogue = FYContentModeDialogue;
+static NSInteger const ContentModeUI = FYContentModeUI;
 
 // Compatibility fixture entry points; UI-frame classification is a pure OCR policy.
-static BOOL __attribute__((unused)) TextHitsUIToken(NSString *text) { return [FYOCRManager textHitsUIToken:text]; }
-static NSUInteger __attribute__((unused)) UITokenHitCount(NSArray<OCRTextItem *> *blocks) { return [FYOCRManager UITokenHitCount:blocks]; }
-static BOOL __attribute__((unused)) IsFuriganaNearLargerLine(OCRTextItem *small, NSArray<OCRTextItem *> *blocks) { return [FYOCRManager isFurigana:small nearLargerLineInItems:blocks]; }
-static BOOL LooksLikeUIFrame(NSArray<OCRTextItem *> *blocks) { return [FYOCRManager looksLikeUIFrame:blocks]; }
+static BOOL __attribute__((unused)) TextHitsUIToken(NSString *text) { return [FYContentRouter textHitsUIToken:text]; }
+static NSUInteger __attribute__((unused)) UITokenHitCount(NSArray<OCRTextItem *> *blocks) { return [FYContentRouter UITokenHitCount:blocks]; }
+static BOOL __attribute__((unused)) IsFuriganaNearLargerLine(OCRTextItem *small, NSArray<OCRTextItem *> *blocks) { return [FYContentRouter isFurigana:small nearLargerLineInItems:blocks]; }
+static BOOL LooksLikeUIFrame(NSArray<OCRTextItem *> *blocks) { return [FYContentRouter looksLikeUIFrame:blocks]; }
 
 // Dialogue policy compatibility seams; implementations live in FYOCRManager.
-static BOOL __attribute__((unused)) IsFormedTextLine(OCRTextItem *block) { return [FYOCRManager isFormedTextLine:block]; }
-static BOOL __attribute__((unused)) IsShortDialogueAnchorCandidate(OCRTextItem *block) { return [FYOCRManager isShortDialogueAnchor:block]; }
-static BOOL __attribute__((unused)) IsCornerHelpButton(OCRTextItem *block) { return [FYOCRManager isCornerHelpButton:block]; }
-static BOOL __attribute__((unused)) IsSingleLineDialogue(OCRTextItem *block) { return [FYOCRManager isSingleLineDialogue:block]; }
-static BOOL __attribute__((unused)) IsDialogueAnchorCandidate(OCRTextItem *block) { return [FYOCRManager isDialogueAnchor:block]; }
-static BOOL __attribute__((unused)) IsUnpunctuatedSingleLineDialogue(NSString *text, CGRect box) { return [FYOCRManager isUnpunctuatedSingleLineDialogue:text box:box]; }
+static BOOL __attribute__((unused)) IsFormedTextLine(OCRTextItem *block) { return [FYContentRouter isFormedTextLine:block]; }
+static BOOL __attribute__((unused)) IsShortDialogueAnchorCandidate(OCRTextItem *block) { return [FYContentRouter isShortDialogueAnchor:block]; }
+static BOOL __attribute__((unused)) IsCornerHelpButton(OCRTextItem *block) { return [FYContentRouter isCornerHelpButton:block]; }
+static BOOL __attribute__((unused)) IsSingleLineDialogue(OCRTextItem *block) { return [FYContentRouter isSingleLineDialogue:block]; }
+static BOOL __attribute__((unused)) IsDialogueAnchorCandidate(OCRTextItem *block) { return [FYContentRouter isDialogueAnchor:block]; }
+static BOOL __attribute__((unused)) IsUnpunctuatedSingleLineDialogue(NSString *text, CGRect box) { return [FYContentRouter isUnpunctuatedSingleLineDialogue:text box:box]; }
 
 // Compatibility adapters; caller supplies snapshots, OCR module owns exclusion policy.
 static BOOL __attribute__((unused)) IsOwnOverlayText(NSString *raw) {
@@ -373,25 +347,25 @@ static NSSet<NSString *> *RenderedTranslationSet(NSString *captionText, NSDictio
     return [FYOCRManager renderedTranslationSetForCaption:captionText inlineCache:inlineCache];
 }
 
-static NSString *DialogueTextWithoutTrailingButton(NSString *text) {
-    return [FYOCRManager dialogueTextWithoutTrailingButton:text];
+static NSString *__attribute__((unused)) DialogueTextWithoutTrailingButton(NSString *text) {
+    return [FYContentRouter dialogueTextWithoutTrailingButton:text];
 }
 
 NSArray<OCRTextItem *> *SubtitleBandItemsFromBlocks(NSArray<OCRTextItem *> *blocks) {
-    return [FYOCRManager subtitleBandItems:blocks];
+    return [FYContentRouter subtitleBandItems:blocks];
 }
 
 // Speaker and dialogue/options compatibility seams; pure policy in OCR module.
-static BOOL __attribute__((unused)) LooksLikeSpeakerNameText(NSString *raw) { return [FYOCRManager looksLikeSpeakerName:raw]; }
-static BOOL __attribute__((unused)) LooksLikeSpeakerFuriganaText(NSString *raw) { return [FYOCRManager looksLikeSpeakerFurigana:raw]; }
-static BOOL __attribute__((unused)) LooksLikeSpeakerLabelCluster(NSArray<OCRTextItem *> *cluster) { return [FYOCRManager looksLikeSpeakerLabelCluster:cluster]; }
-static BOOL __attribute__((unused)) IsSpeakerLabelItem(OCRTextItem *item, NSArray<OCRTextItem *> *pool) { return [FYOCRManager isSpeakerLabelItem:item inPool:pool]; }
-static BOOL DialogueFrameIsSpeakerLabelOnly(NSArray<NSString *> *lines) { return [FYOCRManager dialogueFrameIsSpeakerLabelOnly:lines]; }
+static BOOL __attribute__((unused)) LooksLikeSpeakerNameText(NSString *raw) { return [FYContentRouter looksLikeSpeakerName:raw]; }
+static BOOL __attribute__((unused)) LooksLikeSpeakerFuriganaText(NSString *raw) { return [FYContentRouter looksLikeSpeakerFurigana:raw]; }
+static BOOL __attribute__((unused)) LooksLikeSpeakerLabelCluster(NSArray<OCRTextItem *> *cluster) { return [FYContentRouter looksLikeSpeakerLabelCluster:cluster]; }
+static BOOL __attribute__((unused)) IsSpeakerLabelItem(OCRTextItem *item, NSArray<OCRTextItem *> *pool) { return [FYContentRouter isSpeakerLabelItem:item inPool:pool]; }
+static BOOL __attribute__((unused)) DialogueFrameIsSpeakerLabelOnly(NSArray<NSString *> *lines) { return [FYContentRouter dialogueFrameIsSpeakerLabelOnly:lines]; }
 void SplitDialogueAndOptionsFromItems(NSArray<OCRTextItem *> *band,
                                      NSArray<OCRTextItem *> *allBlocks,
                                      NSMutableArray<OCRTextItem *> *outDialogue,
                                      NSMutableArray<OCRTextItem *> *outOptions) {
-    [FYOCRManager splitDialogueAndOptions:band allBlocks:allBlocks dialogue:outDialogue options:outOptions];
+    [FYContentRouter splitDialogueAndOptions:band allBlocks:allBlocks dialogue:outDialogue options:outOptions];
 }
 
 typedef FYOCRPixelBuffer GrayBuffer;
@@ -411,7 +385,7 @@ BOOL BlockSitsOnBrightBackdrop(OCRTextItem *block, const unsigned char *pixels,
 }
 
 NSInteger DetectContentModeForBlocks(NSArray<OCRTextItem *> *blocks, NSInteger fallbackSegment) {
-    return [FYOCRManager contentModeForItems:blocks fallback:fallbackSegment];
+    return [FYContentRouter contentModeForItems:blocks fallback:fallbackSegment];
 }
 
 @interface FlippedDocumentView : NSView
@@ -682,6 +656,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, copy) NSArray<NSString *> *lastInlineRenderedTranslations;
 @property(nonatomic, copy) NSArray<OCRTextItem *> *lastInlineRenderedItems;
 @property(nonatomic, strong) FYInlineOCRFrameStabilizer *inlineFrameStabilizer;
+@property(nonatomic, strong) FYOCRRefinementStabilizer *ocrRefinementStabilizer;
+@property(nonatomic, copy) NSDictionary *ocrRefinementContext;
 // A raw OCR string can stay identical while its line boundaries change. Require
 // two matching frames before replacing the currently rendered grouping.
 @property(nonatomic, copy) NSArray<NSString *> *inlinePendingGroupedTexts;
@@ -763,7 +739,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic) BOOL captureDeviceListLoaded;
 @property(nonatomic) uint64_t lastOCRedCaptureFrameIndex;
 @property(nonatomic, strong) NSSegmentedControl *languageControl;
-@property(nonatomic, strong) FYContentModeStability *contentModeStability;
+@property(nonatomic, strong) FYContentRouter *contentRouter;
 @property(nonatomic) NSInteger detectedModeSegment;
 @property(nonatomic) NSInteger candidateModeSegment;
 @property(nonatomic) NSInteger candidateModeHits;
@@ -801,10 +777,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 @property(nonatomic, strong) NSTimer *batchAppearanceTimer;
 @property(nonatomic, strong) NSSegmentedControl *captionThemeControl;
 #ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
-// Replay may bypass only the stability gate to isolate downstream boundaries.
+// Tests may bypass stability/refinement to isolate downstream boundaries.
 @property(nonatomic, strong) NSButton *stableTextCheckbox;
-#endif
 @property(nonatomic, strong) NSButton *autoFitRegionCheckbox;
+#endif
 @property(nonatomic, strong) NSButton *manualOCRScopeCheckbox;
 @property(nonatomic, strong) NSTextField *baseURLField;
 @property(nonatomic, strong) NSTextField *modelField;
@@ -2860,8 +2836,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     [stack addArrangedSubview:[self label:@"识别方式" font:FYUIFont(15, NSFontWeightBold) color:[NSColor labelColor]]];
 
     self.languageControl = [self segmentedWithLabels:@[@"日语", @"英语"] action:@selector(controlValueChanged:)];
-    self.autoFitRegionCheckbox = [NSButton checkboxWithTitle:@"自动贴合文字识别（不依赖固定区域，小字更准）" target:self action:@selector(controlValueChanged:)];
-    self.autoFitRegionCheckbox.state = NSControlStateValueOn;
 
     [stack addArrangedSubview:[self settingsRowWithLabel:@"原文语言" view:self.languageControl]];
     return stack;
@@ -3914,6 +3888,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
             }
             NSDictionary *trace = captureTrace;
             if (!fullImage) {
+                self.ocrRefinementStabilizer=nil;
+                self.ocrRefinementContext=nil;
                 FYTrace(trace, @"capture", @{@"success": @NO, @"reason": captureCard ? @"capture_card_no_frame" : @"capture_unavailable"});
                 FYTrace(trace, @"skip", @{@"reason": captureCard ? @"capture_card_no_frame" : @"capture_unavailable", @"input_epoch": @(inputEpoch)});
                 self.inFlight = NO;
@@ -3937,7 +3913,10 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
             [self setStatus:@"正在 OCR"];
             [self updatePreviewFromImage:fullImage generation:cycleGeneration];
             BOOL fastOCR = NO;
-            BOOL autoFit = self.autoFitRegionCheckbox == nil || self.autoFitRegionCheckbox.state == NSControlStateValueOn;
+            BOOL autoFit = YES;
+#ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
+            if (self.autoFitRegionCheckbox) { autoFit = self.autoFitRegionCheckbox.state == NSControlStateValueOn; }
+#endif
             NSInteger languageSegment = self.languageControl.selectedSegment;
             self.learningCoordinator.japaneseMode = (languageSegment == 0);
 
@@ -3946,6 +3925,16 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
             NSArray<NSValue *> *exclusionSnapshot = @[];
 
             CGRect ocrScope=[self selectedOCRScope];
+            NSDictionary *refinementContext=@{@"generation":@(cycleGeneration), @"window":@(windowID),
+                @"source":@(captureCard), @"epoch":@(inputEpoch), @"language":@(languageSegment),
+                @"scope":NSStringFromRect(ocrScope), @"width":@(CGImageGetWidth(fullImage)), @"height":@(CGImageGetHeight(fullImage))};
+            if (![self.ocrRefinementContext isEqual:refinementContext]) {
+                self.ocrRefinementContext=refinementContext;
+                self.ocrRefinementStabilizer=[FYOCRRefinementStabilizer new];
+            }
+            // Each context owns its worker state. A late pre-restart OCR cannot
+            // mutate the new context's consecutive-frame evidence.
+            FYOCRRefinementStabilizer *refinementStabilizer=self.ocrRefinementStabilizer;
             NSDictionary *layoutDebug=[[FYInlineLayoutDebug shared] beginFrameWithImage:fullImage metadata:@{
                 @"window_id":@(windowID), @"generation":@(cycleGeneration), @"geometry_generation":@(self.geometryGeneration),
                 @"input_source":@(captureCard), @"input_epoch":@(inputEpoch), @"frame_index":@(actualCaptureFrameIndex), @"scope":FYLayoutDebugRect(ocrScope)}];
@@ -3992,7 +3981,7 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                 __block NSTimeInterval pass2Duration = 0;
                 // 第二遍 OCR 会让每轮耗时翻倍。只在“文字区域本身不大”时才值得放大识别：
                 // 区域已经很大时，放大既没有精度收益，又白白多花一整个 OCR 周期。
-                FYApplyOCRRefinement(ocrBlocks, autoFit,
+                FYApplyOCRRefinementWithStabilizer(ocrBlocks, autoFit,
                     ^NSString *(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error) {
                         CGRect visionScope=CGRectMake(ocrScope.origin.x,1-CGRectGetMaxY(ocrScope),ocrScope.size.width,ocrScope.size.height);
                         region=CGRectIntersection(region,visionScope);
@@ -4002,10 +3991,18 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                             regionWidth:region.size.width regionHeight:region.size.height
                             fastOCR:fastOCR languageSegment:languageSegment blocks:blocks error:error];
                     }, ^{ pass2Duration = [[NSDate date] timeIntervalSinceDate:ocrStart] - pass1Duration; },
-                    &ocrText, &ocrBlocks);
+                    refinementStabilizer, &ocrText, &ocrBlocks);
+                if (refinementStabilizer.fallbackCount) {
+                    FYTrace(trace, @"ocr", @{@"stage":@"refinement_selection", @"reason":@"stable_pass1",
+                        @"blocks":@(refinementStabilizer.fallbackCount)});
+                }
                 FuyiDiagLog(@"  OCR pass1=%.2fs pass2=%.2fs total=%.2fs blocks=%lu",
                             pass1Duration, pass2Duration,
                             [[NSDate date] timeIntervalSinceDate:ocrStart], (unsigned long)ocrBlocks.count);
+
+                if (languageSegment == 0) {
+                    ocrBlocks = [FYOCRManager itemsByMarkingSpeakerLabels:ocrBlocks inImage:fullImage];
+                }
 
                 // 必须在 CGImageRelease 之前、同一个线程上做完像素分析：
                 // 主队列回调里 fullImage 已经被释放，之前把这段放在回调里是一个 use-after-free。
@@ -4042,7 +4039,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         FYTrace(trace, @"skip", @{@"reason": @"ocr_error", @"error_code": @(error.code)});
                         [self showError:error.localizedDescription];
                         [self setStatus:@"OCR 出错"];
-                        self.inFlight = NO;
                         return;
                     }
 
@@ -4052,7 +4048,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         [[self stabilityOwner] reset];
                         FYTrace(trace, @"skip", @{@"reason": @"ocr_empty"});
                         [self setStatus:[NSString stringWithFormat:@"等待识别字幕 · OCR %.1fs", ocrDuration]];
-                        self.inFlight = NO;
                         return;
                     }
 
@@ -4091,6 +4086,15 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                              @"mode": @([self effectiveModeSegment]), @"candidate_mode": @(self.candidateModeSegment),
                                              @"candidate_hits": @(self.candidateModeHits)});
                     NSInteger currentFrameMode = [self effectiveModeSegment];
+                    if (currentFrameMode == ContentModeDialogue) {
+                        NSMutableArray<NSString *> *comparisonLines = [NSMutableArray array];
+                        for (OCRTextItem *item in ocrBlocks) {
+                            if (![FYContentRouter isUncertainSpeakerLabelItem:item]) { [comparisonLines addObject:item.text]; }
+                        }
+                        // Use the same plate/body distinction before stability,
+                        // pending-request matching and rendered-frame dedup.
+                        normalized = NormalizeForComparison([comparisonLines componentsJoinedByString:@"\n"]);
+                    }
                     NSArray<OCRTextItem *> *observedUIItems = currentFrameMode == ContentModeUI
                         ? [self filteredInlineTextItems:[self mergedInlineTextItemsFromItems:modalScopedBlocks] strict:NO]
                         : nil;
@@ -4104,7 +4108,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         if (!self.inlineFrameStabilizer.ready) {
                             FYTrace(trace, @"stable", @{@"reason": @"inline_frame_confirming", @"stable_count": @1});
                             [self setStatus:@"正在确认界面文字"];
-                            self.inFlight = NO;
                             return;
                         }
                         FYTrace(trace, @"ocr", @{@"stage": @"inline_stable", @"ocr_lines": FYTraceOCRLines(currentUIItems),
@@ -4151,9 +4154,8 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     if (sameTextAsRendered && self.contentTranslationOperations &&
                         (![self pendingContentMatchesText:normalized mode:currentFrameMode] ||
                          (currentFrameMode == ContentModeUI && ![self pendingInlineMatchesItems:currentUIItems]))) {
-                        // A -> pending B -> A is a new occurrence. Let the existing
-                        // stability/identity rules confirm it instead of skipping A.
-                        [self invalidateContentTranslation];
+                        // A -> pending B -> A may be a new occurrence. Confirm it
+                        // first; beginContentTranslation cancels B after stability.
                         sameTextAsRendered = NO;
                     }
                     if (sameTextAsRendered && !geometryChangedSinceRender && !groupingChangedSinceRender) {
@@ -4171,7 +4173,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     [self advanceExpandedReadingState];
                         FYTrace(trace, @"skip", @{@"reason": @"same_as_last_translated"});
                         [self setStatus:[NSString stringWithFormat:@"文本未变化 · 相似 %.0f%% · OCR %.1fs", translatedSimilarity * 100, ocrDuration]];
-                        self.inFlight = NO;
                         return;
                     }
                     if (sameTextAsRendered) {
@@ -4206,7 +4207,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     [self advanceExpandedReadingState];
                         FYTrace(trace, @"skip", @{@"reason": @"submission_throttle"});
                         [self setStatus:[NSString stringWithFormat:@"等待翻译返回 · 相似 %.0f%% · OCR %.1fs", submittedSimilarity * 100, ocrDuration]];
-                        self.inFlight = NO;
                         return;
                     }
 
@@ -4219,7 +4219,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     if (shouldWaitForStableText && ![self isStableText:normalized]) {
                         FYTrace(trace, @"stable", @{@"reason": @"waiting", @"stable_required": @YES, @"stable_count": @(self.stableCandidateCount)});
                         [self setStatus:[NSString stringWithFormat:@"等待文本稳定 · OCR %.1fs", ocrDuration]];
-                        self.inFlight = NO;
                         return;
                     }
 
@@ -4258,7 +4257,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                                 // 采集卡模式本来就没有贴译面板；字幕窗保留上一条，只更新状态。
                                 [self setCaptionPanelVisibleForUIMode:NO];
                                 [self setStatus:[NSString stringWithFormat:@"采集卡模式：界面暂无可译文字 · OCR %.1fs", ocrDuration]];
-                                self.inFlight = NO;
                                 return;
                             }
                             // 读不到文字（例如被 QuickTime 录制控件挡住）时，**保留上一帧的贴译面板**。
@@ -4266,7 +4264,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                             // 控件淡出又重新贴出来 —— 看起来就是“闪/消失”。译文并没有变，不该清掉。
                             [self setCaptionPanelVisibleForUIMode:YES];
                             [self setStatus:[NSString stringWithFormat:@"自动判别：界面（暂无可译文字） · OCR %.1fs", ocrDuration]];
-                            self.inFlight = NO;
                             return;
                         }
 
@@ -4347,23 +4344,14 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                     // translation does not make an original date/name/kanji an overlay.
                     NSArray<OCRTextItem *> *dialogueSource = ocrBlocks;
 
-                    NSArray<OCRTextItem *> *bandItems = SubtitleBandItemsFromBlocks(dialogueSource);
-                    NSMutableArray<OCRTextItem *> *dialogueItems = [NSMutableArray array];
-                    NSMutableArray<OCRTextItem *> *optionItems = [NSMutableArray array];
-                    // 对白字幕与界面贴译是两条独立路径：
-                    //   窗口截图，或采集卡已建立坐标映射 → 选项照常贴到原选项旁边；
-                    //   采集卡映射不可用 → 不做原位贴译，对白照常进字幕窗（选项不单独贴）。
+                    // Preserve the existing mapping gate and dialogue/full-frame fallback.
                     BOOL optionsCanPasteInline = ![self captureCardInputEnabled] || [self inlinePlacementRect:NULL reason:NULL];
-                    if (optionsCanPasteInline) {
-                        SplitDialogueAndOptionsFromItems(bandItems, dialogueSource, dialogueItems, optionItems);
-                        if (optionItems.count == 0) { [self clearInlineTranslationPanels]; }
-                    } else {
-                        [dialogueItems addObjectsFromArray:bandItems];
-                    }
-
-                    BOOL speakerLabelOnlyFrame = NO;
-                    NSString *dialogueText = [self dialogueTextFromItems:dialogueItems.count > 0 ? dialogueItems : dialogueSource
-                                                      speakerLabelOnly:&speakerLabelOnlyFrame];
+                    FYContentRoute *contentRoute = [FYContentRouter dialogueRouteForItems:dialogueSource
+                        optionsCanPasteInline:optionsCanPasteInline filterObserver:FYContentFilterDiagnosticObserver()];
+                    NSArray<OCRTextItem *> *optionItems = contentRoute.optionItems;
+                    if (optionsCanPasteInline && optionItems.count == 0) { [self clearInlineTranslationPanels]; }
+                    BOOL speakerLabelOnlyFrame = contentRoute.speakerLabelOnly;
+                    NSString *dialogueText = contentRoute.dialogueText;
 
                     // 选项：走贴译路线，贴在原选项文字旁边；有缓存时不会重复请求
                     if (optionItems.count > 0) {
@@ -4405,7 +4393,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
                         [self finishContentTranslation:contentRevision];
                         FYTrace(trace, @"skip", @{@"reason": @"dialogue_empty"});
                         [self setStatus:@"对白框暂无可译文字"];
-                        self.inFlight = NO;
                         return;
                     }
 
@@ -5707,7 +5694,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
         @"regionWidth": @(self.regionWidthSlider.doubleValue),
         @"regionHeight": @(self.regionHeightSlider.doubleValue),
         @"manualOCRScope": @(self.manualOCRScopeCheckbox.state == NSControlStateValueOn),
-        @"autoFitRegion": @(self.autoFitRegionCheckbox.state == NSControlStateValueOn),
         @"baseURL": self.baseURLField.stringValue ?: @"",
         @"model": self.modelField.stringValue ?: @"",
         @"learningModel": self.learningModelField.stringValue ?: @"",
@@ -5793,7 +5779,6 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
     self.regionHeightSlider.doubleValue = settings[@"regionHeight"] ? [settings[@"regionHeight"] doubleValue] : 0.42;
     [self loadSubtitleAppearanceSettings:settings];
     self.manualOCRScopeCheckbox.state=[settings[@"manualOCRScope"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff;
-    self.autoFitRegionCheckbox.state = settings[@"autoFitRegion"] ? ([settings[@"autoFitRegion"] boolValue] ? NSControlStateValueOn : NSControlStateValueOff) : NSControlStateValueOn;
     self.baseURLField.stringValue = settings[@"baseURL"] ?: @"https://api.openai.com/v1";
     self.modelField.stringValue = FYTranslationModelForSettings(settings);
     self.learningModelField.stringValue = settings[@"learningModel"] ?: @"";
@@ -5950,133 +5935,15 @@ static CGImageRef FYCopyPreviewImage(CGImageRef source) {
 }
 
 - (NSString *)dialogueTextFromItems:(NSArray<OCRTextItem *> *)items speakerLabelOnly:(BOOL *)speakerLabelOnly {
-    NSMutableArray<NSString *> *lines=[NSMutableArray array];
-    for(OCRTextItem *item in items){
-        if(IsCornerHelpButton(item) || IsFuriganaNearLargerLine(item,items)){continue;}
-        if([self shouldIgnoreInlineText:item.text normalized:NormalizeForComparison(item.text) boundingBox:item.boundingBox strict:YES]){continue;}
-        [lines addObject:item.text];
-    }
-    // A frame containing only the speaker's name must not become a sentence.
-    if(speakerLabelOnly){*speakerLabelOnly=DialogueFrameIsSpeakerLabelOnly(lines);}
-    return DialogueTextWithoutTrailingButton([lines componentsJoinedByString:@"\n"]);
+    return [FYContentRouter dialogueTextFromItems:items speakerLabelOnly:speakerLabelOnly
+                                  filterObserver:FYContentFilterDiagnosticObserver()];
 }
 
 - (BOOL)shouldIgnoreInlineText:(NSString *)text normalized:(NSString *)normalized boundingBox:(CGRect)box strict:(BOOL)strict {
-    if (normalized.length == 0) { return YES; }
-
-    // 只过滤纯省略号、纯标点/符号与空白；没有假名/汉字不等于没有文字。
-    // 英文句号与省略号不能触发整行删除。
-    // 只要含一个有效日文字符就必须保留 —— 「え……」只有一个字也必须留。
-    //
-    // 以前这里用「点号占比 ≥ 一半 + 实义部分 ≤ 3 字 + 框宽 < 0.16」判噪声，把
-    // 「あれは・・・・・・」（框宽 0.115987）整行删掉，只剩「琥一／話し合いだ。」；
-    // 「退学って……」「どれど……」也栽在同类判据上。按用户要求删掉这些
-    // 字数/框宽/点号占比条件，不再用新的宽度阈值或词语表替代。
-    {
-        NSCharacterSet *dots = [NSCharacterSet characterSetWithCharactersInString:@"・…‥.．·"];
-        BOOL hasJapanese = NO;
-        for (NSUInteger index = 0; index < text.length; index++) {
-            unichar character = [text characterAtIndex:index];
-            if ([dots characterIsMember:character]) { continue; }
-            if ((character >= 0x3040 && character <= 0x30FF) ||    // 平假名 / 片假名
-                (character >= 0x4E00 && character <= 0x9FFF) ||    // 汉字
-                (character >= 0xFF66 && character <= 0xFF9F)) {    // 半角片假名
-                hasJapanese = YES;
-                break;
-            }
-        }
-        // 纯标点/符号行（同样没有假名汉字）也没有可译内容。
-        if (!hasJapanese && text.length > 0) {
-            NSCharacterSet *punct = [NSCharacterSet punctuationCharacterSet];
-            NSCharacterSet *symbols = [NSCharacterSet symbolCharacterSet];
-            NSCharacterSet *spaces = [NSCharacterSet whitespaceAndNewlineCharacterSet];
-            BOOL onlyPunctuation = YES;
-            for (NSUInteger index = 0; index < text.length; index++) {
-                unichar character = [text characterAtIndex:index];
-                if (character == 0x3000 || [spaces characterIsMember:character] ||
-                    [punct characterIsMember:character] || [symbols characterIsMember:character]) { continue; }
-                onlyPunctuation = NO;
-                break;
-            }
-            if (onlyPunctuation) {
-                FuyiDiagLog(@"  DROP-PUNCTUATION-ONLY <%@> w=%.3f", FYDiagTextLength(text), box.size.width);
-                return YES;
-            }
-        }
-    }
-
-    NSString *lower = normalized.lowercaseString;
-    if (strict) {
-        // 对白模式：这些词基本是游戏 UI/环境噪声，不该混进字幕
-        NSArray<NSString *> *ignoreTokens = @[
-            @"today", @"web", @"back", @"戻る", @"戻", @"詳細", @"閉じる", @"ルームへ",
-            @"更新", @"news", @"no.", @"no", @"ok", @"yes", @"skip", @"auto", @"menu"
-        ];
-        // 说明：这条“界面词表”规则保持不变（它需要同时命中词表与长度/宽度条件，
-        // 不属于本轮要删除的“仅凭字数/框宽/省略号比例删除”的误删条件）。
-        for (NSString *token in ignoreTokens) {
-            if ([lower isEqualToString:token] || [lower containsString:token]) {
-                if (normalized.length <= 8 || box.size.width < 0.16 || box.size.height < 0.06) {
-                    return YES;
-                }
-            }
-        }
-
-        // 这里原本还有一条“短、窄、全平假名 = 名字框错读”的删除规则（`ことと` 之类）。
-        // 按本轮要求删除：只要含有效日文文字，就不能凭字数少、框窄删掉 —— 「え」这种
-        // 单字台词同样要保留。代价是名字框的错读可能被翻译出来；完整性优先。
-    } else {
-        // 这里原本还有一条“短且全是平假名/符号 = 噪声”的删除规则（同样会把
-        // 「え……」这类短台词在贴译路径也删掉）。本轮删除：含有效日文文字就保留。
-        // 下面只保留“完全没有假名/汉字”的纯字母碎片过滤 —— 那种行里没有可译的日文。
-
-        // 短且**完全没有日文假名/汉字**的纯字母碎片，也是 `？？？` 之类的错读
-        // （实测名字框被读成 `iee`），发去翻译只会得到编造的译文。
-        if (!strict && normalized.length <= 6) {
-            BOOL hasKanaOrKanji = NO;
-            for (NSUInteger index = 0; index < normalized.length; index++) {
-                unichar character = [normalized characterAtIndex:index];
-                if ((character >= 0x3040 && character <= 0x30FF) ||   // 平假名 / 片假名
-                    (character >= 0x4E00 && character <= 0x9FFF)) {   // 汉字
-                    hasKanaOrKanji = YES;
-                    break;
-                }
-            }
-            if (!hasKanaOrKanji) { return YES; }
-        }
-
-        // 界面模式：按钮、日期、条目编号都是用户要看的文字，不能当成噪声丢掉。
-        // 之前和上面共用同一张表，导致「No. 48 5/1更新」被 “更新” 命中而整条不翻，
-        // 「詳細」「戻る」这类按钮也永远不会被翻译。
-        // 这里只丢真正的装饰：版本号样式的一小串字符。
-        NSArray<NSString *> *decorativeTokens = @[@"no.", @"no"];
-        for (NSString *token in decorativeTokens) {
-            if (([lower isEqualToString:token]) && normalized.length <= 3) { return YES; }
-        }
-    }
-
-    NSCharacterSet *digitsAndMarks = [NSCharacterSet characterSetWithCharactersInString:@"0123456789/.-〜~年月日(月)(火)(水)(木)(金)(土)(日) "];
-    BOOL onlyDigitsAndMarks = normalized.length > 0;
-    for (NSUInteger index = 0; index < normalized.length; index++) {
-        if (![digitsAndMarks characterIsMember:[normalized characterAtIndex:index]]) {
-            onlyDigitsAndMarks = NO;
-            break;
-        }
-    }
-    if (onlyDigitsAndMarks) { return YES; }
-
-    // 贴边且短：多半是画面边缘的按钮。
-    // 但**必须同时够窄**才算按钮 —— 对白框本身就贴在画面下方，
-    // 实测把它整句丢掉（`送ってく。` 宽 0.11、y=0.052）会让最后一行对白消失。
-    BOOL nearBottomOrTop = box.origin.y < 0.08 || CGRectGetMaxY(box) > 0.94;
-    // 必须**横向也贴边**才算角落按钮。对白框本身就贴在画面下方（实测「行くぞ。」y=0.053），
-    // 只按纵向+窄度判定会把台词整句丢掉 —— 现在字幕为空就是这么来的。
-    BOOL nearLeftOrRight = box.origin.x < 0.12 || CGRectGetMaxX(box) > 0.88;
-    if (nearBottomOrTop && nearLeftOrRight && normalized.length <= 8 && box.size.width < 0.10) {
-        return YES;
-    }
-
-    return NO;
+    FYContentTextFilterReason reason = [FYContentRouter filterReasonForText:text normalized:normalized
+                                                             boundingBox:box strict:strict];
+    if (reason != FYContentTextKeep) { FYContentFilterDiagnosticObserver()(text, box, reason); }
+    return reason != FYContentTextKeep;
 }
 
 // 按钮/导航类小标签（詳細・戻る・閉じる…）。
@@ -9080,7 +8947,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 // 同一句文本重复出现时，隔多久才允许再请求一次翻译。
 // 界面模式要短：界面是用户在动，等久了会明显觉得“卡住不动”。
 - (NSTimeInterval)translationAttemptThrottleForMode:(NSInteger)modeSegment {
-    return modeSegment == ContentModeUI ? 1.2 : 4.0;
+    return [FYContentRouter translationAttemptThrottleForMode:modeSegment];
 }
 
 // 保留对普通亮色页面的保护：仅在同时识别到面板、暗背景和底部关闭按钮时隐藏背景。
@@ -9096,9 +8963,8 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 
 // 同样的判别结果连续出现两次才切换，避免单帧抖动导致模式来回跳
 - (NSInteger)stableContentModeForBlocks:(NSArray<OCRTextItem *> *)blocks {
-    NSInteger detected = DetectContentModeForBlocks(blocks, self.detectedModeSegment);
-
-    return [[self modeStability] observeMode:detected];
+    return [self.contentRouter observeModeForItems:blocks
+        locked:(self.inlineOverflowChoicePanel != nil || self.inlineExpandedReadingPanel != nil)];
 }
 
 - (NSString *)systemPromptForMode:(NSInteger)modeSegment {
@@ -9117,10 +8983,11 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 }
 - (NSMutableDictionary *)inlineTranslationCache { return [self inlineCache].entries; }
 - (void)setInlineTranslationCache:(NSMutableDictionary *)value { [self inlineCache].entries=value; }
-- (FYContentModeStability *)modeStability {
-    if (!_contentModeStability) _contentModeStability=[FYContentModeStability new];
-    return _contentModeStability;
+- (FYContentRouter *)contentRouter {
+    if (!_contentRouter) { _contentRouter = [FYContentRouter new]; }
+    return _contentRouter;
 }
+- (FYContentModeStability *)modeStability { return self.contentRouter.modeStability; }
 - (NSInteger)detectedModeSegment { return [self modeStability].detectedMode; }
 - (void)setDetectedModeSegment:(NSInteger)value { [self modeStability].detectedMode=value; }
 - (NSInteger)candidateModeSegment { return [self modeStability].candidateMode; }
@@ -9161,7 +9028,7 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 
 - (NSTimeInterval)recognitionPollingInterval {
     // Legacy hidden settings do not affect players' capture/OCR policy.
-    return [self effectiveModeSegment] == ContentModeDialogue ? 0.5 : 1.2;
+    return [FYContentRouter recognitionPollingIntervalForMode:[self effectiveModeSegment]];
 }
 
 - (void)restartTimerIfRunning {
@@ -9184,18 +9051,11 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 - (NSInteger)stableCandidateCount { return [self stabilityOwner].count; }
 - (void)setStableCandidateCount:(NSInteger)value { [self stabilityOwner].count=value; }
 - (BOOL)isStableText:(NSString *)normalized {
-    BOOL stable = [[self stabilityOwner] observe:normalized equivalent:^BOOL(NSString *current, NSString *previous) {
-        return [self isSameSubtitleText:current comparedTo:previous];
-    }];
-    // Small real corrections must eventually translate, while one/two-frame
-    // substitutions caused by compression need not replace a complete caption.
-    if (stable && [self effectiveModeSegment] == ContentModeDialogue && self.languageControl.selectedSegment == 0 &&
-        self.lastTranslatedNormalizedText.length &&
-        SimilarityRatio(normalized, self.lastTranslatedNormalizedText) >= 0.85 &&
-        ![self isSameSubtitleText:normalized comparedTo:self.lastTranslatedNormalizedText]) {
-        return self.stableCandidateCount >= 3;
-    }
-    return stable;
+    return [FYContentRouter isStableText:normalized owner:[self stabilityOwner]
+        mode:[self effectiveModeSegment] japanese:(self.languageControl.selectedSegment == 0)
+        renderedText:self.lastTranslatedNormalizedText comparisonKey:^NSString *(NSString *text) {
+            return FYDialogueComparisonKey(text);
+        }];
 }
 
 - (BOOL)shouldAcceptInlineOCRCorrection:(NSString *)text comparedTo:(NSString *)rendered {
@@ -9219,25 +9079,10 @@ static double FYMappingScoreInGrids(NSDictionary *entry, const double *scene, si
 }
 
 - (BOOL)isSameSubtitleText:(NSString *)text comparedTo:(NSString *)previous {
-    NSString *left = text ?: @"";
-    NSString *right = previous ?: @"";
-    if (left.length < 2 || right.length < 2) { return NO; }
-    if ([left isEqualToString:right]) { return YES; }
-    if ([self effectiveModeSegment] == ContentModeDialogue && self.languageControl.selectedSegment == 0) {
-        // A long sentence with one changed negation/number can still be >90%
-        // similar. Only harmless OCR punctuation shares the frame identity;
-        // clipped frames are checked directionally against the complete source
-        // by the learning coordinator, after consecutive-frame confirmation.
-        return [FYDialogueComparisonKey(left) isEqualToString:FYDialogueComparisonKey(right)];
-    }
-
-    NSUInteger maxLength = MAX(left.length, right.length);
-    NSUInteger lengthDelta = left.length > right.length ? left.length - right.length : right.length - left.length;
-    if (maxLength <= 6) {
-        return lengthDelta == 0 && SimilarityRatio(left, right) >= 0.84;
-    }
-
-    return SimilarityRatio(left, right) >= 0.90;
+    return [FYContentRouter isSameSubtitleText:text comparedTo:previous mode:[self effectiveModeSegment]
+        japanese:(self.languageControl.selectedSegment == 0) comparisonKey:^NSString *(NSString *value) {
+            return FYDialogueComparisonKey(value);
+        }];
 }
 
 - (NSString *)displayableTranslation:(NSString *)translated sourceText:(NSString *)sourceText {

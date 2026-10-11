@@ -27,6 +27,7 @@ flowchart LR
 | AppDelegate | `objc/LiveCaptionTranslator.m` 的 `start` / `stop` / `timerFired:` 及翻译、显示编排；不是独立管线框架 |
 | 输入 | 窗口 `CGWindowListCreateImage(IncludingWindow)`；`FYCaptureCardInput` 的 AVFoundation 会话、单帧槽与 epoch；QuickTime / OBS 作为显示窗口 |
 | OCR | `FYOCRManager` 的 Vision、区域回映、精读与合并、模态过滤、对白与字段稳定 |
+| 内容路由 | `FYContentRouter` 的整帧判定、模式确认、对白与选项分流、正文过滤、同句及对白稳定策略；主控制器保留请求、缓存与显示编排，详见 [模块边界](docs/content-router-module.md) |
 | 翻译 | `FYTranslationManager` 的请求构造、对白及短文本批次 15 秒 / 显式长正文批次 60–90 秒的数据等待超时、HTTP / JSON 解码、缓存与主线程交付策略；没有独立自动重试队列 |
 | 学习状态 | `FYLearningCoordinator` 的句子身份、版本、不完整帧复用及固定阅读；`FYLearningStore` 的 SQLite 持久化 |
 | 显示 | `FYWindowManager` / `FYGeometryManager` 的目标与映射；`FYInlineLayout` 的贴译排版；AppDelegate 的字幕、面板、折叠与入口 |
@@ -148,7 +149,7 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 }
 ```
 
-顶层 `stable` 默认 true，`auto_fit` / `auto_mode` 默认 false；默认固定路线以单独测试对白 / 界面，`auto_mode:true` 才走生产自动模式判定。`language` 为 `ja` / `en`，`scope` 为左上原点的归一化区域。帧 `blocks` 使用 `text` 与 `[x,y,w,h]`，原点左下；只有 `text` 时使用字幕位置合成框。所有夹具必须有明确产品断言，草稿不能执行为通过。
+顶层 `stable` 默认 true，`auto_fit` / `auto_mode` 默认 false；默认固定路线以单独测试对白 / 界面，`auto_mode:true` 才走生产自动模式判定。生产固定开启自动贴合精读，不创建旧复选框，也不读取或保存 `autoFitRegion`；`auto_fit` 仅在隔离测试构建中控制精读，以便单独验证下游边界。`language` 为 `ja` / `en`，`scope` 为左上原点的归一化区域。帧 `blocks` 使用 `text` 与 `[x,y,w,h]`，原点左下；只有 `text` 时使用字幕位置合成框。`auto_fit:true` 可额外提供 `refined_blocks`，注入第二遍识别回映后的全图坐标；生产精读区域门、合并、结果选择、稳定与交付仍实际执行。所有夹具必须有明确产品断言，草稿不能执行为通过。
 
 帧也可用 `image:"assets/frame.png"`，或 `video:"assets/input.mp4", video_ms:500`。路径相对夹具；不同时提供文字 / blocks 时调用真实 Vision、区域及模态处理。合成 PNG / MP4 已附带，用 `vision-image.json` / `vision-video.json` 验证。媒体哈希写入报告；跨 macOS / Vision 版本不承诺逐字与坐标完全相同，需复核预期，不能据此放宽真实产品要求。`tests/GenerateReplayMedia.m` 可重建这些合成资源，无网络、无截图、无设备。
 
@@ -171,6 +172,14 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 
 ## 当前覆盖与产品缺口
 
+2026-10-11 短对白被误判为贴译追加修复：精读把省略号识别为多个中点时，窄句可达到 10 字的强锚点门，却不满足后续实质行至少 0.15 宽的门，字幕带因此被整体否决，原短句兜底没有执行。强锚点与已有实质行宽度保持一致，窄句继续走原有标点 / 堆叠兜底；不改 OCR 原文、菜单优先规则或两帧模式确认。`short-dialogue-ellipsis-auto-mode.json` 修复前第二帧误切界面且无字幕，修复后覆盖窄句、省略号、多帧去重、真正下半屏选择菜单及从菜单返回对白。现场文字只放私有目录；历史模式回放不代表实际浮窗已验收。
+
+2026-10-11 同位置重行追加修复：双遍 OCR 读到相同单行，但精读框高不足首遍的 60% 时，原替换门及 85% 外框覆盖去重均可能保留两份。`mergeCoarseItems:refinedItems:` 增加跨遍同文单行判定：文字仅去空白后完全相同、水平重叠至少为较宽框的 85%、交集覆盖较小框至少 85%、垂直中心偏差不超过较高框的 25%，保留当前精读观察及元数据。不放宽不同文字、多行或原始观察的通用去重。`refinement-overlapping-same-line.json` 修复前第二帧尚无字幕，修复后覆盖框高交替、完整请求原文、静止去重和不同位置真实重复行；该合成场景证明重行可阻断稳定门，不推断现场首次长延迟的全部原因。
+
+2026-10-11 精读抖动修复：`FYOCRRefinementStabilizer` 在实时双遍 OCR 合并时逐块比较连续帧。同一位置的首遍文字连续两帧一致、精读文字发生变化时，暂用当前帧首遍观察；精读需连续三帧一致才能恢复替换。不改变下游对白/界面稳定门，不累积间断命中；持续正确的精读、精读新增行及拆分/合并多行保持既有合并策略。采集代次、窗口、输入类型/epoch、语言、范围或图像尺寸变化会更换独立状态，旧 OCR 不能污染新上下文。`refinement-dialogue-oscillation.json` 覆盖持续交替、静止去重、切窗与重启；`refinement-correction-and-missing-line.json` 验证稳定精读仍修正首遍错字并补回漏行。详见 [精读结果选择与验证](docs/ocr-refinement-stability.md)。真实诊断文字只保留在本机私有目录，公开夹具全部为合成对白。
+
+2026-10-11 姓名栏错读污染正文及重复历史：已授权的文字采样显示同一正文前的姓名栏在不同错读间变化，生产链路会将完整串送入翻译和学习身份。新增 `speaker-plate-ocr-noise.json`，修复前第二帧提交源文多出合成姓名栏错字，断言失败（`.build/debug/20261011T050725Z-03edc5/`）。修复在完整输入图中确认独立填色姓名栏，复制观察并标记角色；未知姓名栏只在对白正文和对白比较中排除，明确姓名仍参与身份。单纯短句、假名、英文或重复字符不构成排除条件。专项 Replay 覆盖未知姓名栏变化时只请求一次、学习原文不受污染、不同明确人物同文仍分开；`SpeakerPlateTests` 验证原观察不可变、普通底色与无界色块不误删、姓名栏下的短句保留。真实证据留在私有目录，合成图片无真实画面；历史学习记录不自动删除或改写。完整检查、本机安装和用户实际验收分别记录在 [模块记录](docs/content-router-module.md)。
+
 2026-10-10 审查修复：短批超时按显式批次类别设置，不随按钮数量放宽；服务测试使用独立任务 owner 和代次，运行/切窗/切源不再取消测试，服务配置改变或重复测试仍取消旧测试。主窗口隐藏、最小化、位于其它 Space 或完全遮挡时暂停独立预览；重新可见时恢复。采集卡转换在可见预览时为 30 Hz，隐藏或仅 OCR 时为 10 Hz；取帧同时原子取得帧号。旧识别间隔/快速 OCR/等待稳定/预设已从生产 UI、设置读写和运行策略删除，固定对白 0.5 秒、界面 1.2 秒、准确 OCR，保留原稳定流程。测试可显式绕过稳定门以隔离下游边界，生产构建没有该注入开关。完整审查与验证见 [本轮报告](docs/review-dev0.2.1-261009.md)。
 
 2026-10-09 预览卡顿修复：画面预览使用独立的 Common Modes timer（窗口截图 100 ms，采集卡约 33.3 ms） 和串行后台取帧 / 缩放队列，不再等待 OCR 或 HTTP 完成；采集卡预览与 OCR 分开记录帧序号。最多一个预览任务在途，不因暂停 / 重启清除尚未结束的任务槽；代次、窗口、输入源、会话 epoch 与请求序号变化后拒绝旧画面。`TranslationTracePipelineTests` 挂起生产 HTTP 入口的 mock 回复，验证两种输入仍显示连续新帧、没有额外 OCR / 请求，并检查积压限制和迟到画面丢弃。旧 OCR 预览入口在独立 timer 活跃时不覆盖画面。此修复只解耦预览；下方 `latest-frame-while-busy` 的 OCR / 旧字幕缺口仍保留，不能把预览通过当作该缺口修复。详见 [预览卡顿说明](docs/live-preview-stall.md)。
@@ -192,6 +201,8 @@ AppKit 终点替换成参数记录器，因此 Replay 验证字幕 / 面板接�
 2026-10-10 追加修复：`inFlight` 只由实时采集/OCR 占有，识别完成即释放；网络使用独立内容 revision 与操作计数。确认新对白/页面时取消旧批次，传输、字幕与排队中的面板交付均检查内容 revision。相同在途文字不重复请求；保持对白两帧确认、恢复原文打断候选及界面修正三帧规则。界面仅位置变化时复用请求，回包使用最新已确认字段坐标，缓存键序列变化时重新提交。服务测试仍独立。显式“翻译当前界面”的快照操作保持原单次忙碌合同，会作废之前的实时网络结果。
 
 原 `known-gaps/latest-frame-while-busy.json` 已升级为普通回归 `latest-frame-while-translating.json`；保留“C 已确认后不得交付 A”的目标，并加强 OCR 连续、相同帧长期去重、取消及迟到错误检查。另有采集卡版本、带稳定门的 `fast-switch-busy.json`、`inline-page-while-translating.json` 与 `cancelled-dialogue-recurrence.json`。后者验证 A→在途 B→A 建立新身份，再次出现 B 不受已取消请求的 4 秒节流影响，迟到 B 不覆盖字幕。只证明这些合成生产链路场景通过，不证明所有真实游戏场景均已验收。原两个已登记缺口均转为普通回归，历史失败证据保留；这不等于所有设备与产品场景完成验收。
+
+2026-10-10 Nit 追加核实：A 已显示、B 在途时，单帧回读 A 原先在稳定门之前取消 B。`pending-dialogue-single-frame-recurrence.json` 修复前第 4 步取消次数预期 0、实际 1；移除该分支的提前作废后，由 `beginContentTranslation` 在 A 稳定确认后取消 B。新增回归开启生产稳定门，检查单帧 A 保留 B、回到 B 复用请求并打断候选、连续两帧 A 建立新身份，以及再次出现 B 不受取消尝试的节流影响、迟到 B 不覆盖字幕。原 `cancelled-dialogue-recurrence.json` 继续覆盖隔离测试绕过稳定门的身份边界。OCR 主回调统一释放后的重复 `inFlight = NO` 已删除，保留采集、过期 OCR 与手动识别路径的必要释放。
 
 此前已知缺口 `known-gaps/inline-long-batch-unrelated-change.json`：长正文批次在途时，独立时钟块的分钟变化经连续三帧确认，整页请求匹配失败，旧长批次被取消并重发；第 4 步仍断言不应取消（预期 0、实际 1）。2026-10-11 本轮重新执行原失败夹具，仍在同一检查点失败（`.build/debug/20261011T051317Z-700345`），确认取消发生在整页内容作废边界。
 

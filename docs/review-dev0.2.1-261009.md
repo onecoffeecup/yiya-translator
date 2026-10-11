@@ -111,6 +111,38 @@
 
 远端 CI 在提交后单列核对，并在交付中提供结果链接。本次没有安装、重启应用、调用真实服务或运行真实游戏/UI/设备。最短后续验收：用本次构建选英文，对含句号或省略号的完整对白核对译文；同时确认纯省略号不产生翻译请求、日文 `え……` 不漏句，再检查界面含句号文字的贴译。现场验收与自动回归分别记录。
 
+## 2026-10-10：N1–N4 Nit 复核
+
+2026-10-11 后续补充：另一处字幕停滞由首遍稳定、二次精读交替识别引起，发生在请求前，需独立于 N1 修复。已补逐块结果选择、精读稳定恢复与上下文隔离，35 帧历史双遍观察回放两遍通过；完整核心检查本轮退出 0（普通 Replay 66 passed、N2 2 known_gap_reproduced），双架构构建通过，未安装/发布。该新结果不改写下文上一轮的失败记录，详情见 [精读结果选择与验证](ocr-refinement-stability.md)。
+
+本次范围为 Mac 的请求取消时机、隐藏精读设置及重复忙碌赋值。工作区中同时有其它外观、几何和 OCR 基准修改，全部保留；最终验证使用固定提交 `21de5646252fc6189ce6546660f68ae1b40ca1fd` 加本次五个文件的补丁，位于 `.build/nit-review-scoped-pwuju7yq/`。没有把整个工作区标为已验证。精确补丁和散列见该目录的 `nit.patch`、`nit-snapshot.json`、`verification.json`；末次核对确认本次代码和测试适配仍在工作区，额外并行修改未覆盖它们。
+
+- **N1 属实，已局部修正。** A 已显示、B 在途，单帧再次读到 A 时，原 `timerFired:` 的已显示文本分支在稳定门之前调用 `invalidateContentTranslation`。新增 [pending-dialogue-single-frame-recurrence.json](../tests/fixtures/replay/pending-dialogue-single-frame-recurrence.json) 修复前第 4 步取消次数预期 0、实际 1（`.build/debug/20261010T145906Z-8823ed`）。修复仅将 `sameTextAsRendered` 置为 NO，经过原稳定门后由 `beginContentTranslation` 取消 B。新用例开启稳定门，检查单帧 A 保留 B、恢复 B 复用请求并打断候选、连续两帧 A 确认新身份、随后 B 不受已取消尝试的节流影响，以及迟到 B 不覆盖字幕。新用例与原 `cancelled-dialogue-recurrence` 均两遍通过；原用例继续覆盖关闭稳定门的隔离边界。
+- **N2 当时没有直接覆盖，该轮补了已知失败。** 既有界面用例覆盖整页切换、长短批次乱序及几何复用，没有覆盖未变长正文旁的小块变化。原 `known-gaps/inline-long-batch-unrelated-change.json` 保持长正文 HTTP 在途，只改变独立时钟块；前两帧没有取消，第三帧确认后长批次被取消并重发，请求总数由 2 增至 4。第 4 步仍要求取消次数 0，实际 1，修复前报告 `.build/debug/20261010T145934Z-fb44fe`，该轮末次 Replay 两遍均为 `known_gap_reproduced`。当时未改调度，不能把该轮失败写成修复通过。2026-10-11 后续已局部修正并转为 [普通回归](../tests/fixtures/replay/inline-long-batch-unrelated-change.json)，见下方追加记录；历史失败证据保留。
+- **N3 已固定开启。** 删除 `recognitionCard` 对旧复选框的创建、`saveSettings:` 的 `autoFitRegion` 写入和 `loadSettings` 的读取。生产 `autoFit = YES`，保留原精读面积判断。旧控制属性与读取只在 `FY_TEST_ISOLATED_CREDENTIAL_STORE` 内供测试隔离下游边界；目标跟随测试自行创建合成开关。正式二进制核对未包含旧属性名、偏好键和控件标题。
+- **N4 已删除 9 处重复赋值。** 仅清理实时 OCR 主回调统一释放之后的 `self.inFlight = NO`。采集失败、同代次过期 OCR 和手动识别的必要释放保留；相关迟到 OCR/重启所有权回归通过。
+
+以下命令在固定提交补丁快照执行：
+
+| 实际命令 | 本次结果 |
+| --- | --- |
+| `python3 scripts/debug.py check --replay-only --timeout 300` | 退出 0，64 passed / 2 known_gap_reproduced，`source_unchanged=true`；仅 Replay 基线通过。报告 `.build/nit-review-scoped-pwuju7yq/.build/debug/20261010T151903Z-0527d1/summary.json`。包括新/旧 N1、界面及采集卡在途、真实合成图片/视频 Vision 场景各两遍。 |
+| `bash scripts/run-module-tests.sh` | 退出 0；几何、OCR 后处理/配置、字段稳定、字体、翻译与任务取消模块通过。 |
+| `bash scripts/run-translation-trace-tests.sh` | 退出 0；生产翻译链路、四种迟到 OCR 重启组合、在途界面几何复用、独立预览和凭据排除通过。 |
+| `python3 scripts/layout-debug.py check` | 退出 0，132,686 断言通过；`.build/nit-review-scoped-pwuju7yq/.build/layout-debug/run-ddd86b07/summary.json`。 |
+| `ARCHS='arm64 x86_64' bash scripts/build-app.sh` | 退出 0，二进制与 dSYM UUID 一致：arm64 `D51A49DD-83B9-31A7-AE12-ADCD651E289E`，x86_64 `1D401062-086C-3476-9705-5683D1F85D2A`。 |
+| `FY_TEST_COMPILE_ONLY=1 bash scripts/run-learning-app-tests.sh DisplayTargetFollowTests` | 退出 0，`COMPILED_ONLY`，不算 UI 执行通过。 |
+| `python3 scripts/debug.py check` | **未通过**；固定快照的离线检查并行用例超过默认 180 秒，报告 `20261010T150558Z-ac30cf`。 |
+| `python3 scripts/debug.py check --timeout 300` | **未通过**；离线检查的并行子命令仍在内部 120 秒期限超时，报告 `20261010T150946Z-7e53d4`。 |
+| `FY_CAPTURE_CARD_BUNDLE_ID=com.nanami.yiya.nit-review-ocr-check python3 scripts/debug.py check --timeout 300` | **未通过**；Fast 用例的 `open -W` 报 `initial call to kevent() failed: No such process`，并行用例仍超时，报告 `20261010T151429Z-abcdd3`。所有报告在固定快照的 `.build/debug/` 下。 |
+| `git diff --check` | 工作区退出 0。 |
+
+整套核心检查失败停在 `CaptureCardOfflineTests`，不能由模块、Replay 或构建通过替代。对前一次超时的合成 OCR 进程采样，调用栈停在 Apple Vision/TextRecognition 的信号量等待，证据 `.build/nit-review-scoped-pwuju7yq/.build/offline-probe-sample.txt`；尚未证明完整根因。失败后仅终止本次遗留的合成 OCR 进程，没有关闭玩家应用或修改系统配置。
+
+另外保留两次准备失败：原工作区检查因并行源码变化中止为 `incomplete`（`.build/debug/20261010T150201Z-430c48`）；初次从活动文件复制的快照混入了未配套的界面代码，缺少 `FYAppearanceUI.inc` 及相关类型，编译/离线检查失败（`.build/nit-review-snapshot-oqqce610/.build/debug/20261010T150329Z-68c2f4`）。最终改为从固定提交逐项应用本次补丁；这些失败没有算作通过。
+
+本轮未安装、重启正式应用、推送或发布；真实 API、设备和桌面体验未执行。最短后续验收：使用本次构建，让 A 显示后保持 B 翻译在途，短暂单帧返回 A 再恢复 B，核对没有重发 B；再连续两帧返回 A，核对确认后才切换并取消旧 B。N2 仍需在有长正文和分钟变化小块的真实页面核实实际等待影响。
+
 ## 2026-10-11：N2 无关短字段变化保留在途长正文
 
 触发条件为实时界面长正文 HTTP 仍在等待，旁边独立时钟的小改动通过原三帧稳定门。重新执行原失败夹具 `python3 scripts/debug.py replay tests/fixtures/replay/known-gaps/inline-long-batch-unrelated-change.json --repeat 1 --timeout 300`，退出 1，第 4 步取消次数仍为预期 0、实际 1；报告 `.build/debug/20261011T051317Z-700345/summary.json`。根因是整页文本/逐项键序列失配后调用 `beginContentTranslation`，由 `invalidateContentTranslation` 取消所有实时任务，未区分仍未改变的长批。

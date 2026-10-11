@@ -106,6 +106,7 @@ static void MainBarrier(void) {
 
 @interface ReplayApp : AppDelegate
 @property NSArray *observations;
+@property NSArray *refinedObservations;
 @property NSMutableArray *captions, *inlineOutputs;
 @property uint32_t fixtureWindow;
 @property NSInteger fixtureMode;
@@ -133,6 +134,17 @@ static void MainBarrier(void) {
     if (self.ocrError) { if (error) *error = [NSError errorWithDomain:@"ReplayOCR" code:self.ocrError userInfo:nil]; return @[]; }
     if (self.useVision) { return [super recognizeTextItemsInImage:image fastOCR:fast languageSegment:language error:error]; }
     return self.observations;
+}
+- (NSString *)recognizeEnlargedRegionOfImage:(CGImageRef)image regionX:(double)x regionY:(double)y
+    regionWidth:(double)width regionHeight:(double)height fastOCR:(BOOL)fast
+    languageSegment:(NSInteger)language blocks:(NSArray **)blocks error:(NSError **)error {
+    // Optional second Vision boundary, already in full-frame coordinates.
+    // Production region eligibility, merge, temporal selection and delivery run normally.
+    if (!self.refinedObservations) return [super recognizeEnlargedRegionOfImage:image regionX:x regionY:y
+        regionWidth:width regionHeight:height fastOCR:fast languageSegment:language blocks:blocks error:error];
+    self.ocrCalls++;
+    if (blocks) *blocks=self.refinedObservations;
+    return [[self.refinedObservations valueForKey:@"text"] componentsJoinedByString:@"\n"];
 }
 // Terminal UI boundary: record exactly what production would hand to AppKit.
 - (void)updateCaptionWindowWithText:(NSString *)text status:(NSString *)status { [self.captions addObject:text ?: @""]; }
@@ -217,17 +229,22 @@ static NSDictionary *Snapshot(ReplayApp *app, NSString *traceDirectory) {
         ReplayTask *task=Tasks[index]; if (!task.completed) [pending addObject:@(index)]; cancelled+=task.cancelCalls;
     }
     NSMutableArray *reasons=[NSMutableArray new], *drops=[NSMutableArray new];
+    NSMutableSet *dialogueIdentities=[NSMutableSet new];
     NSMutableDictionary *counts=[NSMutableDictionary new];
     for (NSDictionary *event in ReadTrace(traceDirectory)) {
         NSString *name=event[@"event"]; counts[name]=@([counts[name] unsignedIntegerValue]+1);
         if (event[@"reason"]) [reasons addObject:event[@"reason"]];
         if ([name hasSuffix:@"_drop"]) [drops addObject:event[@"reason"] ?: @""];
+        if ([name isEqual:@"dialogue"] && [event[@"stage"] isEqual:@"identity_source"] &&
+            [event[@"sentence_id"] length]) { [dialogueIdentities addObject:event[@"sentence_id"]]; }
     }
     return @{@"requests": @(Sources.count), @"sources": Sources, @"captions": app.captions,
         @"inline": app.inlineOutputs, @"errors": @(app.errorCount), @"in_flight": @(app.inFlight),
         @"pending": pending, @"cancel_calls": @(cancelled), @"ocr_calls": @(app.ocrCalls),
         @"mode": @([app effectiveModeSegment]), @"reasons": reasons, @"drops": drops,
-        @"events": counts, @"direct_results": DirectResults};
+        @"events": counts, @"direct_results": DirectResults,
+        @"dialogue_identity_count": @(dialogueIdentities.count),
+        @"learning_source": app.learningCoordinator.currentSourceText ?: @""};
 }
 static CGImageRef FrameImage(NSDictionary *step, NSString *base) {
     if (step[@"image"]) {
@@ -252,17 +269,21 @@ static CGImageRef FrameImage(NSDictionary *step, NSString *base) {
     CGContextSetRGBFillColor(ctx,1,1,1,1); CGContextFillRect(ctx,CGRectMake(0,0,800,600));
     CGImageRef image=CGBitmapContextCreateImage(ctx); CGContextRelease(ctx); return image;
 }
-static void ApplyFrame(ReplayApp *app, NSDictionary *step, NSString *base) {
-    app.captureFailed=[step[@"capture_failed"] boolValue]; app.ocrError=[step[@"ocr_error"] integerValue];
-    app.useVision=(step[@"image"] || step[@"video"]) && !step[@"blocks"] && !step[@"text"];
+static NSArray *FrameItems(NSArray *blocks) {
     NSMutableArray *items=[NSMutableArray new];
-    NSArray *blocks=step[@"blocks"] ?: (step[@"text"] ? @[@{@"text": step[@"text"], @"box": @[@.2,@.2,@.65,@.055]}] : @[]);
     for (NSDictionary *block in blocks) {
         OCRTextItem *item=[OCRTextItem new]; item.text=block[@"text"]; item.confidence=1;
         NSArray *b=block[@"box"]; item.boundingBox=CGRectMake([b[0] doubleValue],[b[1] doubleValue],[b[2] doubleValue],[b[3] doubleValue]);
         [items addObject:item];
     }
-    app.observations=items;
+    return items;
+}
+static void ApplyFrame(ReplayApp *app, NSDictionary *step, NSString *base) {
+    app.captureFailed=[step[@"capture_failed"] boolValue]; app.ocrError=[step[@"ocr_error"] integerValue];
+    app.useVision=(step[@"image"] || step[@"video"]) && !step[@"blocks"] && !step[@"text"];
+    NSArray *blocks=step[@"blocks"] ?: (step[@"text"] ? @[@{@"text": step[@"text"], @"box": @[@.2,@.2,@.65,@.055]}] : @[]);
+    app.observations=FrameItems(blocks);
+    app.refinedObservations=step[@"refined_blocks"] ? FrameItems(step[@"refined_blocks"]) : nil;
     CGImageRef image=FrameImage(step,base);
     CheckReplay(image!=NULL,@"不能读取回放图片或指定视频帧",@YES,@NO);
     FYTestSetWindowImage(image);

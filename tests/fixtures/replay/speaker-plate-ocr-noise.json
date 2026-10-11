@@ -1,0 +1,387 @@
+{
+  "schema_version": 1,
+  "name": "speaker-plate-ocr-noise",
+  "source": "window",
+  "mode": "dialogue",
+  "auto_mode": true,
+  "stable": true,
+  "responses": [
+    {
+      "translation": "明天休息。",
+      "hold": true
+    },
+    {
+      "translation": "青木：明天休息。"
+    },
+    {
+      "translation": "田中：明天休息。"
+    }
+  ],
+  "steps": [
+    {
+      "at_ms": 0,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "ててて",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 0,
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 500,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "ててて",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "mode": 0,
+        "sources": [
+          "明日は休みです。"
+        ],
+        "captions": [],
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1000,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "ink",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "mode": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
+        "captions": [],
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 1500,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "ink",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "mode": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
+        "captions": [],
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2000,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "？？？",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "mode": 0,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
+        "captions": [],
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2500,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "ててて",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "mode": 0,
+        "sources": [
+          "明日は休みです。"
+        ],
+        "captions": [],
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
+        "pending": [
+          0
+        ],
+        "cancel_calls": 0
+      }
+    },
+    {
+      "at_ms": 2700,
+      "action": "release",
+      "request": 0,
+      "expect": {
+        "requests": 1,
+        "pending": [],
+        "cancel_calls": 0,
+        "captions": [
+          "明天休息。"
+        ],
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。"
+      }
+    },
+    {
+      "at_ms": 3000,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "青木",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 1,
+        "dialogue_identity_count": 1,
+        "learning_source": "明日は休みです。",
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 3500,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "青木",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2,
+        "learning_source": "青木\n明日は休みです。",
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 4000,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "田中",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 2,
+        "dialogue_identity_count": 2,
+        "learning_source": "青木\n明日は休みです。",
+        "mode": 0
+      }
+    },
+    {
+      "at_ms": 4500,
+      "action": "frame",
+      "image": "assets/speaker-plate.png",
+      "blocks": [
+        {
+          "text": "田中",
+          "box": [
+            0.267,
+            0.183,
+            0.068,
+            0.057
+          ]
+        },
+        {
+          "text": "明日は休みです。",
+          "box": [
+            0.289,
+            0.117,
+            0.18,
+            0.054
+          ]
+        }
+      ],
+      "expect": {
+        "requests": 3,
+        "dialogue_identity_count": 3,
+        "learning_source": "田中\n明日は休みです。",
+        "mode": 0,
+        "sources": [
+          "明日は休みです。",
+          "青木\n明日は休みです。",
+          "田中\n明日は休みです。"
+        ],
+        "captions": [
+          "明天休息。",
+          "青木：明天休息。",
+          "田中：明天休息。"
+        ]
+      }
+    }
+  ],
+  "notes": "Synthetic pixels identify a separate filled speaker plate. Changes in its unrecognized OCR must not contaminate the body or create requests."
+}
