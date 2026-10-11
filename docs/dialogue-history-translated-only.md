@@ -42,6 +42,8 @@
 
 核心报告在本机 `.build/debug/20261011T083804Z-36f6c5/summary.json` / `summary.txt`。安装索引、安装日志和只含凭据文件元数据的核对在 `.build/history-translated-only-20261011/`，不进入 Git 或发布包。所有自动检查使用合成内容、隔离数据库和模拟服务，不读取真实凭据或学习库，不连接采集设备，不消耗真实 API Token。
 
-已安装并打开 **0.2.1 build 52**，位置为 `~/Applications/译芽.app`。安装包、源码构建二进制、已安装二进制及双架构 dSYM 的 UUID 一致，已安装应用 `codesign --verify --deep --strict` 通过。安装前后 API Key 文件的大小、mtime、inode 及 0600/目录 0700 权限均未变，未读取或输出 Key 内容。源码、回归与说明随本次 Mac 修补单独提交，未推送或更新公开附件；桌面套件只编译，真实服务与游戏体验尚未验收。
+已安装并打开 **0.2.1 build 52**，位置为 `~/Applications/译芽.app`。安装包、源码构建二进制、已安装二进制及双架构 dSYM 的 UUID 一致，已安装应用 `codesign --verify --deep --strict` 通过。安装前后及打开应用后 API Key 文件的大小、mtime、inode 及 0600/目录 0700 权限均未变，未读取或输出 Key 内容。
+
+修补代码与回归已单独提交为 `54cf83b`（`fix(mac): exclude untranslated sentences from recent history`），所属 Mac 开发分支为 `dev0.2.1_261009`。项目入口、Debug 覆盖、发布说明及检查记录随后同步本次交付状态，源码与文档提交到远端同名开发分支。此次开发分支同步不更新公开 Release 附件或 Sparkle 清单；桌面套件只编译，真实服务与游戏体验尚未验收。
 
 最短手动验收：翻译服务暂时不可用时产生一条新对白，刷新最近台词，应保留此前已翻译记录且没有该条失败原文；恢复服务并让新对白翻译成功，再刷新，应显示原文与对应译文。真实服务、桌面可见性与设备验收不由合成检查推定。
