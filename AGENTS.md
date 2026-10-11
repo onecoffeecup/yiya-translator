@@ -21,6 +21,13 @@
 
 保持 OCR、翻译、学习、数据、快捷键、窗口行为和原生文本选择 / 复制 / 换行。涉及视觉改动时先阅读维护者工作区的 `docs/design/pixel-adventure-spec.md` 与实施交付说明；当前为用户确认的「译芽 · 奶油棕花境」，不要用历史探索替代当前设计。
 
+## 窗口与实时阅读
+
+- 用户于 2026-10-11 确认 AI 侧栏只手动开关；拖动窗口及切页不自动改变显隐。展开时最小内容宽度 1100 pt，手动收起后为 720 pt；窄窗手动展开可放宽窗口，保留同一聊天视图、会话和草稿。
+- 原生外框尺寸驱动内部页面画布，不能重新给最外层 `contentView` 加固定宽度锁。改动须覆盖 `MainWindowResizeTests` 的拖动优先级、释放保持、双向缩放、手动侧栏及切页断言，不通过人为调用缩放回调绕过边界。机制与未验收范围见 `docs/window-resize.md`。
+- 实时页沿用「画面 → 中文翻译 → 当前对白 → 语法」、紧凑空状态和按实际栏宽重测原文；保留字符、选择索引及固定身份，相关回归为 `PreviewLayoutTests`。阅读合同见 `docs/live-reading-layout.md`。
+- 服务表单改 `FYTranslationServiceView`，预设与配置改 `FYTranslationServiceSettings`，宿主保留运行编排及 Key 保存；边界见 `docs/translation-service-settings.md`。共享文件有其它已集成改动时按项修改，不整文件回退或覆盖。
+
 ## 平台分支规则
 
 Mac、iPadOS、Windows 的开发分别在独立分支上进行，不得混入同一分支或同一提交。跨平台共用的内容（词典数据、语法目录、提示词、共享测试用例）单独提交，并在提交说明中注明影响哪些平台。Mac 当前开发分支为 `dev0.2.1_261009`，iPad 采集 PoC 分支为 `ipados-poc`。
