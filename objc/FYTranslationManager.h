@@ -4,12 +4,8 @@
 FOUNDATION_EXPORT NSString *FYDisplayableTranslation(NSString *translated, NSString *sourceText,
     NSString *(^trim)(NSString *), NSString *(^normalize)(NSString *),
     BOOL (^equivalent)(NSString *, NSString *), BOOL (^looksLikeSource)(NSString *));
-@interface FYInlineTranslationCache : NSObject
-// Preserve mutable container aliases used by rendered OCR snapshots and compatibility fixtures.
-@property(nonatomic, strong) NSMutableDictionary<NSString *, NSString *> *entries;
-- (void)storeValue:(NSString *)value forKey:(NSString *)key;
-- (void)clear;
-@end
+#import "runtime/FYTranslationCachePlanner.h"
+#import "runtime/FYTranslationRequestCoordinator.h"
 
 @interface FYTranslationRunState : NSObject
 @property(nonatomic, copy) NSString *lastTranslatedText;
@@ -19,16 +15,10 @@ FOUNDATION_EXPORT NSString *FYDisplayableTranslation(NSString *translated, NSStr
 - (BOOL)shouldThrottleText:(NSString *)text geometryChanged:(BOOL)geometryChanged interval:(NSTimeInterval)interval
     equivalent:(BOOL (^)(NSString *current, NSString *previous))equivalent now:(NSDate *(^)(void))now;
 @end
-FOUNDATION_EXPORT NSString *FYInlineDeliveryDropReason(NSInteger generation, NSInteger currentGeneration,
-    NSUInteger inputEpoch, NSUInteger currentInputEpoch, BOOL running, NSInteger mode, NSInteger currentMode);
-FOUNDATION_EXPORT void FYStoreInlineTranslation(NSMutableDictionary<NSString *, NSString *> *cache, NSString *value, NSString *key);
-FOUNDATION_EXPORT void FYPlanInlineTranslations(NSUInteger count, NSDictionary<NSString *, NSString *> *cache,
-    NSString *(^keyAtIndex)(NSUInteger), void (^observeHit)(NSUInteger, BOOL),
-    NSMutableArray<NSString *> *translations, NSMutableArray<NSNumber *> *pendingIndexes, NSMutableArray<NSString *> *pendingKeys);
-FOUNDATION_EXPORT void FYPartitionInlineBatch(NSArray *items, NSArray<NSNumber *> *indexes, NSArray<NSString *> *keys,
-    BOOL (^isLongAtIndex)(NSUInteger), NSMutableArray *shortItems, NSMutableArray<NSNumber *> *shortIndexes,
-    NSMutableArray<NSString *> *shortKeys, NSMutableArray *longItems, NSMutableArray<NSNumber *> *longIndexes,
-    NSMutableArray<NSString *> *longKeys);
+#import "runtime/FYRuntimeDeliveryChecks.h"
+
+
+
 FOUNDATION_EXPORT NSErrorDomain const FYTranslationURLValidationErrorDomain;
 typedef NS_ENUM(NSInteger, FYTranslationURLValidationError) {
     FYTranslationURLMissing = 1,
@@ -51,35 +41,11 @@ FOUNDATION_EXPORT NSString *FYNumberedTranslationSource(NSUInteger count, NSStri
 FOUNDATION_EXPORT NSString *FYInlineBatchPrompt(NSString *sourceLanguage, BOOL longText);
 FOUNDATION_EXPORT NSInteger FYInlineBatchMaxTokens(NSUInteger itemCount, BOOL longText);
 FOUNDATION_EXPORT NSArray<NSString *> *FYParseNumberedTranslations(NSString *text, NSUInteger count);
-FOUNDATION_EXPORT NSError *FYApplyInlineBatchResults(NSArray<NSString *> *parsed, NSUInteger count,
-    NSArray<NSNumber *> *indexes, NSArray<NSString *> *keys, NSMutableArray<NSString *> *translations,
-    void (^cacheValue)(NSString *, NSString *));
-// Launch callbacks and their completions must run on the same serial queue.
-FOUNDATION_EXPORT void FYRunInlineBatches(BOOL hasShort, BOOL hasLong, NSArray<NSString *> *translations,
-    void (^launch)(BOOL longText, void (^done)(NSError *)),
-    void (^completion)(NSArray<NSString *> *, NSError *));
-FOUNDATION_EXPORT NSString *FYTranslationCacheKey(NSInteger generation, NSInteger serviceGeneration,
-    NSString *sentenceID, NSInteger version, NSString *text, NSString *prompt);
-FOUNDATION_EXPORT BOOL FYTranslationCacheCanStore(NSInteger requestGeneration, NSInteger currentGeneration,
-    NSInteger requestServiceGeneration, NSInteger currentServiceGeneration, NSString *translated);
-FOUNDATION_EXPORT void FYDeliverTranslationOnMain(NSInteger requestGeneration, NSInteger (^currentGeneration)(void),
-    NSString *translated, NSError *error, void (^completion)(NSString *, NSError *), void (^dropped)(void));
-// Main-thread owner. Batches may run concurrently; a run change cancels all of them.
-@interface FYTranslationTaskOwner : NSObject
-@property(nonatomic, strong) NSURLSessionDataTask *activeTask;
-- (void)finishTask:(NSURLSessionDataTask *)task;
-- (void)cancelActiveTask;
-// Keep one unchanged inline long batch while replacing obsolete short work.
-- (void)cancelTasksExceptTask:(NSURLSessionDataTask *)retainedTask;
-@end
 
-@interface FYTranslationCache : NSObject
-@property(nonatomic, copy, readonly) NSString *key;
-@property(nonatomic, copy, readonly) NSString *value;
-- (NSString *)valueForKey:(NSString *)key;
-- (void)storeValue:(NSString *)value forKey:(NSString *)key;
-- (void)clear;
-@end
+// Launch callbacks and their completions must run on the same serial queue.
+
+
+
 
 @interface FYTranslationManager : NSObject
 + (NSMutableURLRequest *)requestWithURL:(NSURL *)url apiKey:(NSString *)key model:(NSString *)model

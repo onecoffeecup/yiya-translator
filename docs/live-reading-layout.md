@@ -1,5 +1,7 @@
 # 实时页：先读中文，再查看原文
 
+2026-10-12 结构迁移：实时阅读与窗口导航位于 `objc/presentation/FYMainWindowController.m`，查句／AI 往返位于 `FYStudyPresentationController.m`，词典与悬停位于 `FYReferencePresentationController.m`；保持现有阅读、选择、缩放及悬停行为。下文 `.inc` 路径属于对应日期的历史实现。
+
 2026-10-11，用户确认奶油棕圆体预览及紧凑空状态并授权接入。阅读布局已随功能提交 `4956d21` 推送至 Mac 分支 `dev0.2.1_261009`，前一集成包为 0.2.1 build 59；公开 Release / Sparkle 仍为 build 17。
 
 ## 2026-10-11：查看原句共用实时页悬停词卡
@@ -139,3 +141,15 @@ UUID: 84A2DF00-BD72-306E-9958-6607868403AC (arm64) /Users/nanami/Applications/�
 记录时的工作区相关文件 SHA-256（不是已安装产物源码标记）：
 - `objc/LiveCaptionTranslator.m`：`fabe8c1e6800c30bfc1dcfdb79e47400db354d307c55f367ebddbd9338f48070`
 - `tests/PreviewLayoutTests.m`：`ec04a4db6c99e70422a2bbb534335b33140e2298311bf5b7288986d43a27b55d`
+
+## 2026-10-14 实时阅读组件边界
+
+源码刷新与等级读取由无状态 `FYLiveReadingCoordinator` 维护；原生文字样式、实际栏宽测高、对白及固定状态由无状态 `FYLiveReadingRenderer` 维护。Main原视图和Display4/Word3仍是唯一拥有者，刷新/读取顺序、19/13字体与0/5行距、字符/选择索引、中文speaker匹配及42..190高度沿用原实现。没有新增宽度锁或自动侧栏规则。
+
+专项入口 `bash scripts/run-live-reading-tests.sh` 使用真实生产算法和原生文字测量；拆前/后实际Main共用无窗口fixture，O0/O2的18编排+18native+17host检查通过。MainWindowResize与其它UI仅编译，真实外框驱动布局、手动1100/720侧栏、聊天草稿和鼠标选词仍另列验收。详细职责与证据见 [Mac深度拆分](mac-decoupling.md)。
+
+## 2026-10-14 原生实时页构造边界
+
+原完整页面构造由零state `FYLivePageBuilder` 维护，Main仍拥有实际视图，Word3/Display4/List2与阅读/学习仍原owner。原画面→中文→原文/选词→列表→语法顺序、所有原生字体/颜色/constraint/选择属性及weak具体Main回调、defaultCenter/object/mainQueue不变。Main sidebar/window/navigation代码保持，不新增外层固定宽锁、观察资源或显隐规则。
+
+20最小native与19原body摘录/实际Main同fixture验证真实通知过滤、后台→主队列和原弱生命周期；整个页面图的实际构造/鼠标/布局只编译专用原/新LivePageBuilderUITests与既有布局UI，不记为运行通过。来源、所有者与后续边界见 [Mac深度拆分](mac-decoupling.md)。

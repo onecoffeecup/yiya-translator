@@ -1,5 +1,7 @@
 # 译芽 · Yiya!
 
+阶段交付范围、模块图、已知缺口和待验收项见 [阶段交付](docs/mac-decoupling-stage-delivery.md)。用户已停止扩大范围：保留1–38批，收尾词典39批；数据库、设置、诊断的新拆分暂缓。以下历史“继续全目标”计划不再是本阶段必做。
+
 **译芽 0.2.2** 汇总 Mac 开发分支的对白识别、窗口与阅读、翻译服务及跨版本 API Key 保留改进。下载与更新说明见 [v0.2.2 Release](https://github.com/onecoffeecup/yiya-translator/releases/tag/v0.2.2) 和[发布说明](docs/发布说明.md)。
 
 AI 侧栏只手动开关，原文和译文保留原生选择、复制与换行；最近台词只收录已有译文的记录。发布验证、已知的粘连按钮缺口和桌面旧验收差异分别记录在[发布检查](docs/发布检查结果.md)与[维护状态](docs/project-maintenance.md)。
@@ -59,6 +61,8 @@ AI 侧栏只手动开关，原文和译文保留原生选择、复制与换行�
 
 Debug 与回归入口见 [DEBUG_WORKFLOW.md](DEBUG_WORKFLOW.md)，架构与实施依据见 [审查记录](docs/debug-architecture-audit.md)。在源码根运行 `python3 scripts/debug.py check` 可无设备、无窗口、无真实 API 执行生产链路 Replay 与核心检查；报告明确单列已知产品缺口。每次修复 Bug 前需先按 [AGENTS.md](AGENTS.md) 复现并验证根因，修复后运行相关回归。真实采集和用户体验仍需单独验收。
 
+应用入口位于 `objc/LiveCaptionTranslator.m`，宿主生命周期与设置适配位于 `objc/app/FYAppDelegate.m`，兼容动作／属性分别位于该目录的四个 `*Bridge.m`，共享辅助与视图实现在 `FYAppSupport.m`；页面、学习交互、字幕窗和贴译浮层维护在 `objc/presentation/`，设置和诊断分别维护在 `objc/settings/` 与 `objc/diagnostics/`；采集／预览／目标映射及 OCR／翻译运行编排维护在 `objc/runtime/`。测试及离线工具通过声明头链接同一份生产实现；模块边界与检查入口见 [Debug 工作流](DEBUG_WORKFLOW.md)。
+
 本仓库为唯一维护源码；维护者本机的旧根目录副本已于 2026-10-08 归档，不再同步或用于构建。目录与文档归属见 [维护与归档约定](docs/project-maintenance.md)。
 
 需要 macOS、Xcode Command Line Tools（`clang` 等）和 Python 3.9+。工程使用 Objective-C / AppKit，构建时下载锁定的 Sparkle；框架随应用内置，玩家无需另装运行时。
@@ -86,6 +90,10 @@ open "$HOME/Applications/译芽.app"
 当前界面采用「奶油棕花境」样式；设计过程、内部交接和验收截图仅在维护者本机保留，不随公开源码分发。公开仓库包含运行所需的原创 UI 资产，验证范围见 [发布检查结果](docs/发布检查结果.md)。
 
 主窗口、AI 对话、字幕浮窗、快捷查句及原句悬停共用新样式。字幕主题「译芽花境」沿用索引 3；原黑/白/粉主题、字号、透明度、位置与设置保持兼容。安装名为 `译芽.app`，继续使用 `com.nanami.fuyi` 和原学习数据库。实际预览始终展示真实采集画面并保持图像比例，演示场景仅用于隔离测试。
+
+收藏查询、词卡操作、复习和原生渲染已分别维护，控件与渲染代次保留原生控制器单一归属；接口与验收范围见 [收藏工作流](docs/collection-workflow.md) 和 [收藏复习](docs/collection-review.md)。
+
+Mac 模块的进一步解耦、状态归属与测试对应表见 [Mac 深度拆分](docs/mac-decoupling.md)。预览、内容修订/交付、请求/缓存协调、OCR 调度及观察模型/精读处理与上下文、识别 worker/Vision/裁剪适配、对白/字段稳定与模式状态、内容过滤/分类/对白路由、模态/姓名栏像素与文本后处理已独立；目标跟踪/解析及映射算法/状态与坐标转换也已独立；采集会话、纯帧槽和模型也已分开；自动定位/复核由独立映射协调器维护，原宿主仅提供单次原生动作租约；布局模型/结果索引、分组、跨帧匹配和文字/几何工具也已能用 Foundation/CG 独立检查；真实文字测量及原字体/高度缓存已独立为原生组件，布局与绘制共用相同字形度量；候选/避让/评分和轮次计算已独立到Foundation/CG计算器，原生引擎只保留真实测量与兼容入口；原生绘制的依赖、纯尺寸与按压决策也已分开；面板复用/缓存与渲染编排已独立到Foundation/CG协调器，native只提供窗口动作；手动位置的key/邻桶/边界/过期与原生拖动回调、Option/timer资源也已独立；选择身份/学习快照与卡片动作绑定也已独立，当前快照仍由原Study拥有；展开阅读的size/appearance/open/reposition/advance/close及四项资源状态已独立，保持滚动与Esc生命周期；overflow的候选/冻结/过期/row策略与原生入口/选择窗口/监听资源也已分开；短/长卡片的原生构造、正文度量与更新、复用/滚动上限、外观刷新已独立到无state渲染组件，仍调用同一原生测量/绘制primitive；MainWindow的可见句子身份/版本/text/translation与选词generation/busy/AI状态及学习操作已独立为Foundation组件，保持原强弱回调与归属门；实时阅读刷新/等级读取与原生文字样式、实际栏宽测量、对白/固定状态也已独立，原显示与选词状态仍只有原owner；实时页界面译文列表的原签名/快照状态、筛选/刷新/行选择与原生card/row也已独立，保留原索引/复制与构造顺序；完整原生实时页及弱选词回调/通知注册也已移至无状态builder，native视图与所有业务状态保持原拥有者；主窗口公有头也已隔离整套应用支持依赖，原外框尺寸驱动画布独立为同名原生类，Main继续负责原导航/布局；语法初次分析/追问/展开/深度复核及main/quick配置与回包门已独立为Foundation编排组件，七项原状态只有该owner，native文字仍原适配；结构图scroll恢复、quick详情更新与复核位置保持已独立为无状态原生组件，语法公有头也已隔离应用支持依赖；选中语法的详情/字段、主快捷两表面动作控件、富文本高亮与局部选择也已独立为无状态原生renderer，原视图与业务state仍原owner；语法结果刷新/清场/页签/追问开合也已独立为无状态原生组件，保留原回调顺序和取消范围；完整语法卡/结构图/信息单元构造也已独立到无状态builder，原生图与交互体验单列待验收；语法两类收藏异步操作也已进入Foundation业务层，保留索引读取时点、原strong任务租约与唯一存储服务；聊天的最新句解析、引用和发送编排及两项上下文状态已独立为Foundation组件，既有会话、草稿和网络取消继续沿用，详见[聊天上下文](docs/study-chat-context.md)；快捷查句分析/取消及句子、语法收藏查询与操作和九项临时状态也已独立为Foundation组件，详见[查句业务](docs/quick-sentence-workflow.md)；学习进入/返回、固定快照与查句导航的七方法和十二项状态已独立为Foundation/CG组件，详见[学习导航](docs/study-navigation.md)；学习页聊天/查句/scroll的十四个原生方法已分为三个无状态组件，Study公有头也已隔离整套应用依赖，见[学习原生渲染](docs/study-native-rendering.md)；其它页面与存储等继续逐批推进，源码变化未安装或发布。
 
 ## 已知限制与反馈
 

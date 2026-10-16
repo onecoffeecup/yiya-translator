@@ -1,0 +1,25 @@
+#import "capture/FYCaptureCardFrameSlot.h"
+#import <stdatomic.h>
+static NSUInteger checks;
+static void Check(BOOL ok,NSString *s){checks++;if(!ok){fprintf(stderr,"FAIL: %s\n",s.UTF8String);exit(2);}}
+static void Freed(void *info,const void *data,size_t size){if(info){(*(NSUInteger *)info)++;}free((void *)data);}
+static CGImageRef Image(size_t width,NSUInteger *released){void *bytes=calloc(width,4);CGDataProviderRef p=CGDataProviderCreateWithData(released,bytes,width*4,Freed);CGColorSpaceRef c=CGColorSpaceCreateDeviceRGB();CGImageRef i=CGImageCreate(width,1,8,32,width*4,c,(CGBitmapInfo)kCGImageAlphaPremultipliedLast,p,NULL,NO,kCGRenderingIntentDefault);CGColorSpaceRelease(c);CGDataProviderRelease(p);return i;}
+int main(void){@autoreleasepool{
+ FYCaptureCardFrameSlot *slot=[FYCaptureCardFrameSlot new];Check(slot&&!slot.hasFrame&&!slot.latestIndex&&!slot.storedCount&&!slot.skippedCount,@"cold slot contains no pixels or counts");Check(fabs(slot.minimumInterval-1.0/30.0)<1e-10,@"pure slot keeps original preview cadence");
+ uint64_t index=99;Check(![slot copyLatestFrameWithIndex:&index]&&index==0,@"empty atomic read writes zero index");Check([slot shouldStoreFrameAtTime:1],@"empty slot always accepts first frame");
+ NSUInteger releasedA=0,releasedB=0;CGImageRef a=Image(4,&releasedA);[slot storeFrame:a index:4 atTime:1];CGImageRelease(a);Check(slot.hasFrame&&slot.latestIndex==4&&slot.storedCount==1&&!releasedA,@"slot retains real caller pixels");
+ Check(![slot shouldStoreFrameAtTime:1.031]&&slot.skippedCount==1,@"frame before original tolerance boundary is dropped and counted");Check([slot shouldStoreFrameAtTime:1.033],@"nominal 30Hz with callback jitter remains accepted");
+ CGImageRef b=Image(8,&releasedB);[slot storeFrame:b index:8 atTime:1.033];CGImageRelease(b);Check(releasedA==1&&slot.latestIndex==8&&slot.storedCount==2,@"overwriting releases old image, retains latest and bounds cache");
+ CGImageRef lease=[slot copyLatestFrameWithIndex:&index];Check(index==8&&CGImageGetWidth(lease)==8,@"atomic lease holds image and matching index");[slot clear];Check(!slot.hasFrame&&!slot.latestIndex&&!releasedB,@"clear drops slot, preserves consumer image lease");Check(CGImageGetWidth(lease)==8,@"consumer pixels remain usable after clear");CGImageRelease(lease);Check(releasedB==1,@"consumer completion ends final image ownership exactly once");[slot clear];Check(releasedB==1,@"repeated clear does not release an image twice");
+ [slot resetCounters];Check(!slot.storedCount&&!slot.skippedCount,@"reset counters is independent of cadence");slot.minimumInterval=.1;NSUInteger cReleased=0;CGImageRef c=Image(4,&cReleased);[slot storeFrame:c index:4 atTime:2];CGImageRelease(c);Check(![slot shouldStoreFrameAtTime:2.098]&&[slot shouldStoreFrameAtTime:2.1],@"OCR-only 10Hz retains original tolerance");[slot clear];Check(cReleased==1,@"10Hz sample ownership is released");
+ atomic_bool *mismatch=malloc(sizeof(*mismatch));atomic_init(mismatch,false);dispatch_group_t group=dispatch_group_create();dispatch_queue_t q=dispatch_get_global_queue(QOS_CLASS_DEFAULT,0);
+ dispatch_group_async(group,q,^{@autoreleasepool{for(size_t n=4;n<204;n++){CGImageRef i=Image(n,NULL);[slot storeFrame:i index:n atTime:n];CGImageRelease(i);}}});
+ dispatch_group_async(group,q,^{for(int n=0;n<2000;n++){uint64_t number=0;CGImageRef i=[slot copyLatestFrameWithIndex:&number];if(i){if(CGImageGetWidth(i)!=number)atomic_store(mismatch,true);CGImageRelease(i);}else if(number)atomic_store(mismatch,true);}});
+ Check(dispatch_group_wait(group,dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC))==0&&!atomic_load(mismatch),@"concurrent reads keep real image/index atomic");free(mismatch);[slot clear];
+ Check(FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityAuthorized)==FYCapturePermissionActionContinue&&FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityNotDetermined)==FYCapturePermissionActionRequest&&FYCapturePermissionActionForAvailability(FYCaptureCardAvailabilityDenied)==FYCapturePermissionActionReject,@"pure permission policy preserves explicit request and rejection");
+ NSMutableString *name=[NSMutableString stringWithString:@"synthetic device"],*detail=[NSMutableString stringWithString:@"running"];
+ FYCaptureSessionSnapshot *s=[[FYCaptureSessionSnapshot alloc] initWithState:FYCaptureCardSessionStateRunning detail:detail deviceID:@"fixture" deviceName:name epoch:7 startToken:8 released:NO received:9 failures:10];[name appendString:@"changed"];[detail appendString:@"changed"];
+ Check([s.deviceName isEqual:@"synthetic device"]&&[s.detail isEqual:@"running"]&&s.epoch==7&&s.startToken==8&&!s.released&&s.receivedFrames==9&&s.conversionFailures==10,@"typed snapshot copies strings and fixes scalar identity");
+ Check([FYCaptureCardStatusText(FYCaptureCardSessionStateRunning,FYCaptureCardAvailabilityAuthorized,@"synthetic",9,2,@"fictional") containsString:@"已收帧 9（丢弃旧帧 2）"],@"status formatting uses original explicit values only");
+ printf("PASS frame boundary: %lu checks; Foundation/CG, real pixel leases, bounded slot, atomic reads and model snapshot\n",(unsigned long)checks);
+ }return 0;}

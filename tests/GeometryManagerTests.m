@@ -1,5 +1,8 @@
-#import "FYGeometryManager.h"
-#import "FYOCRManager.h"
+#import "ocr/FYOCRTextModels.h"
+#import "runtime/FYRuntimeDeliveryChecks.h"
+#import "capture/FYCaptureMapping.h"
+#import "capture/FYCoordinateConversions.h"
+
 #import <math.h>
 
 @interface LocateClockDate : NSDate
@@ -62,39 +65,39 @@ int main(void) {
         Expect(FYGeometryDeliveryIsStale(1,2,10,10), @"geometry generation change rejects old placement");
         Expect(FYGeometryDeliveryIsStale(1,1,10,20), @"known display target change rejects placement");
         Expect(!FYGeometryDeliveryIsStale(1,1,0,20) && !FYGeometryDeliveryIsStale(1,1,10,10), @"unknown target skips target match and current geometry accepted");
-        NSRect quartz = [FYGeometryManager appKitFrameForQuartzBounds:CGRectMake(-400, 100, 300, 200) mainScreenTop:900];
+        NSRect quartz = [FYCoordinateConversions appKitFrameForQuartzBounds:CGRectMake(-400, 100, 300, 200) mainScreenTop:900];
         Expect(NSEqualRects(quartz, NSMakeRect(-400, 600, 300, 200)), @"Quartz conversion preserves negative monitor coordinates");
         NSRect viewport = NSMakeRect(100, 200, 800, 600);
         CGRect box = CGRectMake(0.25, 0.10, 0.50, 0.20);
-        Expect(NSEqualRects([FYGeometryManager frameForNormalizedBox:box inViewport:viewport], NSMakeRect(300, 260, 400, 120)), @"Vision bottom-left conversion");
-        Expect(NSEqualRects([FYGeometryManager frameForTopLeftNormalizedBox:box inViewport:viewport], NSMakeRect(300, 620, 400, 120)), @"Top-left region slider conversion");
-        CGRect selection = [FYGeometryManager quartzRectFromSelection:CGRectMake(10, 20, 30, 40) panelFrame:viewport mainScreenTop:1000];
+        Expect(NSEqualRects([FYCoordinateConversions frameForNormalizedBox:box inViewport:viewport], NSMakeRect(300, 260, 400, 120)), @"Vision bottom-left conversion");
+        Expect(NSEqualRects([FYCoordinateConversions frameForTopLeftNormalizedBox:box inViewport:viewport], NSMakeRect(300, 620, 400, 120)), @"Top-left region slider conversion");
+        CGRect selection = [FYCoordinateConversions quartzRectFromSelection:CGRectMake(10, 20, 30, 40) panelFrame:viewport mainScreenTop:1000];
         Expect(CGRectEqualToRect(selection, CGRectMake(110, 220, 30, 40)), @"Selection conversion uses explicit screen top");
-        Expect(NSEqualRects([FYGeometryManager frameForNormalizedBox:CGRectMake(0, 0, 1, 1) inViewport:viewport], viewport), @"Full normalized viewport round trip");
+        Expect(NSEqualRects([FYCoordinateConversions frameForNormalizedBox:CGRectMake(0, 0, 1, 1) inViewport:viewport], viewport), @"Full normalized viewport round trip");
         OCRTextItem *item = [OCRTextItem new]; item.text = @"日本語"; item.blockKind = InlineBlockKindLong; item.confidence = 0.8;
         Expect([item.text isEqualToString:@"日本語"] && item.blockKind == InlineBlockKindLong && fabs(item.confidence - 0.8) < 0.001, @"Shared OCR model preserves field semantics");
         NSDictionary *mapping=@{@"windowAspect":@2,@"videoAspect":@1.5,@"deviceID":@"A"};
-        Expect(![FYGeometryManager captureMappingWindowReason:mapping windowFrame:NSMakeRect(-500,50,800,400)], @"moving and proportional scaling preserve mapping");
-        Expect([[FYGeometryManager captureMappingWindowReason:mapping windowFrame:NSMakeRect(0,0,1,400)] isEqual:@"目标窗口尺寸无效，无法定位画面区域。"], @"invalid size reason preserved");
-        Expect([[FYGeometryManager captureMappingWindowReason:mapping windowFrame:NSMakeRect(0,0,840,400)] isEqual:@"目标窗口比例已变化。"], @"changed window aspect rejected");
-        Expect(![FYGeometryManager captureMappingInputReason:mapping frameSize:CGSizeZero hasFrameSize:NO deviceID:@"A"], @"unavailable frame size does not invent invalidation");
-        Expect([[FYGeometryManager captureMappingInputReason:mapping frameSize:CGSizeMake(200,100) hasFrameSize:YES deviceID:@"B"] isEqual:@"采集画面比例已变化（可能换了输入源或设备）。"], @"video aspect reason precedes changed device");
-        Expect([[FYGeometryManager captureMappingInputReason:mapping frameSize:CGSizeMake(150,100) hasFrameSize:YES deviceID:@"B"] isEqual:@"采集卡设备已变化。"], @"changed device rejected");
-        Expect(![FYGeometryManager captureMappingInputReason:@{} frameSize:CGSizeZero hasFrameSize:NO deviceID:nil], @"missing calibrated device remains compatible");
-        Expect([FYGeometryManager captureMappingScoreIsStale:-.5 unavailableValue:-2] && ![FYGeometryManager captureMappingScoreIsStale:-2 unavailableValue:-2], @"negative correlation stale but unavailable sentinel retained");
-        Expect(![FYGeometryManager captureMappingScoreIsStale:.30 unavailableValue:-2] && [FYGeometryManager captureMappingScoreIsStale:.299 unavailableValue:-2], @"strict score threshold preserved");
-        Expect(CGRectEqualToRect([FYGeometryManager pixelCropForTopLeftRegion:CGRectMake(.253,.107,.505,.208) imageWidth:100 imageHeight:100],CGRectMake(25,10,50,20)), @"crop floors top-left origin and size independently");
-        Expect(CGRectEqualToRect([FYGeometryManager pixelCropForTopLeftRegion:CGRectMake(.2,.3,0,0) imageWidth:100 imageHeight:100],CGRectMake(20,30,1,1)), @"zero region retains minimum one-pixel dimensions");
-        Expect(CGRectEqualToRect([FYGeometryManager pixelCropForTopLeftRegion:CGRectMake(.9,.8,.3,.4) imageWidth:100 imageHeight:100],CGRectMake(90,80,10,20)), @"crop clipped at right and bottom image edges");
-        Expect(CGRectIsNull([FYGeometryManager pixelCropForTopLeftRegion:CGRectMake(2,2,.2,.2) imageWidth:100 imageHeight:100]), @"disjoint region remains null rather than fabricated valid crop");
-        Expect(CGRectEqualToRect([FYGeometryManager pixelCropForTopLeftRegion:CGRectMake(0,0,1,1) imageWidth:2560 imageHeight:1440],CGRectMake(0,0,2560,1440)), @"full region preserves image pixels with no coordinate flip");
+        Expect(![FYCaptureMappingAlgorithms captureMappingWindowReason:mapping windowFrame:NSMakeRect(-500,50,800,400)], @"moving and proportional scaling preserve mapping");
+        Expect([[FYCaptureMappingAlgorithms captureMappingWindowReason:mapping windowFrame:NSMakeRect(0,0,1,400)] isEqual:@"目标窗口尺寸无效，无法定位画面区域。"], @"invalid size reason preserved");
+        Expect([[FYCaptureMappingAlgorithms captureMappingWindowReason:mapping windowFrame:NSMakeRect(0,0,840,400)] isEqual:@"目标窗口比例已变化。"], @"changed window aspect rejected");
+        Expect(![FYCaptureMappingAlgorithms captureMappingInputReason:mapping frameSize:CGSizeZero hasFrameSize:NO deviceID:@"A"], @"unavailable frame size does not invent invalidation");
+        Expect([[FYCaptureMappingAlgorithms captureMappingInputReason:mapping frameSize:CGSizeMake(200,100) hasFrameSize:YES deviceID:@"B"] isEqual:@"采集画面比例已变化（可能换了输入源或设备）。"], @"video aspect reason precedes changed device");
+        Expect([[FYCaptureMappingAlgorithms captureMappingInputReason:mapping frameSize:CGSizeMake(150,100) hasFrameSize:YES deviceID:@"B"] isEqual:@"采集卡设备已变化。"], @"changed device rejected");
+        Expect(![FYCaptureMappingAlgorithms captureMappingInputReason:@{} frameSize:CGSizeZero hasFrameSize:NO deviceID:nil], @"missing calibrated device remains compatible");
+        Expect([FYCaptureMappingAlgorithms captureMappingScoreIsStale:-.5 unavailableValue:-2] && ![FYCaptureMappingAlgorithms captureMappingScoreIsStale:-2 unavailableValue:-2], @"negative correlation stale but unavailable sentinel retained");
+        Expect(![FYCaptureMappingAlgorithms captureMappingScoreIsStale:.30 unavailableValue:-2] && [FYCaptureMappingAlgorithms captureMappingScoreIsStale:.299 unavailableValue:-2], @"strict score threshold preserved");
+        Expect(CGRectEqualToRect([FYCoordinateConversions pixelCropForTopLeftRegion:CGRectMake(.253,.107,.505,.208) imageWidth:100 imageHeight:100],CGRectMake(25,10,50,20)), @"crop floors top-left origin and size independently");
+        Expect(CGRectEqualToRect([FYCoordinateConversions pixelCropForTopLeftRegion:CGRectMake(.2,.3,0,0) imageWidth:100 imageHeight:100],CGRectMake(20,30,1,1)), @"zero region retains minimum one-pixel dimensions");
+        Expect(CGRectEqualToRect([FYCoordinateConversions pixelCropForTopLeftRegion:CGRectMake(.9,.8,.3,.4) imageWidth:100 imageHeight:100],CGRectMake(90,80,10,20)), @"crop clipped at right and bottom image edges");
+        Expect(CGRectIsNull([FYCoordinateConversions pixelCropForTopLeftRegion:CGRectMake(2,2,.2,.2) imageWidth:100 imageHeight:100]), @"disjoint region remains null rather than fabricated valid crop");
+        Expect(CGRectEqualToRect([FYCoordinateConversions pixelCropForTopLeftRegion:CGRectMake(0,0,1,1) imageWidth:2560 imageHeight:1440],CGRectMake(0,0,2560,1440)), @"full region preserves image pixels with no coordinate flip");
         NSRect frame=NSMakeRect(-400,100,800,400), calibrated=NSMakeRect(-200,150,400,200);
-        NSDictionary *entry=[FYGeometryManager captureMappingForRect:calibrated windowFrame:frame videoAspect:0 deviceID:nil source:nil confidence:.75 version:2];
+        NSDictionary *entry=[FYCaptureMappingAlgorithms captureMappingForRect:calibrated windowFrame:frame videoAspect:0 deviceID:nil source:nil confidence:.75 version:2];
         Expect([entry isEqual:@{@"nx":@.25,@"ny":@.125,@"nw":@.5,@"nh":@.5,@"windowAspect":@2,@"videoAspect":@1,@"deviceID":@"",@"source":@"auto",@"confidence":@.75,@"mappingVersion":@2}], @"mapping fields and defaults preserve plist schema");
-        Expect(NSEqualRects([FYGeometryManager captureMappingRect:entry windowFrame:frame],calibrated), @"negative-monitor mapping round trip");
-        Expect(NSEqualRects([FYGeometryManager captureMappingRect:entry windowFrame:NSMakeRect(0,0,1600,800)],NSMakeRect(400,100,800,400)), @"moved and proportionally resized window reconstructs mapping");
-        Expect(![FYGeometryManager captureMappingForRect:NSMakeRect(0,0,1,100) windowFrame:frame videoAspect:1 deviceID:nil source:nil confidence:0 version:2], @"invalid calibration does not produce entry");
-        Expect(NSEqualRects([FYGeometryManager captureMappingRect:@{} windowFrame:frame],NSMakeRect(-400,100,0,0)), @"missing dimensions remain zero for coordinator rejection");
+        Expect(NSEqualRects([FYCaptureMappingAlgorithms captureMappingRect:entry windowFrame:frame],calibrated), @"negative-monitor mapping round trip");
+        Expect(NSEqualRects([FYCaptureMappingAlgorithms captureMappingRect:entry windowFrame:NSMakeRect(0,0,1600,800)],NSMakeRect(400,100,800,400)), @"moved and proportionally resized window reconstructs mapping");
+        Expect(![FYCaptureMappingAlgorithms captureMappingForRect:NSMakeRect(0,0,1,100) windowFrame:frame videoAspect:1 deviceID:nil source:nil confidence:0 version:2], @"invalid calibration does not produce entry");
+        Expect(NSEqualRects([FYCaptureMappingAlgorithms captureMappingRect:@{} windowFrame:frame],NSMakeRect(-400,100,0,0)), @"missing dimensions remain zero for coordinator rejection");
         double templ[]={1,2,3,4}, scene[]={11,12,13,14}; FYNormalizeSignature(templ,4);
         Expect(fabs(templ[0]+templ[1]+templ[2]+templ[3])<1e-9, @"signature zero mean");
         Expect(fabs((templ[0]*templ[0]+templ[1]*templ[1]+templ[2]*templ[2]+templ[3]*templ[3])/4-1)<1e-9, @"signature unit variance");

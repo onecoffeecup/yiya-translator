@@ -181,6 +181,109 @@ static void DamagedReference(void) {
     [dictionary lookupWord:@"合成" reading:nil completion:^(NSArray *records, NSError *error) { done = YES; }];
     Pump(^BOOL { return done; });
 }
+// Exercise the public facade across storage domains on the actual SQLite connection.
+static void StorageOrderingAndLifetime(void) {
+    FYLearningStore *store = FixtureStore();
+    dispatch_queue_t callbacks = dispatch_queue_create("fixture.storage-completions", DISPATCH_QUEUE_SERIAL);
+    static char callbackKey;
+    dispatch_queue_set_specific(callbacks, &callbackKey, &callbackKey, NULL);
+    [store setCompletionQueue:callbacks];
+    __block NSUInteger completions = 0;
+    void (^written)(NSUInteger, NSError *) = ^(NSUInteger sequence, NSError *error) {
+        Check(!error && dispatch_get_specific(&callbackKey), @"writes deliver on selected completion queue");
+        Check(completions == sequence, @"mixed-domain completions keep submission order");
+        completions++;
+    };
+    FYVocabularyEntry *entry = [FYVocabularyEntry new];
+    entry.vocabularyID = @"ordered-word"; entry.surface = @"合成词";
+    FYVocabularyExample *example = [FYVocabularyExample new];
+    example.vocabularyID = entry.vocabularyID; example.sentenceID = @"sentence";
+    example.version = 1; example.sourceTextSnapshot = @"合成原文";
+    [store saveVocabulary:entry withExample:example completion:^(NSError *error) { written(0, error); }];
+    [store updateReviewStatus:FYReviewStatusLearning forVocabulary:entry.vocabularyID completion:^(NSError *error) { written(1, error); }];
+    [store updateTranslation:@"顺序译文" forSentence:@"sentence" version:1 completion:^(NSError *error) { written(2, error); }];
+    FYAnalysisResult *analysis = [FYAnalysisResult new];
+    analysis.status = FYAnalysisStatusSuccess; analysis.schemaVersion = 1;
+    analysis.grammar = @[]; analysis.vocabulary = @[]; analysis.sentenceNote = @"合成分析";
+    [store saveAnalysisResult:analysis sentenceID:@"sentence" version:1 textHash:@"synthetic-hash"
+               promptVersion:1 catalogVersion:1 modelConfig:@"synthetic-model" completion:^(NSError *error) { written(3, error); }];
+    [store fetchAnalysisForSentence:@"sentence" version:1 completion:^(FYAnalysisResult *result, NSString *model, NSError *error) {
+        Check([result.sentenceNote isEqual:@"合成分析"] && [model isEqual:@"synthetic-model"], @"cache read observes preceding shared-session write"); written(4, error);
+    }];
+    FYRequestIdentity *identity = [FYRequestIdentity identityWithSentenceID:@"sentence" version:1 requestID:@"ordering"
+                                                               sourceText:@"合成原文" translation:@"顺序译文"];
+    [store toggleSentenceBookmark:identity completion:^(BOOL saved, NSError *error) {
+        Check(saved, @"bookmark queued after sentence write succeeds"); written(5, error);
+    }];
+    [store fetchSentence:@"sentence" completion:^(FYSentenceRecord *record, NSError *error) {
+        Check([record.latestTranslation isEqual:@"顺序译文"], @"read observes prior write across repositories"); written(6, error);
+    }];
+    [store closeWithCompletion:^(NSError *error) { written(7, error); }];
+    // This implicitly reopens the same file after the queued close.
+    [store fetchVocabularyListWithCompletion:^(NSArray<FYVocabularyEntry *> *entries, NSError *error) {
+        Check(entries.count == 1 && entries.firstObject.reviewStatus == FYReviewStatusLearning, @"close/reopen preserves queued review update"); written(8, error);
+    }];
+    dispatch_sync([store valueForKey:@"queue"], ^{});
+    dispatch_sync(callbacks, ^{});
+    Check(completions == 9, @"all callbacks arrive exactly once in a mixed-domain batch");
+    [store setCompletionQueue:dispatch_get_main_queue()];
+    AwaitWrite(^(void (^done)(NSError *)) { [store closeWithCompletion:done]; });
+
+    // A queued operation owns the facade until work finishes, without retaining it for callback delivery.
+    dispatch_queue_t workQueue;
+    __weak FYLearningStore *weakStore;
+    __block BOOL delivered = NO;
+    @autoreleasepool {
+        FYLearningStore *pending = [[FYLearningStore alloc] initWithDatabasePath:[FYTestTemporaryDirectory() stringByAppendingPathComponent:@"lifetime.sqlite"]];
+        workQueue = [pending valueForKey:@"queue"];
+        dispatch_suspend(workQueue); dispatch_suspend(callbacks);
+        [pending setCompletionQueue:callbacks]; weakStore = pending;
+        [pending closeWithCompletion:^(NSError *error) { Check(!error, @"queued close succeeds"); delivered = YES; }];
+        pending = nil;
+    }
+    Check(weakStore != nil, @"queued operation retains original facade");
+    dispatch_resume(workQueue); dispatch_sync(workQueue, ^{});
+    Check(weakStore == nil && !delivered, @"facade releases after work even while completion is held");
+    dispatch_resume(callbacks); dispatch_sync(callbacks, ^{});
+    Check(delivered, @"completion survives facade release");
+}
+
+static void HistoryCompatibilityAccessor(void) {
+    FYLearningStore *store = FixtureStore();
+    [store setValue:@1 forKey:@"historyRetentionLimit"];
+    InsertHistory(store, @"kvc-new", NSDate.date.timeIntervalSince1970 + 10);
+    TranslateHistory(store, @"kvc-new", 1, @"合成新译文");
+    __block BOOL done = NO;
+    [store fetchSentence:@"sentence" completion:^(FYSentenceRecord *record, NSError *error) {
+        Check(!error && !record, @"legacy KVC retention setting affects actual sentence pruning"); done = YES;
+    }];
+    Pump(^BOOL { return done; });
+    AwaitWrite(^(void (^completion)(NSError *)) { [store configureHistoryRetentionWithLimit:0 completion:completion]; });
+    Check([[store valueForKey:@"historyRetentionLimit"] unsignedIntegerValue] == 0, @"public retention configuration and compatibility getter share one state");
+    AwaitWrite(^(void (^completion)(NSError *)) { [store closeWithCompletion:completion]; });
+}
+
+static void VocabularyTransactionFailure(void) {
+    FYLearningStore *store = FixtureStore();
+    FYVocabularyEntry *entry = [FYVocabularyEntry new]; entry.vocabularyID = @"atomic-word"; entry.surface = @"合成词";
+    FYVocabularyExample *example = [FYVocabularyExample new]; example.vocabularyID = entry.vocabularyID;
+    example.sentenceID = @"sentence"; example.version = 1; example.sourceTextSnapshot = @"合成原文";
+    OnStore(store, ^(sqlite3 *db) {
+        Check(sqlite3_exec(db, "CREATE TEMP TRIGGER fail_example BEFORE INSERT ON vocabulary_examples BEGIN SELECT RAISE(ABORT,'fixture'); END", NULL, NULL, NULL) == SQLITE_OK, @"install example write fault on shared connection");
+    });
+    __block BOOL done = NO; __block NSError *failure;
+    [store saveVocabulary:entry withExample:example completion:^(NSError *error) { failure = error; done = YES; }];
+    Pump(^BOOL { return done; }); Check(failure != nil, @"example failure reaches facade caller");
+    OnStore(store, ^(sqlite3 *db) {
+        sqlite3_stmt *stmt = NULL;
+        sqlite3_prepare_v2(db, "SELECT (SELECT COUNT(*) FROM vocabulary), (SELECT COUNT(*) FROM vocabulary_examples)", -1, &stmt, NULL);
+        Check(sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 0 && sqlite3_column_int(stmt, 1) == 0, @"entry and example roll back together");
+        sqlite3_finalize(stmt); sqlite3_exec(db, "DROP TRIGGER fail_example", NULL, NULL, NULL);
+    });
+    AwaitWrite(^(void (^completion)(NSError *)) { [store saveVocabulary:entry withExample:example completion:completion]; });
+    AwaitWrite(^(void (^completion)(NSError *)) { [store closeWithCompletion:completion]; });
+}
+
 int main(int argc, const char *argv[]) { @autoreleasepool {
     NSString *mode = argc > 1 ? @(argv[1]) : @"all";
     if ([mode isEqual:@"all"] || [mode isEqual:@"transaction"]) TransactionFailure();
@@ -189,5 +292,8 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
     if ([mode isEqual:@"all"] || [mode isEqual:@"nil"]) OptionalCompletions();
     if ([mode isEqual:@"all"] || [mode isEqual:@"reference"]) DamagedReference();
     if ([mode isEqual:@"all"] || [mode isEqual:@"history"]) HistoryEligibility();
+    if ([mode isEqual:@"all"] || [mode isEqual:@"ordering"]) StorageOrderingAndLifetime();
+    if ([mode isEqual:@"all"] || [mode isEqual:@"vocabulary"]) VocabularyTransactionFailure();
+    if ([mode isEqual:@"all"] || [mode isEqual:@"compatibility"]) HistoryCompatibilityAccessor();
     NSLog(@"PASS LearningStoreResilienceTests %@: isolated database faults, no UI/network/user data", mode);
 } return 0; }

@@ -1,93 +1,21 @@
 #import <Cocoa/Cocoa.h>
 #import "FYContentRouter.h"
 
-typedef NS_ENUM(NSInteger, InlineBlockKind) {
-    InlineBlockKindShort = 0,
-    InlineBlockKindLong = 1,
-};
-
-// OCR model shared by recognition, grouping and rendering. Coordinates are normalized.
-@interface OCRTextItem : NSObject
-@property(nonatomic, copy) NSString *text;
-@property(nonatomic) CGRect boundingBox;
-@property(nonatomic) CGRect lastLineBox;
-@property(nonatomic, copy) NSArray<NSString *> *lineTexts;
-@property(nonatomic, copy) NSArray<NSValue *> *lineBoxes;
-@property(nonatomic) NSInteger lineCount;
-@property(nonatomic) InlineBlockKind blockKind;
-@property(nonatomic) CGFloat confidence;
-@property(nonatomic) CGFloat groupingConfidence;
-@property(nonatomic, copy) NSString *sourceBlockID;
-// Positive source-pixel evidence of a separate filled speaker plate.
-@property(nonatomic) BOOL speakerLabel;
-@end
-
-// Pure comparison normalization shared with the coordinator; whitespace only.
-@interface FYOCRStabilityOwner : NSObject
-@property(nonatomic, copy) NSString *candidate;
-@property(nonatomic) NSInteger count;
-- (BOOL)observe:(NSString *)normalized equivalent:(BOOL (^)(NSString *current, NSString *previous))equivalent;
-- (void)reset;
-@end
-// Keeps UI OCR content and its geometry tied to the same on-screen regions
-// across frames. Transient missing/merged/misread observations do not replace
-// a confirmed block; sustained edits and page changes do.
-@interface FYInlineOCRFrameStabilizer : NSObject
-@property(nonatomic, readonly) BOOL ready;
-- (NSArray<OCRTextItem *> *)observeItems:(NSArray<OCRTextItem *> *)items;
-- (void)reset;
-@end
-// Per-capture-context, serial OCR owner. Only one-to-one line replacements are
-// compared across consecutive frames; new/multiline refinement remains intact.
-@interface FYOCRRefinementStabilizer : NSObject
-@property(nonatomic, readonly) NSUInteger fallbackCount;
-- (NSArray<OCRTextItem *> *)observeCoarseItems:(NSArray<OCRTextItem *> *)coarse
-                                refinedItems:(NSArray<OCRTextItem *> *)refined;
-- (void)reset;
-@end
-FOUNDATION_EXPORT NSString *FYNormalizeOCRTextForComparison(NSString *value);
-// Synchronous recognition only when region is eligible; rejected output leaves caller slots untouched.
-FOUNDATION_EXPORT BOOL FYRecognizeOCRRefinement(NSArray<OCRTextItem *> *coarse, BOOL autoFit,
-    NSString *(^recognizer)(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error),
-    NSString **outText, NSArray<OCRTextItem *> **outBlocks);
-// Accepted observer runs before merging; rejection leaves output slots untouched.
-FOUNDATION_EXPORT BOOL FYApplyOCRRefinement(NSArray<OCRTextItem *> *coarse, BOOL autoFit,
-    NSString *(^recognizer)(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error),
-    void (^acceptedObserver)(void), NSString **outText, NSArray<OCRTextItem *> **outBlocks);
-FOUNDATION_EXPORT BOOL FYApplyOCRRefinementWithStabilizer(NSArray<OCRTextItem *> *coarse, BOOL autoFit,
-    NSString *(^recognizer)(CGRect region, NSArray<OCRTextItem *> **blocks, NSError **error),
-    void (^acceptedObserver)(void), FYOCRRefinementStabilizer *stabilizer,
-    NSString **outText, NSArray<OCRTextItem *> **outBlocks);
-FOUNDATION_EXPORT CGFloat FYOCRFittedTextArea(NSArray<OCRTextItem *> *blocks);
-// Output changes only when a second-pass region is applicable.
-FOUNDATION_EXPORT BOOL FYOCRRefinementRegion(NSArray<OCRTextItem *> *blocks, BOOL autoFit, CGFloat fittedArea, CGRect *outRegion);
-
-// Caller-owned sampling buffer. Do not copy ownership; release once (repeat release is safe).
-typedef struct {
-    unsigned char *pixels;
-    size_t width;
-    size_t height;
-    size_t bytesPerRow;
-    CGContextRef context;
-} FYOCRPixelBuffer;
-FOUNDATION_EXPORT FYOCRPixelBuffer FYCreateOCRPixelBuffer(CGImageRef image);
-FOUNDATION_EXPORT void FYReleaseOCRPixelBuffer(FYOCRPixelBuffer *buffer);
-FOUNDATION_EXPORT BOOL FYOCRModalSurroundingsAreDimmer(unsigned char *pixels, size_t width, size_t height,
-    size_t bytesPerRow, CGRect rect);
-FOUNDATION_EXPORT BOOL FYOCRModalRectQualifiesForCropping(CGRect rect);
-
-// RGBA pixel policies; dimensions/stride and exclusions are supplied explicitly.
-FOUNDATION_EXPORT BOOL FYDetectBrightOCRContentRegion(const unsigned char *pixels, size_t width, size_t height,
-    size_t bytesPerRow, CGRect *outNormalizedRect, BOOL *outDimmedColumns,
-    const CGRect *exclusions, size_t exclusionCount);
-FOUNDATION_EXPORT BOOL FYOCRBlockSitsOnBrightBackdrop(OCRTextItem *block, const unsigned char *pixels,
-    size_t width, size_t height, size_t bytesPerRow);
+#import "ocr/FYOCRTextModels.h"
+#import "ocr/FYOCRRefinement.h"
+#import "ocr/FYOCRImageGeometry.h"
+#import "ocr/FYOCRVisionEngine.h"
+#import "ocr/FYDialogueStability.h"
+#import "ocr/FYInlineOCRFrameStabilizer.h"
+#import "ocr/FYOCRPixelAnalysis.h"
+#import "ocr/FYOCRTextProcessing.h"
 
 // Recognition and pure postprocessing; no UI, caches, credentials or capture devices.
 // Dedup/exclusion preserve identity/metadata and do not mutate input arrays or items.
 // Region remapping intentionally mutates only boundingBox/nonempty lastLineBox.
 // resolve preserves surviving input order; merge sorts only when refinement is present.
 @interface FYOCRManager : NSObject
+@property(nonatomic, strong, readonly) FYOCRVisionEngine *visionEngine;
 + (NSArray<OCRTextItem *> *)itemsByMarkingSpeakerLabels:(NSArray<OCRTextItem *> *)items inImage:(CGImageRef)image;
 // Require a centered bright panel, dim surround and an explicit dismiss control.
 // Ambiguous images pass through unchanged; no capture or extra OCR is performed.

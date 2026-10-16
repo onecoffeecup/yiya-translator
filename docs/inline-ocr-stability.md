@@ -84,6 +84,8 @@ build 50 现场复测发现另一条丢词路径：精读将引用词横向拆�
 
 ## 展示与交互
 
+2026-10-12 第三批职责拆分：面板复用、布局缓存、手动偏移、折叠入口、冻结选择列表及完整阅读卡集中维护于 `objc/presentation/FYInlineOverlayController.m`；字幕窗与快捷小条由 `FYSubtitlePresenter.m` 管理。宿主保留原动作及覆写入口；第五批后 OCR 分组／跨帧稳定与翻译请求位于 `objc/runtime/FYTranslationRuntimeController.m`，输入与显示几何连接位于 `FYCaptureRuntimeController.m`。第六批后分组与块身份实现在 `objc/inline/FYInlineGrouping.m`，浮层视图与安装／测量函数位于 `FYInlineOverlayViews.m`，规范化及共用数值辅助位于 `FYInlineLayoutUtilities.m`，模型和排版引擎仍在 `FYInlineLayout.m`，公共声明保持。此次不调整以下排版与交互合同；拆分前后对照证据见 [维护记录](project-maintenance.md)。
+
 2026-10-09 用户确认：普通长贴译统一只显示译文，测量与渲染均不保留「中文译文」标题带；顶部原有内边距仍负责拖动，正文继续滚动和点击学习。只有点入口展开的阅读卡保留字段标题、收起按钮和阅读提示。折叠入口的字段名、原因与「点击展开」仍需显示。
 
 同一段长正文首次落位后，自动 OCR 刷新沿用已经显示的正文大小，包括暂时折叠后恢复的帧。宽度与卡片修饰仍可适配空间；空间不足时滚动或折叠，不再逐帧重新尝试更大或更小的字号。用户明确调整字号后重新选择字号，新场景不继承旧段落的字号。面板诊断增加 `font` 数值，便于核对实际排版字号。
@@ -124,3 +126,46 @@ build 50 现场复测发现另一条丢词路径：精读将引用词横向拆�
 - arm64：`4CE34762-0694-3BC5-8EEE-D1B218AFB799`
 
 本机计数与源码散列记录在各副本的 `.build/inline-stability/verification.json`。它用于复核本次安装，后续改代码或安装其他构建后不代表最新状态；原始文字诊断不复制进项目文档或发布包。
+
+OCR 调度与周期身份已独立为 `FYRecognitionCycleScheduler`（详见 [模块边界与测试](mac-decoupling.md)）。实时 OCR 完成后释放识别槽；手动界面翻译保留到 HTTP 回包，暂停时仍可完成；旧 generation 不能释放新槽。生产 scoped OCR、精读合并、像素分析和 CGImage 释放正文与开工快照一致，当前稳定算法与阈值没有因拆分改变。识别 worker 与精读上下文仍待后续独立。
+
+2026-10-13 精读处理拆分：原区域资格、引号保护、合并/重叠去重及连续帧结果选择独立到 `ocr/FYOCRRefinement`，观察/规范化/假名扫描与读序到 `FYOCRTextModels`。`FYOCRRefinementSession` 唯一管理上下文与状态，typed identity 保留原 scope 字符串精度/字典相等行为；旧周期强持有旧状态，不能写入新上下文。函数/方法正文与开工快照一致（仅兼容接收者调整），没有改阈值、原文字或索引。原 manager/路由入口仍调用同一生产实现；详情与未完成范围见 [模块边界](mac-decoupling.md)。
+
+识别 worker/引擎/裁剪适配已独立（[边界与回归](mac-decoupling.md)）：原 scope/crop/enlarge/remap 和 Vision 配置/过滤/排序/错误沿用单一生产实现；不可变识别参数在主线程形成，后台 worker 的图像 lease 在像素分析和 merged 观察后、完成通知/主队列交付前结束，保留 Root 原生识别/模态覆写和强在途寿命。手动仅包住原 pass1 布局上下文，不加实时精读/姓名栏行为。模式与剩余稳定/像素仍继续细拆，没有改当前 OCR 文字、索引或阈值。
+
+2026-10-13 稳定模块独立：原字段算法与轨迹单独编译为 `FYInlineOCRFrameStabilizer`，原对白比较/确认和模式状态分别在 `FYDialogueStability` / `FYContentModeCoordinator`；原函数/方法正文精确一致，观察副本元数据、坐标、索引与阈值没有变化。原字段 39 项断言保持，新增短暂整帧空白的保留/三帧清场回归证明提前清场变异失败；locked 的原候选证据与分类器读取顺序保持。详情见 [模块边界](mac-decoupling.md)。后续内容过滤/分类/对白路由已独立到无状态 `FYContentPolicy` 的三个编译单元，像素/模态/姓名栏与显式源图后处理分别在 `FYOCRPixelAnalysis` / `FYOCRTextProcessing`。原算法正文、阈值和观察身份保持，干净源图继续不按缓存删原文；router 和 manager 公有入口兼容。
+
+
+2026-10-13 目标/映射边界：目标歧义/有效 ID 与几何 revision/token 归属 `FYDisplayTargetTracker`，目标解析使用同步窗口/显示器接口，映射计算和状态在 `capture/` 以最小依赖编译。原 token 一位小数、目标改变时隐藏旧贴译、同窗口移动时重排、歧义清 token 及展开阅读/冻结选择列表动作顺序保持。没有新增识别或请求取消规则；原坐标/阈值/观察身份保持，源码/自动回归与真实桌面验收分开，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-13 布局模型与纯分组边界：原模型/结果索引独立到 `inline/FYInlineTextModels`，grouper 与 `FYInlineBlockMatcher` 通过纯头文件/单一生产实现链接 Foundation/CG；文字/几何辅助也不导入 native 布局。原copy/可变元素/重复ID-last-wins/空ID/三位小数身份、同文异位、源文字与sourceIndices均保持；原native测量/候选/避让和绘制未改。43最小依赖、125宿主与Trace在O0/O2通过，4种边界破坏被检测并恢复；UI只编译，仍需授权后的字段、选择列表/展开阅读和长卡体验验收。真实测量/计算/绘制及后续领域继续拆分，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-13 真实测量边界：字体/段落/boundingRect与glyph primitive在 `FYInlineTextMeasurer`，原fontProvider与本轮heightCache单owner，Engine只兼容。布局与渲染读取同一实际原生度量，原font/style对象、options、ceil与正文+4、native getter次数、[text,width,font,style] keys和finally外层恢复保持；实际nested/exception路径同fixture直接编译拆前/后O0/O2均通过，源文字/选择索引与原排版规则不变。25原生+13lifecycle、130宿主与Trace的O0/O2、Module O2通过，4变异被抓住并恢复；UI只编译，长卡/字体/原生选择实际体验仍待授权验收。布局计算与绘制及后续完整范围继续，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-13 布局计算边界：原候选/合法性/严格避让/评分/变体/轮次与config/revision独立到 `FYInlineLayoutCalculator`（Foundation/CG），原Engine继承并通过明确native actions调用真实测量。具体self/helper、指定class默认工厂与标题、字符/选择索引/手动位置/稳定字号、长卡上限与内部滚动保持，没有改变阈值或已知520×170旧预期。31纯几何+6原生receiver及13lifecycle同fixture直接编译拆前/后O0/O2通过；完整收尾与未验收范围见 [模块边界](mac-decoupling.md)。UI仍只编译，实际窗口/设备验收待授权。
+
+2026-10-13 渲染与按压边界：原5个显示尺寸函数在 `FYInlineRenderingGeometry`，原绘制/scroll/fold/header/footer不变；原 `FYInlineOverlayViews` 的纯按压决策与四项state在 `FYInlineCardPressState`，具体native receiver通过明确同步协议接入，保留strict4pt、原hit/高亮/回调顺序。12尺寸同fixture拆前/后O0/O2、25按压与8冷依赖检查通过；10项原生事件fixture拆前/后仅编译，真实桌面事件未验收。OCR文本/选择索引/排版阈值/卡内滚动/旧520×170差异保持，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 显示协调边界：`FYInlineDisplayCoordinator` 拥有原panel/cache/结果与渲染身份16项状态，原NativeController继承；原相对上次实际layout的.003 jitter、target/viewport/style key、同文异位稳定ID/面板复用/compact/手动age/clear与展开记账保持。Core只Foundation/CG，native控件/窗口读取通过明确原生动作，真实calculator/测量/renderer/OCR model未改；33pure+37实际native计算、同fixture13原/新hostO0/O2通过，没有假字体或模拟排版。真实UI/冻结选择与长卡体验仍待授权，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 手动位置/拖动边界：原0.01中点floor/3x3邻桶顺序、4pt/integral clamp、rekey/age>2在独立manual owner；原weak panel/controller drag回调、Option/0.1s host timer与stop顺序在NativeDrag适配，状态唯一，字典alias/nil与清场规则保持。26pure+21native事实、18同fixture原/新实际host O0/O2通过，显示/选择/冻结/展开身份与原文索引未改；真实UI仅编译，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 选择与快照：原三位raw/lineBoxes fallback、source→epoch/stableID/Host比较在无state pure selection，原copy模型及Study当前owner保持；NativeCard绑定仍weak具体source/card、强原item/translation/stable/snapshot。24pure+19native事实、19原/新真实hostO0/O2通过，原文本/索引/同文异位选择/冻结/学习返回未变，实际点击/hover/选择仍只编译，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 展开阅读边界：六个原生算法/四项状态在独立Expanded owner，保留stable sourceFrame、原12/8pt定位、round/integral、顶部滚动距离、两帧missing关闭与当前帧恢复；weak collapse/Esc、监视器/拖动/选择/Study快照及OCR文本索引保持。66最小native事实+15原/新实际host同fixtureO0/O2通过，真实UI仅编译，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 overflow边界：原policy6和Native资源3独立，保留构造后chooser冻结、两帧count/1.5s过期、mutable entries/entry租约、原8候选避让、Host row targets、第一条scroll、weak click/Esc/关闭顺序。34pure+25Native事实与20原/新实际host同fixtureO0/O2通过，原字符/选择索引/字段/布局阈值保持；>1真实列表/UI只编译，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 native card渲染边界：20原body/placement/content/panel/update/chrome/color方法在无state Renderer，原engine/真实font/paragraph/measure/ceil/+4/Normalize与renderer primitives保持；16最小Native与20原/新实际host同fixtureO0/O2通过，复用保留scroll/重绑Host与selected badge/alpha/nil-vs-empty规则、原字符/选择索引不改。初nil-height22硬编码与诊断失败审计留档，真实native测量+4（此机30）拆前相同；实际构造/绘制/交互只编译，详见 [模块边界](mac-decoupling.md)。
+
+2026-10-14 Main学习/选词边界：displayed4与word3原状态唯一，12实际Foundation算法保留原UTF16/range/current text/句ID/version/generation归属及同文异选区；原token/bookmark强source与AI/follow弱source、busy清理及Main native读写顺序保持。37最小Foundation与22原/新实际Main同fixtureO0/O2通过，没有更改OCR字符/选择索引或学习返回；真实窗口/鼠标只编译待验收，见 [模块边界](mac-decoupling.md)。
+
+## 2026-10-14 主窗口译文列表的独立边界
+
+主窗口界面译文列表由 `FYInlineTranslationListCoordinator` 维护原signature/snapshots两copy字段，`FYInlineTranslationListRenderer` 维护无状态原生card/row构造。签名仍只含ID/mode/原始译文，保持相同签名时的旧行和旧snapshot身份、row tag与copy数组语义；选择继续打开保存快照，source/reason/geometry变化不自行替换。原生工厂过程中输入换帧仍使用原局部placement/snapshots顺序。浮层chooser的打开冻结规则在原Overflow组件，此列表不增加该规则。
+
+26pure、24native与25实际Main原/新同fixtureO0/O2检查通过，真实列表/鼠标/滚动/UI只编译，不能代替玩家体验验收。职责和本机证据见 [Mac深度拆分](mac-decoupling.md)。
+
+## 2026-10-14 学习导航与快照状态归属
+
+七个原学习进入/返回/查句导航算法在Foundation/CG `FYStudyNavigationCoordinator`，当前与返回snapshot物理状态移入唯一导航owner；Study/Root/Inline兼容访问仍得到同一八字段对象，不复制同文块或改变索引、几何、选择列表冻结、OCR/排版算法。打开同块与聊天返回的原两种sameBlock门分别保留，同源同译往返保持会话/在途回答/草稿；缺ID仍由原learning记录Snapshot。59最小与60原/新真实Study同fixtureO0O2通过，11变异失败并恢复；完整证据及待真实交互范围见[学习导航](study-navigation.md)。UI只编译，不替代真实选择/返回/滚动体验验收。

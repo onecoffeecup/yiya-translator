@@ -6,6 +6,10 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <sqlite3.h>
 
+// Shared by separately compiled app/settings units; synthetic credentials only.
+extern NSString *FYTestLocalAPIKeyValue;
+extern BOOL FYTestLocalAPIKeyFailWrites;
+
 @interface FYTestDefaults : NSObject
 + (instancetype)standardUserDefaults;
 - (id)objectForKey:(NSString *)key;

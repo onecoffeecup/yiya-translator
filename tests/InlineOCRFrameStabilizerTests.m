@@ -1,5 +1,4 @@
-#import <Cocoa/Cocoa.h>
-#import "FYOCRManager.h"
+#import "ocr/FYInlineOCRFrameStabilizer.h"
 
 static NSUInteger checks = 0;
 static void Expect(BOOL condition, NSString *message) {

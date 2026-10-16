@@ -1,6 +1,10 @@
 # 画面预览被翻译等待阻塞（2026-10-09）
 
+2026-10-12 维护入口：独立预览、输入与目标映射已迁入 `objc/runtime/FYCaptureRuntimeController.m`，OCR／HTTP 运行编排位于 `FYTranslationRuntimeController.m`；原宿主动作和覆写接口保留。以下忙碌槽、Common Modes、代次／epoch／serial 校验规则不变；拆分记录见 [维护记录](project-maintenance.md)。
+
 玩家反馈：使用采集卡，在译芽内观看繁体中文游戏画面，连续按手柄 A，约 15 秒才看到下一画面。开发者尚未取得该视频或对应 HTTP 日志；无法认定其设备故障、实际模型配置或恰好发生了 15 秒超时。
+
+2026-10-13 进一步拆分：独立调度与所有预览状态由 `objc/runtime/FYLivePreviewScheduler.m` 维护，原采集控制器只提供值快照、单次取帧租约与 UI 适配；尺寸函数在 `FYPreviewImage.m`，正文保持原实现。宿主与采集控制器的预览属性仅兼容访问，不生成重复存储。生命周期、反向验证与当前自动检查见 [Mac 深度拆分](mac-decoupling.md)。
 
 ## 根因与修改
 
@@ -9,6 +13,10 @@
 本轮把预览从上述周期拆出：窗口截图以 100 ms timer、采集卡以约 33.3 ms timer 单独读取最新画面，Common Modes 下保持调度；取帧和限尺寸缩放在独立串行后台队列上执行。最多一个任务从取帧到主线程交付在途，慢处理时跳过 tick，避免堆积截图。采集卡只显示新到的帧，使用独立序号，不消耗 OCR 的帧身份。第一轮采集卡和预览都限为 10 Hz，用户现场确认仍跳帧；第二轮将采集卡单槽缓存与预览目标提高到 30 Hz，窗口截图保留 10 Hz。缓存限速允许最多 1 ms 的回调抖动，避免在 30 / 60 Hz 输入的边界误丢帧。尺寸无需缩小时直接保留不可变 CGImage，省去每帧重复分配和拷贝；超出 2560 像素的图像仍缩小。实际帧率取决于设备、系统和处理开销，自动检查不能证明实机稳定达到 30 fps。
 
 停止时取消预览 timer；运行代次、会话 epoch、窗口、输入源和请求序号共同检查迟到画面。失效时保留尚在途任务槽到交付结束，确保重启不会积压多个取帧任务。独立 timer 活跃时，较旧的 OCR 图不再覆盖当前预览。
+
+2026-10-13 内容/交付子批：内容在途租约由 `FYContentTranslationState` 拥有，实时与单次落位 ticket、主队列交付由 `FYRuntimeDeliveryChecks` 校验。原异步强弱持有、预览/OCR/HTTP 独立槽、迟到原因和取消范围不变，完整记录见 [Mac 深度拆分](mac-decoupling.md)。
+
+2026-10-13 请求/缓存子批：`FYTranslationRequestCoordinator` 管理实时 task owner 和回包租约，服务测试 owner 仍独立；`FYInlineTranslationCoordinator` 管理缓存、计划 serial 与长批复用。预览/OCR/HTTP 独立忙碌槽、节奏、取消、旧结果规则不变；边界和当前证据见 [Mac 深度拆分](mac-decoupling.md)。
 
 ## 回归及验收范围
 

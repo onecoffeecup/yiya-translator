@@ -1,0 +1,43 @@
+#pragma once
+#import "FYReferenceNativeTestFacts.h"
+@interface SavedReferenceFact : ReferenceNodeFact
+@property(nonatomic,copy) NSString*loadedWord,*loadedReading;
+@property(nonatomic,strong) FYReferenceDictionary*loadedDictionary;
+@end
+@implementation SavedReferenceFact
+- (BOOL)isKindOfClass:(Class)cls{if(cls==FYSavedWordReferenceView.class)return YES;return[super isKindOfClass:cls];}
+- (void)loadWord:(NSString*)word reading:(NSString*)reading dictionary:(FYReferenceDictionary*)dictionary{self.loadedWord=word;self.loadedReading=reading;self.loadedDictionary=dictionary;}
+@end
+@interface ReferenceRendererFacts : ReferenceFacts
+@property(nonatomic,strong) ReferenceNodeFact*window;
+@property(nonatomic,strong) NSArray*pages;
+@property(nonatomic,strong) FYVocabularyEntry*savedWord;
+@end
+@implementation ReferenceRendererFacts
+@end
+@protocol ReferenceRendererDriver <ReferenceWorkflowDriver>
+- (NSView*)makeIntegratedReferenceCard;
+- (NSButton*)referenceLink:(NSString*)title URL:(NSString*)url;
+- (void)revealReferenceCard;
+- (void)referenceEntryChanged:(id)sender;
+- (void)referenceTabChanged:(id)sender;
+- (void)addReferenceDisclosure:(NSString*)title content:(NSView*)content;
+- (void)toggleReferenceExtra:(NSButton*)sender;
+- (void)showSavedWordReference:(NSButton*)sender;
+- (void)setSourceHoverTip:(NSString*)tip range:(NSRange)range source:(NSString*)source views:(NSArray*)views;
+@end
+static ReferenceNodeFact*View(id s,NSString*name){return[(id)s valueForKey:name];}
+static NSDictionary*RichRecord(void){NSMutableArray*examples=[NSMutableArray new];for(NSUInteger n=0;n<4;n++)[examples addObject:@{@"ja":[NSString stringWithFormat:@"合成例句%lu",(unsigned long)n],@"matched_text":@"猫",@"author":@"synthetic",@"sentence_id":@(n+1),@"license":@"synthetic",@"url":@"https://synthetic.invalid/example"}];return@{@"readings":@[@"ねこ"],@"spellings":@[@"猫"],@"reference_levels":@[@"N2"],@"source_url":@"https://synthetic.invalid/entry",@"senses":@[@{@"number":@1,@"glosses":@[@"first meaning"],@"pos":@[@"noun (common) (futsuumeishi)",@"unknown"],@"notes":@[@"synthetic note"],@"examples":examples},@{@"number":@2,@"glosses":@[@"second meaning"],@"pos":@[],@"examples":@[]}]};}
+static void RunReferenceRenderer(id<ReferenceRendererDriver>s,ReferenceRendererFacts*f){
+ Check(NSApp==nil,@"native renderer starts without application/windows");ReferenceNodeFact*card=(id)[s makeIntegratedReferenceCard];Check([card.identifier isEqual:@"integrated-reference-card"]&&Contains(card,@"词语用法")&&Contains(card,@"离线查看"),@"complete native reference card retains original structure/instructions");ReferenceNodeFact*search=View(s,@"referenceSearchField");Check(search.target==[(id)s valueForKey:@"resourceBoundary"]&&search.action==@selector(searchReferenceWord:)&&search.layer.cornerRadius==7&&search.layer.borderWidth==1,@"native search target/action and original layer styling");
+ [s lookupReferenceWord:@"猫"reading:@"ねこ"];QueryReply(f,@[],nil);Check(Contains(View(s,@"referenceStack"),@"猫 · 暂无资料")&&Contains(View(s,@"referenceStack"),@"试试输入辞书形"),@"native empty query preserves original title and instruction");[s lookupReferenceWord:@"猫"reading:@""];QueryReply(f,nil,Failure());Check(Contains(View(s,@"referenceStack"),@"合成错误"),@"native query error row preserves reason");
+ [s lookupReferenceWord:@"猫"reading:@"ねこ"];QueryReply(f,@[RichRecord(),Record(@"other")],nil);Check(View(s,@"referenceEntryPopup").items.count==2&&View(s,@"referenceSensePopup").items.count==2,@"actual popup rendering retains records and separate senses");ReferenceNodeFact*stack=View(s,@"referenceStack");Check(Contains(stack,@"同形词")&&Contains(stack,@"JLPT 参考 N2")&&Contains(stack,@"JMdict 词典原文"),@"native summary has homograph/readings/level/provenance");ReferenceNodeFact*details=View(s,@"referenceDetailStack");Check(Contains(details,@"first meaning")&&Contains(details,@"名词")&&Contains(details,@"synthetic note"),@"default sense renders raw gloss/translated POS/notes");
+ View(s,@"referenceTabs").selectedSegment=1;[s referenceTabChanged:nil];ReferenceNodeFact*more=View(s,@"referenceMoreExamples");Check(more&&more.hidden&&more.arrangedSubviews.count==2&&Contains(details,@"合成例句0")&&Contains(details,@"合成例句1"),@"first two native examples visible, remainder grouped under original disclosure");ReferenceNodeFact*toggle=Node();toggle.state=NSControlStateValueOn;[s toggleReferenceExtra:(id)toggle];Check(!more.hidden,@"native disclosure opens current more-examples container");toggle.state=NSControlStateValueOff;[s toggleReferenceExtra:(id)toggle];Check(more.hidden,@"native disclosure closes current container");
+ View(s,@"referenceTabs").selectedSegment=2;[s referenceTabChanged:nil];Check(View(s,@"referenceSensePopup").hidden&&Contains(details,@"资料可追溯")&&Contains(details,@"JMdict / EDRDG")&&Contains(details,@"完整许可文件"),@"native provenance tab preserves original source/license rows and hides sense popup");NSButton*link=[s referenceLink:@"synthetic link"URL:@"https://synthetic.invalid"];Check([link.identifier isEqual:@"https://synthetic.invalid"]&&link.action==@selector(openReferenceLink:),@"native link only binds original URL/action; no external opening");
+ View(s,@"referenceEntryPopup").indexOfSelectedItem=-1;NSUInteger before=stack.arrangedSubviews.count;[s referenceEntryChanged:nil];Check(stack.arrangedSubviews.count==before,@"invalid entry index leaves native rows intact");View(s,@"referenceEntryPopup").indexOfSelectedItem=0;View(s,@"referenceSensePopup").indexOfSelectedItem=-1;[s referenceTabChanged:nil];Check(Contains(details,@"资料可追溯"),@"invalid sense index keeps existing detail");
+ f.window=Node();f.window.contentView=Node();ReferenceNodeFact*scroll=Node();scroll.documentView=Node();scroll.contentView=Node();scroll.documentView.bounds=NSMakeRect(0,0,600,900);scroll.contentView.bounds=NSMakeRect(0,0,600,200);f.pages=@[scroll];card.bounds=NSMakeRect(0,400,100,100);[s revealReferenceCard];Check(NSEqualPoints(scroll.contentView.scrolledPoint,NSMakePoint(0,382))&&scroll.reflects==1&&f.window.contentView.layouts==1,@"native reveal lays out then aligns original title offset and reflects current clip");
+ ReferenceNodeFact*row=Node();ReferenceNodeFact*wordCard=Node();ReferenceNodeFact*sender=Node();SavedReferenceFact*saved=[SavedReferenceFact new];saved.hidden=YES;[wordCard addArrangedSubview:row];[row addArrangedSubview:sender];[wordCard addArrangedSubview:saved];FYVocabularyEntry*w=[FYVocabularyEntry new];w.vocabularyID=@"w";w.surface=@"表記";w.lemma=@"辞書形";w.reading=@"よみ";f.savedWord=w;FYReferenceDictionary*shared=s.referenceDictionary;NSString*original=f.main.string;[s showSavedWordReference:(id)sender];Check(!saved.hidden&&[sender.title isEqual:@"收起用法与等级参考"]&&[saved.loadedWord isEqual:@"辞書形"]&&[saved.loadedReading isEqual:@"よみ"]&&saved.loadedDictionary==shared,@"saved-word native reference expands in place with original lemma/read/shared dictionary");[s showSavedWordReference:(id)sender];Check(saved.hidden&&[sender.title isEqual:@"用法与等级参考"]&&[f.main.string isEqual:original],@"closing saved reference preserves current learning source");
+ NSString*source=@"猫😀猫";f.main.textStorage=[[NSMutableAttributedString alloc]initWithString:source];f.grammar.textStorage=[[NSMutableAttributedString alloc]initWithString:source];f.grammar.editable=YES;f.quick.textStorage=[[NSMutableAttributedString alloc]initWithString:@"different"];[s setSourceHoverTip:@"tip"range:NSMakeRange(1,2)source:source views:@[f.main,f.grammar,f.quick,NSNull.null]];Check([[f.main.textStorage attribute:FYSourceHoverAttributeName atIndex:1 effectiveRange:NULL]isEqual:@"tip"]&&![f.grammar.textStorage attribute:FYSourceHoverAttributeName atIndex:1 effectiveRange:NULL]&&![f.quick.textStorage attribute:FYSourceHoverAttributeName atIndex:0 effectiveRange:NULL],@"actual attributed text applies only same-source noneditable native targets");[s setSourceHoverTip:@"invalid"range:NSMakeRange(99,1)source:source views:@[f.main]];Check([[f.main.textStorage attribute:FYSourceHoverAttributeName atIndex:1 effectiveRange:NULL]isEqual:@"tip"]&&[f.main.string isEqual:source],@"invalid range leaves Unicode characters and existing attributes untouched");
+ __block BOOL current=NO;[s populateSourceHoverTips:@""views:@[f.main]analysis:nil fallback:@"fallback"isCurrent:^BOOL{return current;}];Check(![f.main.textStorage attribute:FYSourceHoverAttributeName atIndex:1 effectiveRange:NULL]&&[f.main.string isEqual:source]&&f.main.dismisses>0,@"native hover clear dismisses and removes only attributes before source/current guard");
+ Check(NSApp==nil,@"complete native page/entry/sense/example/provenance/hover bodies ran without real UI or external actions");
+}

@@ -1,8 +1,52 @@
 # 译芽 Debug 与回归工作流
 
+前一阶段交付范围与证据入口见 [阶段交付](docs/mac-decoupling-stage-delivery.md)：保留1–38批，收尾词典39批。2026-10-14 [学习存储拆分](docs/learning-storage.md) 已完成，用户随后授权继续独立的 [学习 AI 分析拆分](docs/learning-analyzer.md) 阶段；设置、诊断的新拆分仍暂缓。以下历史“继续全目标”计划不再是当前阶段必做。
+
 每次修复 Bug 前先读本文件。先复现、验证根因、最小修复，再运行回归并报告证据。自动检查验证代码处理与交付；真实设备和用户体验另行验收。
 
 本文件及源码根 AGENTS.md 随 Git 与源码包保留，新 Codex 会话从仓库根进入即可读取。维护者本机的唯一源码为工作区 `.build/yiya-translator-publish-ocj99vs_/fuyi-0.1.0`；其它机器使用正常克隆目录。工作区根仅导航，不能清空包含源码的 `.build/`。
+
+2026-10-13 深度拆分进度与模块表见 [Mac 深度拆分](docs/mac-decoupling.md)。预览调度独立为 `FYLivePreviewScheduler`；内容修订与交付分别由 `FYContentTranslationState` / `FYRuntimeDeliveryChecks` 维护，宿主只有原生动作与兼容状态入口。`bash scripts/run-live-preview-tests.sh`、`bash scripts/run-content-delivery-tests.sh`、`bash scripts/run-translation-coordination-tests.sh`、`bash scripts/run-recognition-cycle-tests.sh`、`bash scripts/run-ocr-refinement-boundary-tests.sh`、`bash scripts/run-ocr-worker-tests.sh`、`bash scripts/run-content-stability-tests.sh`、`bash scripts/run-content-policy-tests.sh`、`bash scripts/run-capture-boundary-tests.sh`、`bash scripts/run-capture-session-boundary-tests.sh`、`bash scripts/run-capture-mapping-coordinator-tests.sh`、`bash scripts/run-inline-model-boundary-tests.sh` 、`bash scripts/run-inline-text-measurement-tests.sh` 、`bash scripts/run-inline-layout-calculation-tests.sh` 、`bash scripts/run-inline-renderer-boundary-tests.sh` 、`bash scripts/run-inline-display-coordinator-tests.sh` 、`bash scripts/run-inline-manual-drag-tests.sh` 、`bash scripts/run-inline-selection-tests.sh` 、`bash scripts/run-inline-expanded-reading-tests.sh` 、`bash scripts/run-inline-overflow-tests.sh` 、`bash scripts/run-inline-card-renderer-tests.sh` 、`bash scripts/run-word-selection-tests.sh` 、`bash scripts/run-live-reading-tests.sh` 、`bash scripts/run-inline-translation-list-tests.sh` 、`bash scripts/run-live-page-builder-tests.sh` 、`bash scripts/run-main-window-boundary-tests.sh` 、`bash scripts/run-grammar-interaction-tests.sh` 、`bash scripts/run-grammar-scroll-tests.sh` 、`bash scripts/run-grammar-detail-tests.sh` 、`bash scripts/run-grammar-results-tests.sh` 、`bash scripts/run-grammar-page-builder-tests.sh` 及 `bash scripts/run-grammar-bookmark-tests.sh` 的最小依赖检查均接入统一 Debug。请求与缓存/批次分别由 `FYTranslationRequestCoordinator` / `FYInlineTranslationCoordinator` 维护，原生动作、任务 scope 和 callback 租约保持；OCR 调度由 `FYRecognitionCycleScheduler` 独立拥有，保留实时 OCR 完成释放槽、手动界面翻译等到 HTTP 回包的区别；`FY_OPT=-O2` 可核对发布优化下同一生产实现。渲染边界脚本运行纯尺寸、按压决策和不创建UI对象的原生链接/归属检查；新增 `InlineCardPressUITests` 只编译，实际事件/控件验收须另获当前桌面授权。显示协调检查运行Foundation/CG的原缓存/commit算法，以及真实native calculator和实际控制器配合合成panel事实；同一个无窗口host fixture直接编译拆前/后O0/O2，检查生命周期、身份/复用、几何重排与原clear；不mock布局算法。手动/拖动检查独立运行原key/邻桶/clamp/age及原NativeDrag适配，真实native控制器同fixture拆前/后O0/O2核对实际0.1s timer/weak回调/early-reset；只合成UI事实，不创建视图/窗口，也不把它当桌面交互验收。选择检查独立运行原copy模型/三位身份/source-epoch/stable-raw/Host比较和NativeCardBinder的实际弱回调与强payload租约；19实际host同fixture拆前/后O0/O2，无UI对象，真实点击/hover仍仅编译待验收。
+
+展开阅读检查直接执行原六个Native算法：size、appearance、open、reposition、advance、close；合成的只有panel/card/scroll/monitor边界事实与已测量placement输入，不创建NSApplication/view/control/window或调用真实事件监听。原/新真实控制器同fixture检查原定位/状态/清场，实际字体由已有测量套件另验，真实collapse/Esc/滚动体验仍仅UI编译。
+
+overflow检查执行原Foundation/CG条目/两帧计数/1.5s过期/冻结/row策略及Native入口位置/resize/build/close，保持原strong数组别名和关闭期间entry局部租约。Native事实只提供UI属性/动作与已测量size；>1真实chooser构造/按钮/scroll/Esc只编译，未授权不运行。新共享FlippedDocumentView保持原class与isFlipped实现，Root/其它调用兼容。
+
+CardRenderer检查用真实NSFont/paragraph/boundingRect/attributed与原body primitive，合成的只是label/card/scroll/panel属性；运行原复用/rebuild/clamp/颜色算法，不fake glyph width。16最小依赖和20实际host同fixture原/新O0/O2通过；原空正文height为native测量ceil+4且至少22，并非固定22，初fixture硬编码/诊断越界/修改入口匹配错误与止损审计保存，生产未因此改变。实际构造/绘制/事件只编译。
+
+WordSelection检查用Foundation实际业务与FYLearningCoordinator真实range/generation/version/selection gates，注入的只有tokenizer/learning服务边界及原生UI事实；held callbacks验证原tokenizer/bookmark强source租约与AI/follow弱source、stale结果/同句同文异选区和原busy释放顺序。不初始化真实学习库、不发API/连设备/建UI。37最小依赖+22实际原/新MainWindow同fixtureO0/O2通过；MainWindowResize/PreviewLayout/学习等UI只编译，实际窗口与鼠标另验。
+
+LiveReading检查分别链接Foundation/CG真实刷新与等级读取，以及AppKit真实字体/paragraph/textStorage boundingRect与原生属性事实；实际Main拆前/后共用同一fixture。保持ID/version变化、Display4/Word3、空状态156/104、Host刷新与hover门、原文字符/UTF16索引、speaker源匹配及高度42..190。18纯编排、18原生事实与17原/新host在O0/O2通过；不建立应用/视图/窗口/控件，不发API或连接设备。真正布局、选择和侧栏须另行桌面验收。
+
+InlineTranslationList检查执行原Trim/filter/signature/empty/same gates和index/copy策略，native执行原card/row factory、实际字体与UI属性事实。26纯编排、24native与25实际Main同fixture在O0/O2通过；Main fixture仅覆盖未迁移的scroll原生工厂，三个被测列表方法与状态/Host桥接完整执行，真实scroll构造另列UI编译。首minimum缺canonical normalize链接、草稿count动作/native setter碰撞均有原记录，纠正依赖/新接口名后原/新共同夹具通过，没有弱化行为断言。
+
+LivePageBuilder最小检查只链接独立native builder与FYLearningViews，通过真实NSNotificationCenter/mainQueue和合成text/field原生事实运行原弱callback/注册算法，不创建NSApplication/view/control/window。20最小与19实际Main/原makeLivePage选择body精确摘录同fixtureO0/O2通过；返回同一SDK token仅供测试移除合成注册，生产仍忽略center拥有的token，无新增observer owner。完整页面构造只编译原/新专用LivePageBuilderUITests与现有布局/学习UI，不能按摘录检查宣称全页面/桌面通过。旧列表fact按实现补方法声明，生产算法及所有旧断言不改。
+
+MainWindowBoundary检查用原FrameDriven sync三表达式与原class独立AppKit链接，10几何检查包括真实属性求值次序、3次bounds读取和setter重入；18实际Main原/新同fixture运行原导航/chat/resize，canonical选中状态更新使用mounted页面UI事实，未运行unmounted真实约束mount。所有163个Main方法正文保持。首getter顺序误预期与fact优先级ABI错误由旧代码同fixture/本机SDK证明，只纠正测试预期及NSLayoutPriority float签名，不改生产或249断言。完整窗口/FrameDriven真实初始化与resize/layout仍UI编译单列。
+
+GrammarInteraction检查用Foundation真实七个分析/followup/config/expand/review算法、canonical learning gate与原ActionState；只注入held learning/analyzer服务边界、原生config/文字/渲染动作。51最小与44实际原/新controller同fixtureO0/O2通过，包含原strong source leases、迟到version/generation/item/state gates、错误保留结果和main/quick独立transport/cancel。readonly配置container保留原strong局部字符串别名，native Trim/fallbackgetter顺序不改，Key排除identity JSON；只用合成Key，不发API/初始化真实库。UI scroll/render与真实服务另验，GrammarActionsAppTests等只编译。
+
+GrammarScroll检查执行四个原Native算法，独立renderer38与实际原/新controller37同fixture在O0/O2通过。只合成SDK view/clip/document/window/stack事实，updates与layout期间更换几何和scroll；原before/after强局部、当前读取位置、layout后frame/bounds clamp保持。clang-MM实际依赖证明公有头不带Root/support/capture/OCR/settings/diagnostics。5变异退出2、恢复38退出0；四相关UI仅编译，真实AppKit滚动/文字布局未运行，不由facts替代。
+
+GrammarDetail检查执行六个原Native算法：detail、三highlight、局部selection、main/quick actioncontrols。39独立与37实际原/新controller同fixtureO0/O2通过，真实NSMutableAttributedString、canonical applicableGrammarItems/gates、UIFont/颜色与alpha0.23；合成仅控件/约束/工厂与输入状态。UTF16/emoji/换行/选区和其它属性保留；原动态facade覆写和detail→highlight→hover顺序、104pt/3/4行与原raw解释保持。8变异退出2，恢复39退出0；四相关UI仅编译，真实鼠标/控件布局/高亮体验未执行。
+
+GrammarResults检查执行五原Native busy/results/clear/tab/followup算法。96独立与93实际原/新controller同fixtureO0/O2通过，使用真实Core七字段、ActionState reset/cancel和UIFont/颜色，只有控件/约束/结构图工厂与其它组件动作是明确边界。覆盖结果局部强引用/读取时点、clear主状态取消与quick保留、两代次/两次nil和Tab动态重入、offset/rows/empty与页签优先级。首95/92夹具未检出读取时点变异，保留全部证据后只新增原result身份断言；最终八变异失败且恢复96通过。四UI只编译，真实图/窗口/鼠标体验未运行。
+
+GrammarPageBuilder检查完整三个生产构造方法的独立冷初始化和结构输入验证：65最小、原64/新65实际controller同fixture O0/O2通过；新版本额外验证新增target适配只读取一次原弱Host，旧版没有该接口。合法main/quick与emoji在私有子进程到达第一原生factory即以明确43退出，父进程验证marker/状态，未创建视图。该证据只覆盖guards/目标/归属，不能称完整card/info/graph运行通过。三个完整正文只typed receiver/原host target适配，144其它方法精确；完整原/新专用GrammarPageBuilderUITests两opt和五相关UI均仅编译。六变异失败、恢复minimum/host65通过。
+
+GrammarBookmark检查真实Foundation两类收藏算法/canonical gate，注入的仅held learning/store服务与native BOOL/text/事件边界。60独立与61实际原/新controller同fixtureO0/O2通过；验证原index gate/参数求值和重入、selected两次读取、enabled短路、existing delete、原stale分支与强source/item/existing任务租约，sender不进入async捕获。Core仍七字段，原Core其它实现和146 Native方法精确；七变异失败、恢复60通过。业务头clang完整依赖无AppKit/Root/private/采集/设置诊断；相关五UI只编译，真实按钮与持久化体验另验。
+
+StudyChatContext检查执行Foundation真实四算法、canonical identity/对白比较/片段与原Session；采集/store/analyzer及原生字段是held边界，不创建UI或真实数据库。73最小与74实际原/新controller同fixture O0/O2通过，八变异失败/恢复通过。覆盖fresh UUID/latest与pinned、nil/empty回退、配置读写交错、取消独立、旧解析不清新busy、两草稿顺序恢复及原strong上下文/weak网络寿命。RuntimeOwnership另查两字段唯一owner与双向兼容，相关UI仅编译，详见[聊天上下文](docs/study-chat-context.md)。`bash scripts/run-study-chat-context-tests.sh`已接入统一Debug。
+
+QuickSentenceWorkflow检查Foundation真实六算法、canonical identity/text与实际ActionState.reset；analyzer/store响应及native配置/BOOL/text是明确held边界。81最小与82实际原/新controller同fixture O0/O2通过，九变异失败/恢复通过，覆盖独立cancel/旧回包/重复请求、strong任务租约与copy/别名、ID/version/UUID及原status刷新顺序。RuntimeOwnership另查九状态唯一归属与冷/双向兼容。`bash scripts/run-quick-sentence-workflow-tests.sh`已接统一Debug；相关UI仅编译，详见[查句业务](docs/quick-sentence-workflow.md)。
+
+StudyNavigation检查真实七个Foundation/CG进入/返回算法、canonical Snapshot/Session与原Quick cancel；identity/learning与原生panel/input/peer actions为明确边界。59最小与60实际原/新controller同fixtureO0O2通过，11变异失败/恢复通过；覆盖两种sameBlock、同源同译草稿/在途回答、固定ID/version、close重入/强result、读序/focus短路及强回调。RuntimeOwnership新增12字段唯一owner并加强跨Inline相同快照断言，兼容getter临时autorelease排空后才验证释放。`bash scripts/run-study-navigation-tests.sh`已接统一Debug；UI只编译，详见[学习导航](docs/study-navigation.md)。
+
+StudyRenderer检查原Chat/Quick/Scroll三组件：69独立与68实际原/新controller同fixtureO0O2通过，执行13完整原生方法，真实字体/富文本与weak闭包；仅OS控件构造及native属性/peer工厂为明确边界，私有IMP恢复，不创建UI。完整Quick render图/真实窗口与绘制只编译原/新StudyRendererUITests O0O2，登记统一UI inventory。10变异失败/恢复，Runtime增加零state/冷/视图owner与Host target，public header编译器依赖证明不带大Support/Root/capture/settings/diag。`bash scripts/run-study-renderer-tests.sh`接统一Debug，详见[原生渲染](docs/study-native-rendering.md)。
+
+CollectionReview 检查真实七个 Foundation 业务方法、生产模型与 canonical 选词算法；仅 held Store 与原生文字/显隐/刷新动作是服务边界。60 独立与 61 实际原/新控制器同用例在 O0/O2 通过，八项变异失败并恢复。覆盖列表 strong 别名、nil/空、稳定 ID 重绑、原刷新/重入顺序、错误保留、强加载/标记和弱删除回调。RuntimeOwnership 检查三字段唯一 owner 与兼容访问；业务头实际依赖隔离 AppKit/Root。`bash scripts/run-collection-review-tests.sh` 接入统一 Debug；CollectionLayout 等 UI 仅编译，详见 [收藏复习](docs/collection-review.md)。
+
+CollectionWorkflow 执行真实 Query/Card/Foundation 和原生十方法：94 业务/64 原生最小及实际旧新控制器同用例 O0/O2 通过，11 变异失败并恢复。只注入 Store/learning 和 OS 工厂/控件事实，真实模型、选词、例句与 UIFont 共用。覆盖原强数组/copy、raw identity 渲染、版本绑定、同步 sender、不扩大 pending/cancel、卡片 generation/强控件 lease 与原位更新。首 fixture 类型/nil字典/+new返回所有权/弱观测问题的原失败与定位证据保留，不改生产/断言；两业务头及公开原生头的 compiler graph 检查隔离 UI/Root 边界。`bash scripts/run-collection-workflow-tests.sh` 已纳入统一入口，相关 UI 只编译，详见 [收藏工作流](docs/collection-workflow.md)。
 
 ## 数据流与审查基线
 
@@ -24,14 +68,18 @@ flowchart LR
 
 | 模块 | 入口与职责 |
 | --- | --- |
-| AppDelegate | `objc/LiveCaptionTranslator.m` 的 `start` / `stop` / `timerFired:` 及翻译、显示编排；不是独立管线框架 |
-| 输入 | 窗口 `CGWindowListCreateImage(IncludingWindow)`；`FYCaptureCardInput` 的 AVFoundation 会话、单帧槽与 epoch；QuickTime / OBS 作为显示窗口 |
-| OCR | `FYOCRManager` 的 Vision、区域回映、精读与合并、模态过滤、对白与字段稳定 |
-| 内容路由 | `FYContentRouter` 的整帧判定、模式确认、对白与选项分流、正文过滤、同句及对白稳定策略；主控制器保留请求、缓存与显示编排，详见 [模块边界](docs/content-router-module.md) |
-| 翻译 | `FYTranslationManager` 的请求构造、对白及短文本批次 15 秒 / 显式长正文批次 60–90 秒的数据等待超时、HTTP / JSON 解码、缓存与主线程交付策略；没有独立自动重试队列 |
+| 宿主与运行编排 | `objc/app/FYAppDelegate.m` 保留生命周期和设置控件；四个 `app/*Bridge.m` 类别保留动作／属性门面，委托字段声明为 `@dynamic` 防止主类自动生成重复状态；`objc/runtime/FYTranslationRuntimeController.m` 保留 `start` / `stop` / `timerFired:` 和 UI/原生动作适配；`FYRecognitionCycleScheduler`、`FYContentTranslationState`、`FYInlineTranslationCoordinator`、`FYTranslationRequestCoordinator` 分别拥有 OCR 调度、内容代次、缓存/长短计划、实时请求状态。方法仍通过明确宿主协议访问原始接收者，保留回调持有与覆写边界 |
+| 输入 | `objc/runtime/FYCaptureRuntimeController.m` 负责输入选择、目标／映射与预览适配；`FYDisplayTargetTracker` 唯一拥有目标/几何与探测日期，`FYDisplayTargetResolver` 仅按窗口快照及同步几何接口解析；`capture/` 中映射算法/缓存与 schedule/坐标转换仅用 Foundation/CG；独立 `FYLivePreviewScheduler` 只接收值快照与取帧租约，拥有预览队列/timer/busy/serial/帧号，`FYPreviewImage` 保留原尺寸算法；窗口 `CGWindowListCreateImage(IncludingWindow)`；`FYCaptureCardInput` 保留设备/权限适配并继承 `FYCaptureSessionController` 的原 AV 会话/队列/观察/epoch，原具体 self/锁/delegate/强任务捕获保留；`FYCaptureCardFrameSlot` / `FYCaptureCardModels` 仅用 Foundation/CG，显式 snapshot 是不可变会话字段视图；QuickTime / OBS 作为显示窗口 |
+| OCR | `ocr/FYOCRTextModels` 的观察/基本文字与读序；`FYOCRRefinement` 的原资格/选择/合并去重；`FYOCRRefinementSession` 的上下文唯一状态与 worker 隔离；`FYOCRRecognitionWorker` 编排两种后台识别与图像 lease；`FYOCRVisionEngine` 拥有配置/过滤/排序/错误；`FYOCRImageGeometry` 拥有 scope/放大/回映；`FYDialogueStability` / `FYOCRStabilityOwner`、`FYInlineOCRFrameStabilizer`、`FYContentModeCoordinator` 分别拥有对白/字段/模式状态；`FYOCRPixelAnalysis` 拥有原模态/姓名栏像素及 caller-owned buffer，`FYOCRTextProcessing` 处理显式源图/浮层快照；`FYOCRManager` 只保留原公有方法兼容适配 |
+| 内容路由 | `FYContentPolicy` 的过滤、分类与对白路由三个独立编译单元保留原 self/helper 分派；`FYContentRouter` 继承兼容入口并委托模式状态 owner；同句与连续确认沿用 `FYDialogueStability`；翻译运行组件保留请求、缓存与显示编排，详见 [模块边界](docs/content-router-module.md) |
+| 翻译 | `FYTranslationManager` 的请求构造、对白及短文本批次 15 秒 / 显式长正文批次 60–90 秒的数据等待超时、HTTP / JSON 解码；缓存规划/批次协调与请求/主线程交付分别由上述独立组件处理，没有独立自动重试队列 |
+| 页面与学习交互 | `objc/presentation/` 的主窗口／阅读、收藏、语法、查句／聊天和词典／悬停控制器拥有控件及临时状态；宿主保留动作入口和测试覆写边界，控制器通过明确协议读取服务与连接页面 |
 | 学习状态 | `FYLearningCoordinator` 的句子身份、版本、不完整帧复用及固定阅读；`FYLearningStore` 的 SQLite 持久化 |
-| 显示 | `FYWindowManager` / `FYGeometryManager` 的目标与映射；`FYInlineLayout` 的贴译排版；AppDelegate 的字幕、面板、折叠与入口 |
-| 诊断 | `FYRuntimeDiagnostics` 元数据内存环；`FYTranslationTrace` 显式启用的文字 JSONL |
+| 显示 | `FYWindowManager` 保留原显示器查询与候选选择覆写，`FYGeometryManager` 兼容原映射/坐标入口，实际计算在上述纯组件；`inline/FYInlineTextModels`、`FYInlineLayoutCalculator` 的纯候选／避让／评分与轮次，`FYInlineLayout.m` 原生兼容门面和 `inline/` 的分组／身份、独立原生浮层视图、纯渲染几何/按压状态、`FYInlineDisplayCoordinator` 的面板复用/缓存与帧提交、共用实际测量工具；`presentation/FYSubtitlePresenter` 的字幕／快捷小条／预览，`presentation/FYInlineOverlayController` 的面板复用、拖动、折叠／选择与展开阅读；宿主提供几何和学习连接 |
+| 设置 | `objc/settings/FYSettingsStore` 管理普通设置、凭据保存状态及延迟保存；`FYServiceTestController` 独立管理服务测试任务和代次；服务表单与预设沿用原组件 |
+| 诊断 | `FYRuntimeDiagnostics` 元数据内存环；`FYTranslationTrace` 显式启用的文字 JSONL；`objc/diagnostics/FYDiagnosticsController` 接收元数据并管理报告导出和邮件草稿状态 |
+
+2026-10-12 第一、二批模块拆分：`LiveCaptionTranslator.m` 仅启动应用；宿主实现独立编译，测试和离线工具导入 `app/FYAppDelegateInternal.h` 声明并链接共享生产源码清单，不再导入 `.m` 或重命名应用 main。私有头保留既有字段与覆写边界用于逐步迁移，不作为公开 API；设置、服务测试与诊断状态由宿主持有的独立组件拥有。`HostExtractionTests` 覆盖快照、凭据失败、保存定时器、服务测试代次与诊断隐私，并纳入核心检查。2026-10-12 第四批继续迁移 159 个页面／学习交互方法及 210 个状态字段；当时主循环和贴译展示仍未拆分。`PresentationOwnershipTests` 验证冷初始化、弱宿主、唯一状态、原生动作和草稿保留，登记至桌面检查清单。随后第三批迁移 101 个字幕／贴译方法及 49 个展示字段，控件配置继续读取原设置，OCR／请求／几何编排保持宿主原入口。`OverlayOwnershipTests` 检查冷／弱归属、唯一状态、原生按钮、稳定阅读身份和清场监听释放，也登记在桌面检查清单。第五批继续迁移 180 个方法、74 个存储字段及 13 个既有派生访问入口至 `objc/runtime/`；`RuntimeOwnershipTests` 在无窗口环境检查冷／弱归属、独立忙碌槽、内容租约、服务测试独立、停止清理及异步回调强／弱宿主生命周期，纳入核心入口。第六批机械拆分兼容类别、共享辅助及分组／浮层视图；`RuntimeOwnershipTests` 同时检查全部动态兼容属性没有宿主 ivar，单文件排版消费者改用统一的 `FY_LAYOUT_CORE_SOURCES`，不拉入可选布局诊断。
 
 对白默认两帧确认，高相似修正三帧；连续同句复用，真正 A→B→A 重新建立身份并请求。失败不缓存，下一周期经过节流可重试：对白 4 秒、界面 1.2 秒。界面字段的确认与保留规则见 [OCR 稳定合同](docs/inline-ocr-stability.md)。
 
@@ -60,6 +108,8 @@ python3 scripts/debug.py import-trace /absolute/private/path/events.jsonl /absol
 ```
 
 `scripts/run-checks.sh` 默认执行无界面入口，随后明确报告桌面检查未运行。只有在安排好的桌面时段设 `FY_TEST_ALLOW_UI=1` 才执行 UI / 更新安装验收；`FY_TEST_COMPILE_ONLY=1` 仅编译这些套件。GitHub Actions 使用 macOS 15 runner，报告上传到工作流附件；本机通过不代表远端 CI 已执行。
+
+2026-10-13 离线工具启动隔离：工作区签名工具或私有 bundle 读取受保护工作区图片时，经 LaunchServices 曾在 ImageIO / Foundation `__open` 停住，尚未进入应用初始化或 OCR。同签名二进制直接处理原图通过；私有 bundle + 字节完全相同的私有输入完成真实 Vision。离线脚本在构建锁下复制签名 bundle 到 0700 的每轮目录，再把输入原始字节复制到其中的 0700 input 目录、文件 0600，保留原 basename；不修改原文件或图像像素，不重编码。仍经 LaunchServices 启动并生成独立原子报告，完成后删除该轮副本；报告复制回既有私有证据目录。launch metadata 原“路径必须原文件”结构断言改为私有位置/权限/原副本 SHA256/原文件不变的行为断言，签名字节、真实 OCR、正反/并行/等待失败断言全部保留。失败报告及首次探针的 open wait 超时仍保存；OS 策略的具体原因未据此认定。
 
 2026-10-09 补齐采集卡脚本覆盖：`debug.py check` 和 `run-acceptance.py` 均执行 `SourceManifestTests` 与 `CaptureCardOfflineTests`。后者以仓库中的合成图片调用真正的 `run-capture-card-check.sh offline` 和签名 OCR 工具，验证 Accurate / Fast、指定台词缺失必须失败、文件缺失、硬件门禁及并行正反断言隔离（含强制重建）；不创建窗口、不读取真实凭据或学习库、不连接采集设备或请求翻译。每轮离线核对独立传参、独立报告，同一工具的重建 / 签名串行化。默认无界面入口与 CI 经 Debug 复用这一步。
 
@@ -283,3 +333,5 @@ python3 scripts/run-acceptance.py --ui
 - 按该 Bug 的最短步骤恢复失败，必要时连续运行；30 分钟稳定性、另一台机器、Intel 实机及其它 macOS 单列，不由合成检查推定。
 
 上述 Debug / Replay 平台建设当时只更新源码和自动化，没有安装、改变版本、推送或发布；无需为了验证 Replay 启动游戏。后续 Bug 修补的本机安装与用户验收另记于「当前覆盖与产品缺口」及对应记录，不能把这段历史状态当成当前所有修复的交付状态。
+
+词典查询／悬停与原生展示专项：`FY_OPT=-O2 bash scripts/run-reference-workflow-tests.sh`。默认O0，已接入统一Debug。四入口63／26／63／26检查执行生产算法，传输与控件边界隔离；header实际clang依赖图、独立代次、迟到结果、缓存写入顺序、weak currentness与strong任务租约同时验证。真实查询／鼠标／窗口及外链不运行，见[词典工作流](docs/reference-workflow.md)。

@@ -10,13 +10,18 @@
 
 此前追加状态（build 51）：2026-10-11 的引用词缺失修补已进入本机 0.2.1 build 51，用户确认该句复测正常。首遍完整引用的保护属于 `FYOCRManager`；同一行横向短片段的收录、排序和串接属于 `FYContentRouter`。下文 build 44 的检查与安装保持历史记录，该轮验证见 [引用词修复](ocr-refinement-quotation.md)。
 
+2026-10-13 当前源码边界：内容过滤、分类与对白/选项/字幕带路由已独立为 `FYContentPolicy` 的三个无状态算法编译单元；`FYContentRouter` 继承原公有 API 并委托 `FYContentModeCoordinator` 的唯一状态。对白比较/确认在 `FYDialogueStability`，字段轨迹在 `FYInlineOCRFrameStabilizer`；原 `FYOCRManager` 只兼容访问精读、Vision、几何、像素和文本组件。此前 build 和安装记录为历史范围，本批源码未安装。当前测试与模块图见 [Mac 深度拆分](mac-decoupling.md)。
+
 ## 职责
 
 | 位置 | 负责内容 |
 | --- | --- |
-| [FYContentRouter.h](../objc/FYContentRouter.h) 与 [FYContentRouter.m](../objc/FYContentRouter.m) | 整帧模式判定、模式候选状态、对白字幕带、姓名与注音、对白与选项分流、正文过滤、同句与对白稳定策略、轮询及同文重试间隔 |
-| [FYOCRManager.m](../objc/FYOCRManager.m) | Vision、区域映射、双遍合并与精读结果选择、完整源图独立姓名栏角色证据、源观察去重、弹窗范围、通用文本稳定计数和界面字段跨帧跟踪 |
-| [LiveCaptionTranslator.m](../objc/LiveCaptionTranslator.m) | 按原顺序调用规则，处理采集会话、交互面板、在途请求、缓存、学习身份、取消及迟到交付、实际窗口显示 |
+| `ocr/FYContentPolicy` 与过滤/分类/对白路由编译单元 | 原模式分类、字幕带/姓名/注音、对白选项分流、过滤及间隔；保留 self/helper 分派 |
+| `FYContentRouter` / `FYContentModeCoordinator` | 兼容 API 和原模式候选/已确认决定唯一状态 |
+| `FYDialogueStability` / `FYInlineOCRFrameStabilizer` | 原同句/对白确认与字段跨帧轨迹，各自独立状态 |
+| `FYOCRPixelAnalysis` / `FYOCRTextProcessing` | 原模态/姓名栏像素与 buffer 生命周期、显式源图/浮层快照后处理 |
+| `FYOCRVisionEngine` / `FYOCRImageGeometry` / `FYOCRRefinement` | 原识别配置、区域映射、双遍资格/选择/合并；manager 兼容入口 |
+| `runtime/FYTranslationRuntimeController` 与各调度/请求/交付 owner | 保持采集、交互、请求、缓存、学习及迟到交付的原顺序；宿主保留原生动作入口 |
 | [FYLearningModels.m](../objc/learning/FYLearningModels.m) | 共享对白比较键和学习模型；比较键通过纯函数回调提供给路由模块，不复制算法 |
 
 规则模块不发起采集、Vision 请求、网络、窗口操作或凭据读写。它接收共享 OCRTextItem；公开头文件只依赖 Foundation、CoreGraphics 及模型前向声明。实现使用 OCR 模型和既有空白归一化函数，不引入新的 OCR 或学习数据库。

@@ -170,11 +170,8 @@
     self.batchTextColorCustomized = NO; self.batchTextColorWell.color = [self inlineThemeTextColor];
     [self controlValueChanged:self.batchThemeControl];
 }
-- (NSInteger)inlineThemeIndex {
-    NSInteger index = self.batchThemeControl ? self.batchThemeControl.selectedSegment : 3;
-    return index>=0 && index<=3 ? index : 3;
-}
-- (NSColor *)inlineThemeTextColor { return FYSubtitleThemeText([self inlineThemeIndex]); }
+
+
 
 - (void)updateSubtitleAppearancePage {
     NSInteger mode = self.appearanceModeControl.selectedSegment == 0 ? 0 : 1;

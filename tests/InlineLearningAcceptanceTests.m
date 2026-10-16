@@ -98,7 +98,14 @@ int main(int argc,const char *argv[]) { @autoreleasepool {
     Require(app.studyChatSession.sending && answerDone!=nil,@"pending chat fixture");
     [app returnFromStudyChatToInlineLearning:nil];[app askQuickSentence:nil];
     Audit(app.studyChatSession.sending,@"same-block round trip keeps pending AI request",[NSString stringWithFormat:@"sending=%d",app.studyChatSession.sending]);
-    answerDone(Envelope(@"块 A 的回答"),Response(),nil);Tick();
+    // Delivery is asynchronous; a fixed 50 ms tick can inspect the conversation
+    // before the reply reaches the main queue. Keep a delayed synthetic reply
+    // and wait for completion with Pump's five-second failure deadline.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)),
+        dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            answerDone(Envelope(@"块 A 的回答"),Response(),nil);
+        });
+    Pump(^BOOL { return !app.studyChatSession.sending; });
     Audit(app.studyChatSession.messages.count==2,@"pending answer survives same-block round trip",[NSString stringWithFormat:@"messages=%lu",(unsigned long)app.studyChatSession.messages.count]);
 
     [app openInlineLearningForBlockText:@"明日は図書館で一緒に勉強しましょう。" translation:@"明天一起去图书馆学习吧。"];

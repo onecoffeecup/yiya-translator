@@ -1,7 +1,5 @@
 #pragma once
-#define main FuyiMainForRound3Review
-#import "LiveCaptionTranslator.m"
-#undef main
+#import "app/FYAppDelegateInternal.h"
 #import <sqlite3.h>
 
 // Independent review: real AppKit actions, temporary stores, fictional text,

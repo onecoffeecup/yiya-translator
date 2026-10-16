@@ -137,3 +137,7 @@ __attribute__((constructor)) static void FYPrepareTestProcess(void) {
 #endif
     }
 }
+
+// The separately compiled app/settings units share the isolated credential fixture.
+NSString *FYTestLocalAPIKeyValue;
+BOOL FYTestLocalAPIKeyFailWrites;

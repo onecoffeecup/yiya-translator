@@ -9,9 +9,7 @@
 //   {"image": "...", "require_line": "...", "dialogue_contains": "...", "fast": false, "report": "..."}
 // 经 LaunchServices 启动很关键：Vision 的 Accurate 识别要求调用方是有 bundle 身份的签名应用，
 // 直接从终端跑子进程时结果可能不同（会以 CRImageReaderError 或 Metal 归档异常失败）。
-#define main FuyiMainForCaptureCardCheck
-#import "LiveCaptionTranslator.m"
-#undef main
+#import "app/FYAppDelegateInternal.h"
 #import <ImageIO/ImageIO.h>
 #import <sys/stat.h>
 

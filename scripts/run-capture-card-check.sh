@@ -20,8 +20,7 @@ MODULE_CACHE="$ROOT_DIR/.build/capture-card-check-module-cache"
 mkdir -p "$OUT" "$MODULE_CACHE"
 chmod 700 "$OUT"
 
-# 工具源码自己 #import 了 LiveCaptionTranslator.m，这里只补链接其余实现文件，
-# 否则会出现重复符号。
+# 工具只导入宿主声明，和测试一样链接同一份生产实现；不链接应用 main。
 LINK_SOURCES=("${FY_APP_LINK_SOURCES[@]}")
 FRAMEWORKS=(
   -framework Cocoa -framework Security -framework UniformTypeIdentifiers -framework CoreGraphics -framework QuartzCore -framework Vision
@@ -111,19 +110,40 @@ if [ "$MODE" = "offline" ]; then
   CHECK_APP="$(bundle_tool "$ROOT_DIR/tools/CaptureCardOcrCheck.m" CaptureCardOcrCheck 译芽采集卡离线核对 "$FY_CAPTURE_CARD_BUNDLE_ID" "离线核对工具不访问相机。")"
   REPORT_DIR="$(mktemp -d "$OUT/offline-ocr-XXXXXX")"
   REPORT="$REPORT_DIR/report.log"
+  # Keep the signed build in the workspace, but launch a per-run private copy.
+  # On this macOS, LaunchServices processes from Documents can stall in ImageIO
+  # __open before application initialization. The same signed bytes launched
+  # from a private temporary directory read the original input successfully.
+  # Copy under the build lock so concurrent forced rebuilds cannot replace the
+  # bundle while this run snapshots it. Snapshot the input bytes into the same
+  # private run directory: LaunchServices must not read the protected workspace.
+  RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/yiya-offline-ocr-XXXXXX")"
+  chmod 700 "$RUN_DIR"
+  trap 'rm -rf "$RUN_DIR"' EXIT
+  RUN_APP="$RUN_DIR/$(basename "$CHECK_APP")"
+  exec 9>"$OUT/CaptureCardOcrCheck.lock"
+  python3 -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX)'
+  cp -R "$CHECK_APP" "$RUN_APP"
+  exec 9>&-
+  mkdir -m 700 "$RUN_DIR/input"
+  RUN_FRAME="$RUN_DIR/input/$(basename "$FRAME")"
+  cp "$FRAME" "$RUN_FRAME"
+  chmod 600 "$RUN_FRAME"
+  RUN_REPORT="$RUN_DIR/report.log"
   # 经 LaunchServices 启动：Accurate 识别要求调用方是有 bundle 身份的签名应用。
   # Each process receives its own arguments/report, so a manual check and CI
   # cannot overwrite a shared request.json or read each other's OCR results.
-  OCR_ARGS=("$FRAME" "$REQUIRED" --dialogue-must-contain "$REQUIRED" --report "$REPORT")
+  OCR_ARGS=("$RUN_FRAME" "$REQUIRED" --dialogue-must-contain "$REQUIRED" --report "$RUN_REPORT")
   if [ "${FY_CAPTURE_CARD_FAST_OCR:-0}" = "1" ]; then OCR_ARGS+=(--fast); fi
   # 短任务可能在 open 注册 kevent 等待前已退出；本次唯一目录的原子报告仍可核对结果。
-  if ! open -W -n "$CHECK_APP" --args "${OCR_ARGS[@]}"; then
-    if [ ! -s "$REPORT" ]; then
+  if ! open -W -n "$RUN_APP" --args "${OCR_ARGS[@]}"; then
+    if [ ! -s "$RUN_REPORT" ]; then
       echo "离线核对启动或等待失败，且未生成本次报告" >&2
       exit 1
     fi
     echo "LaunchServices 等待异常，继续核对本次已完成的独立报告" >&2
   fi
+  if [ -f "$RUN_REPORT" ]; then cp "$RUN_REPORT" "$REPORT"; fi
   cat "$REPORT" 2>/dev/null || echo "离线核对没有生成报告"
   grep -q "^PASS" "$REPORT" 2>/dev/null || { echo "离线核对失败" >&2; exit 1; }
   echo "离线核对通过：真实画面经生产 OCR／对白提取完成（报告 ${REPORT}）。"

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Exercise the real signed OCR tool with fictional input; never open hardware."""
 import os
+import hashlib
+import json
+import shlex
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import subprocess
@@ -98,6 +101,59 @@ class CaptureCardOfflineTests(unittest.TestCase):
         self.assertEqual(negative.returncode, 1, negative.stdout + negative.stderr)
         self.assertIn("OCR 文本缺少", negative.stdout)
         self.assertNotIn("\nPASS\n", negative.stdout)
+
+    def test_private_launch_copy_keeps_signed_bytes_and_byte_identical_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            original_hash = hashlib.sha256(IMAGE.read_bytes()).hexdigest()
+            metadata = Path(directory) / "launch.json"
+            observer = Path(directory) / "observe.py"
+            observer.write_text('''import hashlib, json, os, stat, sys
+from pathlib import Path
+app = next(Path(arg) for arg in sys.argv[1:] if arg.endswith('.app'))
+source = Path(os.environ['FY_EXPECTED_OCR_APP'])
+exe = Path('Contents/MacOS/CaptureCardOcrCheck')
+image = Path(sys.argv[sys.argv.index('--args')+1])
+original = Path(os.environ['FY_EXPECTED_OCR_IMAGE'])
+record = dict(private_copy=app != source,
+              parent_mode=stat.S_IMODE(app.parent.stat().st_mode),
+              same_binary=hashlib.sha256((app/exe).read_bytes()).digest() == hashlib.sha256((source/exe).read_bytes()).digest(),
+              input_path=sys.argv[sys.argv.index('--args')+1],
+              input_parent=str(image.parent),
+              input_mode=stat.S_IMODE(image.stat().st_mode),
+              input_parent_mode=stat.S_IMODE(image.parent.stat().st_mode),
+              original_input_hash=hashlib.sha256(original.read_bytes()).hexdigest(),
+              input_hash=hashlib.sha256(image.read_bytes()).hexdigest(),
+              report_parent=str(Path(sys.argv[sys.argv.index('--report')+1]).parent),
+              app_parent=str(app.parent))
+Path(os.environ['FY_LAUNCH_METADATA']).write_text(json.dumps(record))
+''')
+            wrapper = Path(directory) / "open"
+            wrapper.write_text('#!/bin/bash\npython3 ' + shlex.quote(str(observer)) +
+                               ' "$@"\nexec /usr/bin/open "$@"\n')
+            wrapper.chmod(0o700)
+            env = dict(os.environ, FY_CAPTURE_CARD_ALLOW_HARDWARE="0",
+                       FY_LAUNCH_METADATA=str(metadata),
+                       FY_EXPECTED_OCR_APP=str(ROOT / ".build/capture-card-check/译芽采集卡离线核对.app"),
+                       FY_EXPECTED_OCR_IMAGE=str(IMAGE),
+                       PATH=directory + os.pathsep + os.environ["PATH"])
+            result = subprocess.run(["bash", str(SCRIPT), "offline", str(IMAGE), EXPECTED],
+                                    cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("\nPASS\n", result.stdout)
+            record = json.loads(metadata.read_text())
+            self.assertTrue(record["private_copy"])
+            self.assertEqual(record["parent_mode"], 0o700)
+            self.assertTrue(record["same_binary"])
+            self.assertNotEqual(record["input_path"], str(IMAGE))
+            self.assertEqual(record["input_parent"], str(Path(record["app_parent"]) / "input"))
+            self.assertEqual(record["input_parent_mode"], 0o700)
+            self.assertEqual(record["input_mode"], 0o600)
+            self.assertEqual(record["input_hash"], original_hash)
+            self.assertEqual(record["original_input_hash"], original_hash)
+            self.assertEqual(hashlib.sha256(IMAGE.read_bytes()).hexdigest(), original_hash)
+            self.assertEqual(Path(record["input_path"]).name, IMAGE.name)
+            self.assertEqual(record["report_parent"], record["app_parent"])
+            self.assertFalse(Path(record["app_parent"]).exists(), "only this run's temporary copy is removed")
 
 
 if __name__ == "__main__":

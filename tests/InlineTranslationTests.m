@@ -1,6 +1,4 @@
-#define main FuyiAppMain
-#import "../objc/LiveCaptionTranslator.m"
-#undef main
+#import "app/FYAppDelegateInternal.h"
 
 static OCRTextItem *Item(NSString *text, CGRect box) {
     OCRTextItem *item = [[OCRTextItem alloc] init];

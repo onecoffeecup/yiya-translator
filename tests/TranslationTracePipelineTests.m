@@ -130,7 +130,7 @@ static void (^PendingResponse)(void);
     return [super copyFullCapturedImageForWindow:windowID];
 }
 - (void)updateRunState {}
-- (void)updateRuntimeDiagnostics {}
+- (NSArray<NSDictionary *> *)updateRuntimeDiagnostics { return @[]; }
 - (BOOL)hasScreenAccess { return YES; }
 - (BOOL)hasUsableScreenCaptureAccess { return YES; }
 - (pid_t)selectedWindowOwnerPID { return 99999; }
@@ -861,6 +861,27 @@ static void CheckLateCaptureCancellation(void) {
         Require(a.ocrCalls > 0, @"a fresh capture still completes after cancellation");
     }
 }
+static void CheckManualRecognitionSlot(void) {
+    TracePipelineApp *a = TraceApp(); a.running = NO; a.fixtureMode = ContentModeUI;
+    a.fixture = Fixture(@"設定メニュー", .3);
+    MockRequests = 0; SubmittedSources = [NSMutableArray new]; HoldResponse = YES; PendingResponse = nil;
+    [a translateCurrentInterface:nil];
+    Pump(^BOOL { return PendingResponse != nil; });
+    Require(a.inFlight && a.ocrCalls == 1 && MockRequests == 1,
+            @"paused manual recognition retains its slot through the pending HTTP response");
+    [a translateCurrentInterface:nil];
+    Require(a.inFlight && a.ocrCalls == 1 && MockRequests == 1,
+            @"pending manual translation prevents another recognition cycle");
+    void (^response)(void) = PendingResponse; PendingResponse = nil; HoldResponse = NO;
+    response(); Pump(^BOOL { return !a.inFlight; });
+    Require(!a.running && a.inlineApplies == 1,
+            @"manual response while paused delivers and releases its own recognition slot");
+    [a translateCurrentInterface:nil]; Pump(^BOOL { return !a.inFlight; });
+    Require(a.ocrCalls == 2 && a.inlineApplies == 2,
+            @"completed manual response permits a fresh capture and recognition");
+    [a stop];
+    puts("PASS manual OCR ownership: paused request holds through HTTP and releases for the next cycle");
+}
 static void CheckLateOCRRestartOwnership(void) {
     for (NSUInteger oldRoute = 0; oldRoute < 2; oldRoute++) {
         for (NSUInteger newRoute = 0; newRoute < 2; newRoute++) {
@@ -897,6 +918,42 @@ static void CheckLateOCRRestartOwnership(void) {
         }
     }
     puts("PASS late OCR restart ownership: 4 realtime/manual combinations; no overlapping cycle or stale display");
+}
+static void CheckRuntimeWorkflowLease(void) {
+    __weak TraceHeldOCRApp *weakHost;
+    __weak FYTranslationRuntimeController *weakRuntime;
+    dispatch_semaphore_t freshRelease;
+    @autoreleasepool {
+        TraceHeldOCRApp *a=(id)TraceAppOfClass(TraceHeldOCRApp.class);
+        a.ocrEntered=@[dispatch_semaphore_create(0),dispatch_semaphore_create(0)];
+        a.ocrReleaseGates=@[dispatch_semaphore_create(0),dispatch_semaphore_create(0)];
+        [a timerFired:nil];
+        __block BOOL entered=NO;
+        Pump(^BOOL { return entered || (entered=dispatch_semaphore_wait(a.ocrEntered[0],DISPATCH_TIME_NOW)==0); });
+        [a stop]; [a start]; [a.timer invalidate]; a.timer=nil;
+        entered=NO;
+        Pump(^BOOL { return entered || (entered=dispatch_semaphore_wait(a.ocrEntered[1],DISPATCH_TIME_NOW)==0); });
+        a.observeGenerationReads=YES;
+        dispatch_semaphore_signal(a.ocrReleaseGates[0]);
+        Pump(^BOOL { return a.observedGenerationReads>0; });
+        a.observeGenerationReads=NO;
+        Require(a.inFlight && a.ocrCalls==2,@"workflow lease: cancelled old result must keep fresh OCR slot busy");
+        weakHost=a; weakRuntime=a.translationRuntimeController; freshRelease=a.ocrReleaseGates[1]; a=nil;
+    }
+    @autoreleasepool {
+        Require(weakHost!=nil && weakRuntime!=nil,@"workflow lease: active OCR strongly retains original host and runtime");
+    }
+    dispatch_semaphore_signal(freshRelease);
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:5];
+    BOOL released=NO;
+    while (!released && deadline.timeIntervalSinceNow>0) {
+        @autoreleasepool {
+            [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.005]];
+            released=weakHost==nil && weakRuntime==nil;
+        }
+    }
+    Require(released,@"workflow lease: finishing fresh OCR releases host and runtime after cancellation");
+    puts("PASS runtime workflow lease: stale OCR keeps fresh busy slot; cancelled and completed task leases release");
 }
 static void CheckDialogueLatencyPolicies(void) {
     // Exercise the actual scheduled timer and serialized HTTP request. Only
@@ -1016,6 +1073,7 @@ int main(void) { @autoreleasepool {
     TestTrace = [[FYTranslationTrace alloc] initWithDirectory:root clock:^{ return NSDate.date.timeIntervalSince1970; } maxBytes:1024 * 1024];
     method_exchangeImplementations(class_getClassMethod(FYTranslationTrace.class, @selector(shared)), class_getClassMethod(FYTranslationTrace.class, @selector(pipelineTestShared)));
     method_exchangeImplementations(class_getClassMethod(FYTestURLSession.class, @selector(sharedSession)), class_getClassMethod(FYTestURLSession.class, @selector(pipelineTestSession)));
+    CheckRuntimeWorkflowLease();
     CheckPunctuationFiltering();
     CheckMixedRoutingCalculationCount();
     CheckLatestDialogueWhileTranslating();
@@ -1030,6 +1088,7 @@ int main(void) { @autoreleasepool {
     CheckInlineRequestTimeouts();
     CheckAtomicCaptureIdentity();
     CheckLateCaptureCancellation();
+    CheckManualRecognitionSlot();
     CheckLateOCRRestartOwnership();
     CheckVisibilitySnapshots();
     CheckDialogueLatencyPolicies();

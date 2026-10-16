@@ -14,9 +14,7 @@
 // {"mode":..., "device_name":..., "frames":..., "directory":...}。
 // 这一步很重要：直接从终端跑子进程时，TCC 会把它归到终端/父进程名下，
 // 相机授权状态读出来就不对；经 LaunchServices 启动才是探针自己的身份。
-#define main FuyiMainForCaptureCardProbe
-#import "LiveCaptionTranslator.m"
-#undef main
+#import "app/FYAppDelegateInternal.h"
 #import <ImageIO/ImageIO.h>
 #import <sys/stat.h>
 #import <unistd.h>

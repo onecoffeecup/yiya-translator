@@ -104,16 +104,17 @@ int main(int argc, const char *argv[]) { @autoreleasepool {
     Require(service.composeCount == 0 && !app.diagnosticMailService, @"unconfigured service does not attempt composition");
     service.available = YES;
     [app composeDiagnosticEmailForURL:attachment];
+    Require(service.delegate == app.diagnosticsController, @"extracted controller owns actual sharing-service callbacks");
     Require([service.recipients isEqual:@[@"yiyatranslator@163.com"]] && [service.subject containsString:@"译芽"], @"mail recipient and subject configured");
     Require(service.composeCount == 1 && service.composedItems.count == 2 && [service.composedItems[1] isEqual:attachment], @"mail receives a file URL attachment and body, never a mailto attachment parameter");
     Require([service.composedItems[0] containsString:@"复现步骤"] && ![app.statusLabel.stringValue containsString:@"已发送"], @"draft requests context without claiming delivery");
     [app emailRuntimeDiagnostics:nil];
     Require(app.saveRequests == 2, @"duplicate mail action is blocked while composing");
-    [app sharingService:service didFailToShareItems:service.composedItems error:[NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]];
+    [service.delegate sharingService:service didFailToShareItems:service.composedItems error:[NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]];
     Require(!app.diagnosticMailService && [NSFileManager.defaultManager fileExistsAtPath:attachment.path], @"cancel/failure releases service and preserves attachment for retry");
     [app composeDiagnosticEmailForURL:attachment];
     Require(service.composeCount == 2, @"retry works after cancellation");
-    [app sharingService:service didShareItems:service.composedItems];
+    [service.delegate sharingService:service didShareItems:service.composedItems];
     Require(!app.diagnosticMailService && [app.statusLabel.stringValue containsString:@"确认发送状态"], @"service completion is not treated as recipient delivery");
     app.fixturePermission = NO; app.fixtureInfos = @[WindowInfo(1, getpid(), @"译芽")];
     for (NSNumber *width in @[@340, @620]) {

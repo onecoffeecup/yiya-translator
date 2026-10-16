@@ -11,8 +11,8 @@ COMMON=("$FY_OPT" -fobjc-arc -fmodules -mmacosx-version-min=13.0 -Wall -Wno-null
   -Wno-unused-function -Wno-nonnull -fmodules-cache-path="$OUT/module-cache"
   -include "$ROOT_DIR/tests/FYTestIsolation.h" -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning")
 clang "${COMMON[@]}" tests/GrammarCoverageTests.m tests/FYTestIsolation.m \
-  objc/learning/FYLearningAnalyzer.m objc/learning/FYLearningModels.m objc/learning/FYGrammarCatalog.m \
-  objc/learning/FYLearningStore.m objc/FYTranslationManager.m \
+  "${FY_LEARNING_ANALYZER_SOURCES[@]}" objc/learning/FYLearningModels.m objc/learning/FYGrammarCatalog.m \
+  "${FY_LEARNING_STORAGE_SOURCES[@]}" "${FY_TRANSLATION_CORE_SOURCES[@]}" \
   -framework Foundation -framework CoreGraphics -framework NaturalLanguage -lsqlite3 -o "$OUT/GrammarCoverageTests"
 "$OUT/GrammarCoverageTests"
 clang "${COMMON[@]}" tests/DialogueDriftDiagnosticTests.m tests/FYTestIsolation.m tests/FYTestCaptureCardInput.m \

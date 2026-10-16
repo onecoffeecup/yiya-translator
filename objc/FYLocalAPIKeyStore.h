@@ -87,8 +87,8 @@ static FYAPIKeyStatus FYWriteAPIKeyFile(NSString *path, NSString *version, NSStr
 }
 
 #ifdef FY_TEST_ISOLATED_CREDENTIAL_STORE
-static NSString *FYTestLocalAPIKeyValue;
-static BOOL FYTestLocalAPIKeyFailWrites;
+extern NSString *FYTestLocalAPIKeyValue;
+extern BOOL FYTestLocalAPIKeyFailWrites;
 static FYAPIKeyStatus FYReadAPIKey(NSString **value) {
     if (value) { *value = FYTestLocalAPIKeyValue; }
     return FYTestLocalAPIKeyValue ? FYAPIKeySuccess : FYAPIKeyNotFound;

@@ -2,6 +2,8 @@
 
 2026-10-11，Mac 分支 `dev0.2.1_261009`，本机版本 0.2.1 build 59。功能提交 `4956d21` 与翻译服务提交 `73c306e` 已推送 dev；公开附件与 Sparkle 清单仍为 build 17。
 
+2026-10-12 第四批模块拆分后，窗口、切页与侧栏布局实现位于 `objc/presentation/FYMainWindowController.m`；宿主保留原生委托入口，下方历史 `.inc` 路径保留原日期含义。
+
 ## 现役行为
 
 - 原生窗口外框驱动内部页面画布；松手与切页保持已允许的用户尺寸，不锁定最外层 `contentView` 宽度。
@@ -100,3 +102,9 @@ build 58 后续正式用户反馈确认外框能连续拖动，但实时画面�
 - build 58 备份：`.build/app-backups/译芽.app.bak.preview-manual-20261011-190730`
 
 正式 build 59 的真实鼠标体验仍待用户确认。最短验收：在实时页从右下角缩窄、拉宽，侧栏应保持当前状态、实时画面连续等比变化；展开时拖至 1100 pt 会停在最小宽度。点击「收起 AI 伙伴」后可继续缩到 720 pt，拉宽也不会自动展开，需再点按钮。另一台 Mac、Intel 实机、真实采集卡与长时间运行未在本轮验收。
+
+## 2026-10-14 原生画布依赖边界
+
+同名 `FYFrameDrivenContentView` 从通用AppSupport独立到presentation，原三strong资源、constructor/setFrameSize/layout/super次序保持；原三赋值由同步Native geometry function执行，bounds仍独立读取三次，不改外框/内部画布关系或加入固定宽锁。Main公有头不再import全AppSupport，全部163方法正文（包括resize/manualAI/nav）保持。
+
+10原body/新native几何和18实际Main同fixture无UI检查通过，但Main nav事实只覆盖已mounted页面；真实view初始化、super resize/layout、未mounted约束和生产外框尺寸不由这些facts证明。MainWindowResize/PreviewLayout及其余UI仍只编译，按本文真实生产路径另验。职责/散列见 [Mac深度拆分](mac-decoupling.md)。

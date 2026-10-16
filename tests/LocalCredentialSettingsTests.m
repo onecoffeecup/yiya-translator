@@ -1,6 +1,4 @@
-#define main FYAppMain
-#import "../objc/LiveCaptionTranslator.m"
-#undef main
+#import "app/FYAppDelegateInternal.h"
 static NSUInteger checks;
 static void Check(BOOL pass, NSString *message) {
     checks++; if (!pass) { fprintf(stderr, "FAIL: %s\n", message.UTF8String); exit(1); }

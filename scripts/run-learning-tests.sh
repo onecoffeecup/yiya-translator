@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+FY_OPT="${FY_OPT:--O0}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/lib-sources.sh"
@@ -10,6 +11,7 @@ BIN="$ROOT_DIR/.build/release/LearningTests"
 mkdir -p "$ROOT_DIR/.build/release"
 
 clang \
+  "$FY_OPT" \
   -fobjc-arc \
   -fmodules \
   -fmodules-cache-path="$FY_TEST_MODULE_CACHE" \
@@ -19,7 +21,7 @@ clang \
   -I "$ROOT_DIR/objc" -I "$ROOT_DIR/objc/learning" \
   "$ROOT_DIR/tests/LearningTests.m" \
   "$ROOT_DIR/tests/FYTestIsolation.m" \
-  "${FY_LEARNING_CORE_SOURCES[@]}" "$ROOT_DIR/objc/FYTranslationManager.m" \
+  "${FY_LEARNING_CORE_SOURCES[@]}" "${FY_TRANSLATION_CORE_SOURCES[@]}" \
   -o "$BIN" \
   -framework Foundation -framework CoreGraphics \
   -framework Carbon -framework NaturalLanguage \

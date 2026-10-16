@@ -42,3 +42,19 @@
 上述后台及原生按钮专项测试已运行通过；QuickSentenceAnalysisTests 既有查句回归运行通过，Apple Silicon / Intel 双架构构建通过。构建的既有 7 条未使用函数警告未新增。
 
 2026-10-08 经用户要求，已使用维护源码重新构建并安装到 `~/Applications/译芽.app`，版本 0.2.0 build 10（Apple Silicon / Intel 双架构），旧应用自动备份。签名校验通过并重新打开应用；安装前后的本机凭据文件保持相同，未修改学习数据库。公开 Release 或下载附件未更新。 同日已追加安装复核滚动位置修复；安装后二进制 UUID 与本轮双架构构建一致，凭据文件保持相同。
+
+## 2026-10-14 编排与原生渲染边界
+
+原初次分析/轻量追问/main或quick展开/深度复核与state配置由Foundation `FYGrammarInteractionCoordinator` 维护。七个原field只由此owner保存，两ActionState各自cache/analyzer/generation和quick结果仍原owner；native字段、字体/颜色、滚动保存/恢复与render方法不改。readonly配置container保留原strong字符串局部别名，Key不加入context identity/日志；native学习模型Trim/空才raw fallback、现有transport绑定与各surface reset/cancel顺序不变。
+
+51独立业务与44实际原/新controller同fixtureO0/O2检查通过，包含版本/代次/item/状态指针、任务strongleases、复核失败保留结果、先current gate后busy释放。只注入synthetic services/native actions，不读真实Key或消耗Token。GrammarActionsAppTests及相关UI只编译，真实scroll/渲染/操作按上文另验。详情见 [Mac深度拆分](mac-decoupling.md)。
+
+子批28进一步将原结构图offset/恢复、quick详情刷新与复核scroll保持独立到无状态`FYGrammarScrollRenderer`。实际SDK layout/frame/bounds调用与更新时before/after重新读取保持，原controller保留明确门面，公有依赖已隔离整套应用支持。独立38与实际原/新controller37同fixtureO0/O2通过，五变异失败且恢复通过；相关四UI仅编译。Native属性事实证明原算法/调用顺序，真实鼠标滚动、字体和文档绘制仍按授权桌面步骤验收。源码未安装/发布，收尾证据见本机`batch28-evidence.json`。
+
+子批29将详情/字段、三highlight、局部selection和main/quick actioncontrols六个原Native算法独立为无状态`FYGrammarDetailRenderer`。保留原UTF16/字符/选区/非background属性、canonical适用范围、selected item指针与alpha0.23、facade动态覆写及hover时序；原104pt/3/4行/字体与raw展开解释保持。39独立与37实际原/新controller同fixtureO0/O2通过，8变异失败后恢复通过。模型/视图与两表面状态仍原owner，没有新请求或取消。四相关UI只编译，实际字体布局/鼠标/选择/高亮体验另验；源码未安装/发布，证据见本机`batch29-evidence.json`。
+
+子批30将原busy、结果刷新、清场、页签和followup显隐五算法移至无状态`FYGrammarResultsRenderer`，原Core7与两个ActionState、view/index/tab不复制。保留result局部捕获、main-only reset/cancel、两代次与两次nil/Tab重入、行样式/空态/scroll与页签优先级。96最小与93原/新controller同fixtureO0/O2通过，八变异失败后恢复；首读取时点变异未被弱活性断言检出，原证据留档，只增加原result身份断言并完整重验。四UI仅编译，真实图/操作/窗口体验另验；源码未安装/发布，收尾见本机`batch30-evidence.json`。
+
+子批31把完整card/info/main-quick structure构造移至零状态`FYGrammarPageBuilder`，保留原视图/数组copy/scroll/tab拥有者、原字体/约束/字符/节点映射和weak Host目标。65独立冷/输入guard、旧64/新65实际controller同fixtureO0/O2通过，新增适配额外证明同一Host只读取一次；六变异失败、恢复65通过。合法输入只验证到首native工厂入口后预定停止，没有构造完整图。完整原/新图fixture两opt及五相关UI均只编译；新GrammarPageBuilderUITests已入统一UI清单。真实卡片/布局/按钮/鼠标/字体体验待授权执行，源码未安装/发布，证据见本机`batch31-evidence.json`。
+
+子批32把列表项与详情收藏/删除异步逻辑移入Foundation Core类方法，原Core七字段不变。Native只适配原按钮BOOL、文字和同步index读取；保留先gate后index且数组参数先求值、selected两次读取、既有store/learning分支、原strong source/item/existing租约与不同stale语义。60最小与61实际旧/新controller同fixtureO0/O2通过，七变异失败且恢复通过；原Core和146其它Native方法精确。五UI只编译，真实收藏/数据库/鼠标体验另验；未安装/发布，证据见本机`batch32-evidence.json`。

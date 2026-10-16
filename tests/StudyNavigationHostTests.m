@@ -1,0 +1,79 @@
+#import "presentation/FYStudyPresentationController.h"
+#import "FYStudyNavigationTestFacts.h"
+@interface StudyNavigationHostFixture : FYStudyPresentationController <StudyNavigationDriver>
+@property(nonatomic,strong) StudyNavigationFacts*facts;
+@end
+@implementation StudyNavigationHostFixture
+
+- (NavPanelFact*)navigationQuickPanel{[self.facts.events addObject:@"panel-get"];return self.facts.quickPanel;}
+- (NavPanelFact*)navigationChatPanel{[self.facts.events addObject:@"chat-panel-get"];return self.facts.chatPanel;}
+- (NavPanelFact*)navigationMainWindow{[self.facts.events addObject:@"main-window-get"];return self.facts.mainWindow;}
+- (NavEpochFact*)navigationEpoch{[self.facts.events addObject:@"capture-get"];return self.facts.epochFact;}
+- (NavDraftFact*)navigationMainDraft{[self.facts.events addObject:@"main-get"];return self.facts.mainDraft;}
+- (NavDraftFact*)navigationOverlayDraft{[self.facts.events addObject:@"overlay-get"];return self.facts.overlayDraft;}
+- (BOOL)translationTargetIsForeground{[self.facts.events addObject:@"foreground"];return self.facts.foreground;}
+- (BOOL)selectingCaptureRegion{return self.facts.selecting;}
+- (BOOL)analysisMatchesCurrentSentence{[self.facts.events addObject:@"analysis-matches"];return self.facts.matches;}
+- (FYLearningCoordinator*)learningCoordinator{return (FYLearningCoordinator*)self.facts.learning;}
+- (FYStudyChatSession*)studyChatSession{return self.facts.session;}
+- (FYGrammarActionState*)quickGrammarActions{return self.facts.actions;}
+- (void)ensureStudyChatSession{[self.facts.events addObject:@"ensure"];}
+- (void)refreshStudyChatViews{[self.facts.events addObject:@"chat-refresh"];}
+- (void)captureQuickSentenceScrollPosition{[self.facts.events addObject:@"capture-scroll"];}
+- (void)restoreQuickSentenceScrollPosition{[self.facts.events addObject:@"restore-scroll"];}
+- (void)showStudyChatOverlay:(id)sender{self.facts.lastSender=sender;[self.facts.events addObject:@"show-chat"];}
+- (void)resolveLatestStudyIdentity:(void(^)(FYRequestIdentity*))completion{[self.facts.events addObject:@"resolve"];[self.facts.identities addObject:[completion copy]];}
+- (void)cancelQuickSentenceAnalysis{[self.facts.events addObject:@"cancel"];[self.facts.quick cancelAnalysisWithReceiver:(id<FYQuickSentenceAnalysisSource>)self];}
+- (void)configureQuickSentenceAnalyzer:(FYLearningAnalyzer*)analyzer{Check(NO,@"navigation never configures an analysis service itself");}
+- (void)analyzeQuickSentence:(id)sender{self.facts.analyses++;self.quickSentenceAnalyzing=YES;[self.facts.events addObject:@"analyze"];}
+- (void)renderQuickSentence{self.facts.renders++;[self.facts.events addObject:@"render"];if(self.facts.onRender)self.facts.onRender();if(self.facts.createPanelOnRender&&!self.facts.quickPanel){NavPanelFact*p=[NavPanelFact new];p.events=self.facts.events;p.name=@"quick";self.facts.quickPanel=p;}}
+- (void)refreshSavedSentences{self.facts.savedRefreshes++;[self.facts.events addObject:@"saved-refresh"];}
+- (BOOL)captureCardInputEnabled{[self.facts.events addObject:@"capture-enabled"];return self.facts.captureEnabled;}
+- (void)selectPageAtIndex:(NSInteger)index{Check(index==0,@"workspace activates original page zero");[self.facts.events addObject:@"page"];}
+- (void)closeStudyOverlay:(id)sender{self.facts.closes++;[self.facts.events addObject:@"close"];if(self.facts.onClose)self.facts.onClose();}
+- (void)clearAnalysisDisplay{self.facts.currentResult=nil;[self.facts.events addObject:@"clear-main"];}
+- (void)refreshLearningSource{[self.facts.events addObject:@"learning-source"];}
+- (void)refreshLearningStatus{[self.facts.events addObject:@"learning-status"];}
+- (void)setAnalyzeBusy:(BOOL)busy{self.facts.analyzeBusy=busy;[self.facts.events addObject:busy?@"main-busy":@"main-idle"];}
+- (void)refreshGrammarResults{[self.facts.events addObject:@"grammar-refresh"];}
+- (void)analyzeCurrentSentence:(id)sender{self.facts.currentAnalyses++;[self.facts.events addObject:@"main-analyze"];}
+- (FYAnalysisResult*)currentAnalysis{return self.facts.currentResult;}
+- (void)setCurrentAnalysis:(FYAnalysisResult*)value{self.facts.currentResult=value;}
+- (NSInteger)analysisRequestGeneration{return self.facts.analysisGeneration;}
+- (void)setAnalysisRequestGeneration:(NSInteger)value{self.facts.analysisGeneration=value;}
+- (NSInteger)selectedGrammarIndex{return self.facts.selectedGrammar;}
+- (void)setSelectedGrammarIndex:(NSInteger)value{self.facts.selectedGrammar=value;}
+- (CGFloat)quickSentenceScrollOffset{return self.facts.scrollOffset;}
+- (void)setQuickSentenceScrollOffset:(CGFloat)value{self.facts.scrollOffset=value;}
+- (NSInteger)quickAnalysisGeneration{return self.facts.quick.quickAnalysisGeneration;}
+- (void)setQuickAnalysisGeneration:(NSInteger)value{self.facts.quick.quickAnalysisGeneration=value;}
+- (BOOL)quickSentenceAnalyzing{return self.facts.quick.quickSentenceAnalyzing;}
+- (void)setQuickSentenceAnalyzing:(BOOL)value{self.facts.quick.quickSentenceAnalyzing=value;}
+- (FYAnalysisResult *)quickSentenceAnalysis{return self.facts.quick.quickSentenceAnalysis;}
+- (void)setQuickSentenceAnalysis:(FYAnalysisResult *)value{self.facts.quick.quickSentenceAnalysis=value;}
+- (NSString *)quickSentenceAnalysisError{return self.facts.quick.quickSentenceAnalysisError;}
+- (void)setQuickSentenceAnalysisError:(NSString *)value{self.facts.quick.quickSentenceAnalysisError=value;}
+- (NSString *)quickSentenceAnalysisSource{return self.facts.quick.quickSentenceAnalysisSource;}
+- (void)setQuickSentenceAnalysisSource:(NSString *)value{self.facts.quick.quickSentenceAnalysisSource=value;}
+- (NSString *)quickSentenceAnalysisTranslation{return self.facts.quick.quickSentenceAnalysisTranslation;}
+- (void)setQuickSentenceAnalysisTranslation:(NSString *)value{self.facts.quick.quickSentenceAnalysisTranslation=value;}
+- (FYLearningAnalyzer *)quickSentenceAnalyzer{return self.facts.quick.quickSentenceAnalyzer;}
+- (void)setQuickSentenceAnalyzer:(FYLearningAnalyzer *)value{self.facts.quick.quickSentenceAnalyzer=value;}
+- (BOOL)sentenceBookmarkPending{return self.facts.quick.sentenceBookmarkPending;}
+- (void)setSentenceBookmarkPending:(BOOL)value{self.facts.quick.sentenceBookmarkPending=value;}
+- (BOOL)quickGrammarBookmarkPending{return self.facts.quick.quickGrammarBookmarkPending;}
+- (void)setQuickGrammarBookmarkPending:(BOOL)value{self.facts.quick.quickGrammarBookmarkPending=value;}
+- (NSInteger)chatContextGeneration{return self.facts.context.chatContextGeneration;}
+- (void)setChatContextGeneration:(NSInteger)value{self.facts.context.chatContextGeneration=value;}
+- (BOOL)chatResolvingSource{return self.facts.context.chatResolvingSource;}
+- (void)setChatResolvingSource:(BOOL)value{self.facts.context.chatResolvingSource=value;}
+
+- (FYStudyOverlayPanel*)quickSentencePanel{return (FYStudyOverlayPanel*)[self navigationQuickPanel];}
+- (FYStudyOverlayPanel*)studyChatPanel{return (FYStudyOverlayPanel*)[self navigationChatPanel];}
+- (NSWindow*)mainWindow{return (NSWindow*)[self navigationMainWindow];}
+- (FYCaptureCardInput*)captureCardInput{return (FYCaptureCardInput*)[self navigationEpoch];}
+- (FYStudyChatView*)mainStudyChatView{return (FYStudyChatView*)[self navigationMainDraft];}
+- (FYStudyChatView*)overlayStudyChatView{return (FYStudyChatView*)[self navigationOverlayDraft];}
+@end
+static id<StudyNavigationDriver>Source(StudyNavigationFacts*f){StudyNavigationHostFixture*s=[[StudyNavigationHostFixture alloc]initWithHost:nil];s.facts=f;f.quick=s.quickSentenceCoordinator;f.quick.quickSentenceAnalyzer=f.quickAnalyzer;f.context=s.studyChatContextCoordinator;f.driver=s;return s;}
+int main(void){@autoreleasepool{Check(NSApp==nil,@"actual old/new native navigation fixture starts without application/UI");StudyNavigationFacts*f=[StudyNavigationFacts new];RunStudyNavigationFixture(Source(f),f);RunStudyNavigationLease(^id<StudyNavigationDriver>(StudyNavigationFacts*f){return Source(f);});Check(NSApp==nil,@"workspace activation never creates application/window in isolated native fact fixture");printf("PASS StudyNavigationHostTests: %lu checks; actual original/new controller same fixture and strong identity callback leases\n",(unsigned long)checks);}return 0;}
