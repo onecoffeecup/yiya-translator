@@ -1,0 +1,61 @@
+{
+  "originalAssets": [
+    {
+      "name": "AppIcon.png",
+      "sha256": "13b4121434fbded87485f2e7aeee1660b1a92a3dc847873df6f85c5f35e473c4",
+      "bytes": 1026156
+    },
+    {
+      "name": "ai-mascot.png",
+      "sha256": "4c8fd42e34e26b0bb0225abe4fc4817d93f7cf643085777fa56d764b66be6d57",
+      "bytes": 23095
+    },
+    {
+      "name": "banner-flowers.png",
+      "sha256": "9a1a606fa187e54d484c3b19f4e2dc0af714781e67c5d04f52d8760825c4589a",
+      "bytes": 15155
+    },
+    {
+      "name": "brand-sprout.png",
+      "sha256": "2639506dada832bdc6060df445999f72ff4fb8a623448e2f1cba6028612f8886",
+      "bytes": 12052
+    },
+    {
+      "name": "nav-appearance.png",
+      "sha256": "904665c57f359ef8b0dd85b1cf37653e330deca1a6bd2813d845ed912151bf22",
+      "bytes": 8017
+    },
+    {
+      "name": "nav-history.png",
+      "sha256": "cddfe1461a3b44a95612dada4aa91f4ebdfaa6b19709d5ff716c6af6d89447f6",
+      "bytes": 6924
+    },
+    {
+      "name": "nav-learning.png",
+      "sha256": "00fa7815b1b431cf3f9c844e6bc9a531af1a3ba4b108923e78bc79103cc64f52",
+      "bytes": 7846
+    },
+    {
+      "name": "nav-live.png",
+      "sha256": "aa1f113bcbdbbefe4e19ebcd73ba90b9c6e0953d25cc8f0df920cd0941b1ea91",
+      "bytes": 6640
+    },
+    {
+      "name": "nav-service.png",
+      "sha256": "81dfeb454bb73ee92072b16f927f1849b97d18bd169d45eec126a31a1a1177d4",
+      "bytes": 8236
+    },
+    {
+      "name": "nav-settings.png",
+      "sha256": "bbf8d4f19fe8af0aa117e72ae0c4913c24fb77cbc40574334c329c6a2ab915ab",
+      "bytes": 9552
+    },
+    {
+      "name": "sakura-cat-v1.png",
+      "sha256": "3ff3d5fe9309c9740d1f2a3ae8b00ad4acc5295cf40a50159e7a01f47cef1291",
+      "bytes": 1061455
+    }
+  ],
+  "fontFilesDistributed": false,
+  "completeUIScreenshotsUsedAsDesignImages": false
+}

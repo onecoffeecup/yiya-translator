@@ -1,0 +1,38 @@
+{
+  "date": "2026-11-01",
+  "figmaFile": "https://www.figma.com/design/wRsOJ3322rEwPcnS0QoMPm",
+  "mainCanvasNode": "12:33283",
+  "statesCanvasNode": "16:119822",
+  "screenCount": 48,
+  "mainAndFullContentScreens": 13,
+  "stateCompactAndOverlayScreens": 35,
+  "appearanceUnits": 543,
+  "visibleMainComponentsCreatedInFigma": 521,
+  "originalPNGs": 11,
+  "wholeUIScreenRastersUsedAsEditableDesign": false,
+  "fontAppearance": "Native Mac glyph outlines; text strings and font metadata remain in JSON. Some system controls use independent native bitmaps.",
+  "figmaTransport": "MCP foundations followed by Figma web editor after Starter MCP quota exhausted",
+  "nativeUserDataUsed": false,
+  "realServiceRequestsMade": false,
+  "productionSourceModified": false,
+  "windowsRuntimeAccepted": false,
+  "notYetIndividuallyCaptured": [
+    "OS-owned dialogs and window chrome"
+  ],
+  "visualAcceptance": "Native composition and key Figma page screenshots inspected; different renderers have antialiasing differences. No pixel-identical Windows acceptance claim.",
+  "originalAssetsNode": "14:117503",
+  "visibleMainComponentsVerified": true,
+  "radii": {
+    "card": 12,
+    "buttonHeight34": 15,
+    "chat": 14
+  },
+  "localFigmaFile": {
+    "name": "yiya-mac-ui-reference.fig",
+    "bytes": 7923531,
+    "sha256": "cd9c300622a7ef27401872cefb513f27d3df4f0b4085e00230e4a761713e1c6c",
+    "header": "504b030414000808"
+  },
+  "mainReadingNode": "12:35089",
+  "mainReadingURL": "https://www.figma.com/design/wRsOJ3322rEwPcnS0QoMPm?node-id=12-35089"
+}
