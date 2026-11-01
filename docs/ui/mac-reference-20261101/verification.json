@@ -1,0 +1,38 @@
+{
+  "sourceBranch": "dev_mac_261016",
+  "sourceCommit": "cf0ffda",
+  "screensWithMatchingPointBounds": 48,
+  "appearanceUnits": 543,
+  "visibleAppearanceUnits": 521,
+  "individualNativeSystemControlBitmaps": 73,
+  "missingAssets": [],
+  "fontFilesDistributed": false,
+  "fullUIScreenRastersInDesign": false,
+  "referenceRasterComparisons": {
+    "02-live-reading": {
+      "meanAbsoluteRGBDifference0to255": [
+        2.0569242424242424,
+        0.9335787878787879,
+        2.4257598484848484
+      ],
+      "note": "Different native/PDF/SVG antialiasing; not a pixel-identical acceptance result."
+    },
+    "05-settings": {
+      "meanAbsoluteRGBDifference0to255": [
+        1.7258136363636363,
+        0.8500037878787878,
+        1.8169924242424242
+      ],
+      "note": "Different native/PDF/SVG antialiasing; not a pixel-identical acceptance result."
+    },
+    "07-service": {
+      "meanAbsoluteRGBDifference0to255": [
+        2.1695098484848483,
+        1.3902363636363637,
+        2.459228787878788
+      ],
+      "note": "Different native/PDF/SVG antialiasing; not a pixel-identical acceptance result."
+    }
+  },
+  "compactSVGHasIdenticalRenderedPixels": true
+}
